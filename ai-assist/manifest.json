@@ -1,14 +1,14 @@
 {
 	"name": "AI Assist",
 	"version": "1.0",
-	"iconURL": "https://www.servicem8.com/images/addon-sdk-sample-icon.png",
+	"iconURL": "https://mr-sparky-assets.s3.amazonaws.com/plugin/ai-assist-icon.png",
 	"supportURL": "https://www.mrsparky.com.au",
 	"supportEmail": "steven.sukar@mrsparky.com.au",
 	"actions": [{
 		"name": "AI Assist",
 		"type": "online",
 		"entity": "job",
-		"iconURL": "https://www.servicem8.com/images/addon-sdk-sample-icon.png",
+		"iconURL": "https://mr-sparky-assets.s3.amazonaws.com/plugin/ai-assist-icon.png",
 		"event": "AI_Assist_Open"
 	}]
 }
