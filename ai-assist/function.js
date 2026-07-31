@@ -55,7 +55,7 @@ exports.handler = async (event) => {
   try {
     var token = event && event.auth && event.auth.accessToken;
     var jobUUID = event && event.eventArgs && event.eventArgs.jobUUID;
-    console.log('AI Assist v4.6 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
+    console.log('AI Assist v4.7 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
 
     if (event && event.eventName === 'ai_assist_chat') {
       return chatRelay(event);
@@ -188,6 +188,11 @@ exports.handler = async (event) => {
 				speakOn = !speakOn;
 				spk.innerHTML = speakOn ? '&#128266;' : '&#128263;';
 				if (!speakOn) { try { speechSynthesis.cancel(); } catch (e) {} }
+				else {
+					// Speaking directly from the click both tests the speakers and
+					// unlocks Chrome's speech engine for later replies.
+					try { var u = new SpeechSynthesisUtterance('Voice on'); u.lang = 'en-AU'; speechSynthesis.speak(u); } catch (e) {}
+				}
 			};
 			function say(text) {
 				if (!speakOn || !window.speechSynthesis) return;
@@ -224,7 +229,12 @@ exports.handler = async (event) => {
 					}
 				};
 				mic.onclick = function () {
-					if (listening) { rec.stop(); return; }
+					if (listening) {
+						rec.stop();
+						// Tap-off = send what was dictated (small delay lets the final words land).
+						setTimeout(function () { if (box.value.replace(/^\\s+|\\s+$/g, '')) go(); }, 300);
+						return;
+					}
 					try { box.value = ''; rec.start(); listening = true; mic.className = 'listening'; } catch (e) {}
 				};
 			}
