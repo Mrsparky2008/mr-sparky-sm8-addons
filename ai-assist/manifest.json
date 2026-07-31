@@ -1,8 +1,8 @@
 {
 	"name": "AI Assist",
-	"version": "1.2",
+	"version": "1.3",
 	"oauth": {
-		"scope": "read_jobs manage_jobs create_jobs read_job_contacts manage_job_contacts read_schedule manage_schedule read_staff read_tasks manage_tasks"
+		"scope": "read_jobs manage_jobs create_jobs read_job_contacts manage_job_contacts read_schedule manage_schedule read_staff read_tasks manage_tasks read_job_notes publish_job_notes"
 	},
 	"iconURL": "https://mr-sparky-assets.s3.amazonaws.com/plugin/ai-assist-icon.png",
 	"supportURL": "https://www.mrsparky.com.au",

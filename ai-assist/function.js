@@ -55,7 +55,7 @@ exports.handler = async (event) => {
   try {
     var token = event && event.auth && event.auth.accessToken;
     var jobUUID = event && event.eventArgs && event.eventArgs.jobUUID;
-    console.log('AI Assist v4.5 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
+    console.log('AI Assist v4.6 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
 
     if (event && event.eventName === 'ai_assist_chat') {
       return chatRelay(event);
@@ -193,9 +193,12 @@ exports.handler = async (event) => {
 				if (!speakOn || !window.speechSynthesis) return;
 				try {
 					speechSynthesis.cancel();
-					var u = new SpeechSynthesisUtterance(text);
-					u.lang = 'en-AU';
-					speechSynthesis.speak(u);
+					// Chrome swallows speak() issued in the same tick as cancel().
+					setTimeout(function () {
+						var u = new SpeechSynthesisUtterance(text);
+						u.lang = 'en-AU';
+						speechSynthesis.speak(u);
+					}, 90);
 				} catch (e) {}
 			}
 
@@ -207,7 +210,7 @@ exports.handler = async (event) => {
 				var mic = document.getElementById('mic');
 				mic.style.display = 'block';
 				rec = new SR();
-				rec.lang = 'en-AU'; rec.interimResults = true; rec.continuous = false;
+				rec.lang = 'en-AU'; rec.interimResults = true; rec.continuous = true;
 				rec.onresult = function (e) {
 					var t = '';
 					for (var i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
