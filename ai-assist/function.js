@@ -58,7 +58,7 @@ exports.handler = async (event) => {
 		</style>
 	</head>
 	<body style="font-family:sans-serif;margin:10px;">
-		<div id="aihead">AI Assist</div>
+		<div id="aihead">AI Assist <a id="popout" target="_blank" rel="noopener" style="float:right;color:#fff;font-weight:normal;font-size:12px;text-decoration:underline;">Open in tab (for voice)</a></div>
 		<div id="log">
 			<div class="msg ai">G'day. I'm your admin assistant for this job. I can book it in, move or cancel bookings, check the diary for free slots, add notes, set reminders, change status, or clone the job. What do you need?</div>
 		</div>
@@ -76,6 +76,10 @@ exports.handler = async (event) => {
 			var URL_ = ` + jsEmbed(BACKEND_URL) + `;
 			var history = [];
 			var busy = false;
+			// Voice can't work inside SM8's embedded frame (no mic permission is
+			// ever granted to it) — the pop-out opens the same chat top-level.
+			document.getElementById('popout').href =
+				'https://webchat.mrsparky.com.au/assist#t=' + encodeURIComponent(TOKEN) + '&j=' + encodeURIComponent(JOB);
 			var log = document.getElementById('log');
 			var box = document.getElementById('box');
 			var send = document.getElementById('send');
@@ -124,6 +128,13 @@ exports.handler = async (event) => {
 					history.pop();
 				});
 			}
+			function sysNote(text) {
+				var d = document.createElement('div');
+				d.className = 'sys';
+				d.textContent = text;
+				log.appendChild(d);
+				log.scrollTop = log.scrollHeight;
+			}
 			function sysEl(text) {
 				var d = document.createElement('div');
 				d.className = 'sys';
@@ -152,7 +163,12 @@ exports.handler = async (event) => {
 					box.value = t;
 				};
 				rec.onend = function () { listening = false; mic.className = ''; box.focus(); };
-				rec.onerror = function () { listening = false; mic.className = ''; };
+				rec.onerror = function (e) {
+					listening = false; mic.className = '';
+					if (e && (e.error === 'not-allowed' || e.error === 'service-not-allowed')) {
+						sysNote('Voice is blocked inside this ServiceM8 window — use "Open in tab (for voice)" at the top right.');
+					}
+				};
 				mic.onclick = function () {
 					if (listening) { rec.stop(); return; }
 					try { box.value = ''; rec.start(); listening = true; mic.className = 'listening'; } catch (e) {}
