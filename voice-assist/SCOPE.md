@@ -66,6 +66,16 @@ number/address/identifier; the app looks the job up itself.
     "backend unchanged"; /chat and the PWA untouched) → normal /chat turn; hands-free loop
     with auto-relisten, tap-to-interrupt. (b) Dev build LATER: expo-speech-recognition
     continuous mic + true barge-in — code already wired, activates automatically.
+  - PIVOT 2026-07-31 (Steven's call, keys in hand): VOICE LAYER -> VAPI. Steven found the
+    Expo Go round-based loop as clunky as the PWA (correct — same architecture ceiling), and
+    chose a managed voice platform over the $99 Apple dev-build path. Built same day:
+    /llm/chat/completions OpenAI-SSE bridge on the Lambda (Bearer LLM_TOKEN, brain unchanged,
+    VERIFIED), Vapi assistant 8ff8436f-b6b3-4c3b-9226-0a70d22f2c63 (Deepgram nova-2 en-AU,
+    ElevenLabs Charlie AU voice, custom-llm -> bridge), PWA page rewritten to Vapi Web SDK
+    (voice v1.0: WebRTC call, live captions, barge-in by talking, PIN gate + 15-min idle
+    relock + auto-hangup on backgrounding, typed path kept via /chat). Works on iPhone Safari
+    — native Expo app now a fallback branch, not the main line. BLOCKED ON: Steven adding a
+    payment method to the Vapi account (calls 402 until then).
 - Phase 3 (queued): SMS tool, Marites-notes, custom domain, wake word / lock-screen listening
   if wanted (native makes these possible)
 

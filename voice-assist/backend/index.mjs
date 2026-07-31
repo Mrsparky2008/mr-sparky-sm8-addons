@@ -7,7 +7,10 @@
 //   POST /stt                 speech-to-text for the native app's Expo Go path:
 //                             body {wav: base64 16-bit PCM WAV} -> {ok, text}
 //                             (Amazon Transcribe streaming, en-AU)
-// Auth: x-app-pin header must match env APP_PIN.
+//   POST /llm/chat/completions  Vapi custom-LLM bridge: OpenAI-compatible SSE
+//                             wrapper around the same brain. Auth: Bearer
+//                             env LLM_TOKEN (configured as Vapi credential).
+// Auth (chat/stt): x-app-pin header must match env APP_PIN.
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
@@ -16,6 +19,7 @@ import { runTurn } from "./brain.mjs";
 const polly = new PollyClient({});
 const transcribe = new TranscribeStreamingClient({});
 const PIN = process.env.APP_PIN || "";
+const LLM_TOKEN = process.env.LLM_TOKEN || "";
 
 function parseWav(buf) {
   if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") return null;
@@ -100,6 +104,48 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, x-app-pin",
       }, "");
+    }
+    if (method === "POST" && path === "/llm/chat/completions") {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      if (!LLM_TOKEN || headers["authorization"] !== `Bearer ${LLM_TOKEN}`) {
+        return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ error: "unauthorized" }));
+      }
+      let body = {};
+      try {
+        body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : event.body || "{}");
+      } catch {}
+      // Vapi speaks OpenAI chat format; the brain wants {role, text} pairs and
+      // supplies its own system prompt, so system messages are dropped.
+      const messages = (Array.isArray(body.messages) ? body.messages : [])
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({
+          role: m.role,
+          text: typeof m.content === "string" ? m.content
+            : Array.isArray(m.content) ? m.content.map((p) => p?.text || "").join(" ") : "",
+        }))
+        .filter((m) => m.text.trim());
+
+      const stream = awslambda.HttpResponseStream.from(responseStream, {
+        statusCode: 200,
+        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+      });
+      const id = "chatcmpl-" + Date.now().toString(36);
+      const created = Math.floor(Date.now() / 1000);
+      const chunk = (delta, finish = null) => sse(stream, {
+        id, object: "chat.completion.chunk", created, model: "ai-assist-brain",
+        choices: [{ index: 0, delta, finish_reason: finish }],
+      });
+      try {
+        chunk({ role: "assistant" });
+        await runTurn(messages, async (delta) => chunk({ content: delta }));
+        chunk({}, "stop");
+      } catch (err) {
+        console.error("llm bridge turn failed:", err);
+        try { chunk({ content: "Sorry, something went wrong on my end. Give me that again?" }); chunk({}, "stop"); } catch {}
+      }
+      stream.write("data: [DONE]\n\n");
+      stream.end();
+      return;
     }
     if (method === "POST" && path === "/stt") {
       const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
@@ -194,16 +240,18 @@ const APP_HTML = `<!doctype html><html><head><meta charset="utf-8">
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0f1b2d;color:#e8eef7;display:flex;flex-direction:column;height:100dvh}
 header{padding:14px 18px;font-weight:700;font-size:17px;display:flex;justify-content:space-between;align-items:center;flex:0 0 auto}
 header small{font-weight:400;color:#7d8ba1;font-size:12px}
+#endbtn{background:transparent;border:1px solid #27395a;color:#7d8ba1;border-radius:9px;padding:7px 12px;font-size:13px;cursor:pointer}
 #log{flex:1 1 auto;overflow-y:auto;padding:0 14px 10px}
 .msg{max-width:88%;margin:7px 0;padding:10px 13px;border-radius:14px;font-size:15px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;width:fit-content}
 .me{background:#1a73e8;color:#fff;margin-left:auto;border-bottom-right-radius:4px}
 .ai{background:#1c2b42;border:1px solid #27395a;border-bottom-left-radius:4px}
+.live{opacity:.55}
 .sys{color:#61708a;font-size:12px;text-align:center;margin:8px 0}
 #dock{flex:0 0 auto;padding:10px 14px calc(14px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center}
 #big{width:74px;height:74px;border-radius:50%;border:0;font-size:30px;cursor:pointer;flex:0 0 auto;background:#1a73e8;color:#fff;transition:background .2s}
-#big.listening{background:#e53935;animation:pulse 1.1s infinite}
-#big.thinking{background:#f9ab00}
-#big.speaking{background:#34a853}
+#big.connecting{background:#f9ab00;animation:pulse 1.1s infinite}
+#big.incall{background:#e53935;animation:pulse 1.4s infinite}
+#big.talking{background:#34a853}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 #box{flex:1;background:#16233a;border:1px solid #27395a;color:#e8eef7;border-radius:12px;padding:11px 13px;font:inherit;font-size:15px;resize:none;height:48px;outline:none}
 #send{background:#1a73e8;color:#fff;border:0;border-radius:12px;padding:0 16px;height:48px;font-size:15px;cursor:pointer}
@@ -211,86 +259,130 @@ header small{font-weight:400;color:#7d8ba1;font-size:12px}
 #pinveil{position:fixed;inset:0;background:#0f1b2d;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9}
 #pinveil input{font-size:22px;text-align:center;letter-spacing:6px;background:#16233a;border:1px solid #27395a;color:#fff;border-radius:10px;padding:12px;width:190px}
 #pinveil button{background:#1a73e8;color:#fff;border:0;border-radius:10px;padding:12px 26px;font-size:16px}
+#pinveil .err{color:#e57373;font-size:13px;min-height:16px}
 </style></head><body>
-<div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN</div><input id="pin" inputmode="numeric" autocomplete="off"><button id="pingo">Unlock</button></div>
-<header>AI Assist <small id="ver">voice v0.6</small></header>
-<div id="log"><div class="msg ai">G'day. Which job are we working on? Give me a job number and we'll get into it.</div></div>
-<div id="state">tap the button and talk</div>
+<div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN</div><input id="pin" inputmode="numeric" autocomplete="off"><div class="err" id="pinerr"></div><button id="pingo">Unlock</button></div>
+<header><span>AI Assist <small id="ver">voice v1.0 &#183; vapi</small></span><button id="endbtn" type="button">End session</button></header>
+<div id="log"><div class="msg ai">G'day. Tap the button and we'll get into it.</div></div>
+<div id="state">tap the button to start talking</div>
 <div id="dock"><button id="big" type="button">&#127908;</button><textarea id="box" placeholder="or type here"></textarea><button id="send" type="button">Send</button></div>
-<script>
-var PINKEY='aiassist_pin';var chat=[];var busy=false;
-var log=document.getElementById('log'),box=document.getElementById('box'),send=document.getElementById('send');
-var big=document.getElementById('big'),state=document.getElementById('state');
-var veil=document.getElementById('pinveil'),pinIn=document.getElementById('pin');
-function pin(){return localStorage.getItem(PINKEY)||''}
-if(pin())veil.style.display='none';
-document.getElementById('pingo').onclick=function(){localStorage.setItem(PINKEY,pinIn.value.trim());veil.style.display='none';};
-function add(c,t){var d=document.createElement('div');d.className='msg '+c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
-function sys(t){var d=document.createElement('div');d.className='sys';d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
-function setState(s,label){big.className=s;state.textContent=label;}
+<script type="module">
+import Vapi from "https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm";
 
-/* ---- audio queue: ONE gesture-unlocked element reused for every chunk
-   (phone browsers mute Audio objects created outside a tap) ---- */
-var q=[],qNext=0,playing=false,stopFlag=false,audioUnlocked=false;
-var audioEl=new Audio();
-var SILENT='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
-function unlockAudio(){if(audioUnlocked)return;audioUnlocked=true;try{audioEl.src=SILENT;var pr=audioEl.play();if(pr&&pr.catch)pr.catch(function(){});}catch(e){}}
-audioEl.onended=audioEl.onerror=function(){playing=false;pump();maybeRelisten();};
-function enqueue(seq,b64){q[seq]=b64;pump();}
-function pump(){if(playing||stopFlag)return;var b64=q[qNext];if(!b64)return;q[qNext]=null;qNext++;playing=true;
-audioEl.src='data:audio/mpeg;base64,'+b64;
-var pr=audioEl.play();if(pr&&pr.catch)pr.catch(function(){playing=false;sys('Tap the button once to enable sound.');});}
-function stopAudio(){stopFlag=true;try{audioEl.pause();}catch(e){}playing=false;q=[];}
-function audioDrained(){return !playing&&(qNext>=q.length||!q[qNext]);}
-function maybeRelisten(){if(busy||!handsFree||!audioDrained())return;
-retries=0;setTimeout(function(){if(!busy&&!listening&&audioDrained())startMic();},300);}
+var PUBKEY="13a3a262-9ccf-4fb5-a69e-0c943718dce6";
+var ASSISTANT="8ff8436f-b6b3-4c3b-9226-0a70d22f2c63";
+var PINKEY="aiassist_pin";
+var IDLE_LOCK_MS=15*60*1000;
 
-/* ---- speech recognition: tap → talk → pause sends ---- */
-var SR=window.SpeechRecognition||window.webkitSpeechRecognition;var rec=null,listening=false,handsFree=true,retries=0,watchdog=null,heard=false;
-function killMic(){if(watchdog){clearTimeout(watchdog);watchdog=null;}if(rec){try{rec.onend=null;rec.onerror=null;rec.onresult=null;rec.abort();}catch(e){}rec=null;}listening=false;}
-function startMic(){if(!SR||listening||busy)return;stopFlag=false;killMic();
-// A FRESH instance every round — reused ones silently refuse to restart on phones.
-rec=new SR();rec.lang='en-AU';rec.interimResults=true;rec.continuous=false;heard=false;
-rec.onresult=function(e){heard=true;var t='';for(var i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;box.value=t;};
-rec.onstart=function(){heard=false;};
-rec.onend=function(){if(watchdog){clearTimeout(watchdog);watchdog=null;}listening=false;
-if(box.value.trim()){retries=0;setState('','');go();return;}
-if(handsFree&&!busy&&retries<4){retries++;setTimeout(function(){startMic();},250);return;}
-retries=0;setState('','tap the button and talk');};
-rec.onerror=function(e){if(e&&e.error==='not-allowed'){killMic();setState('','');sys('Mic blocked - allow microphone for this site.');}};
-try{box.value='';rec.start();listening=true;setState('listening','listening\\u2026 pause to send');}catch(e){killMic();setState('','tap the button and talk');return;}
-// Watchdog: if the round never hears anything within 8s, assume it hung
-// (phones sometimes fake-start outside a tap) and reset to a clean idle.
-watchdog=setTimeout(function(){if(listening&&!heard&&!box.value.trim()){killMic();setState('','tap the button and talk');}},4000);}
-function stopMicRound(){if(rec&&listening){try{rec.stop();}catch(e){}}}
-big.onclick=function(){
-unlockAudio();
-if(playing||!audioDrained()){stopAudio();startMic();return;}
-if(listening){stopMicRound();return;}
-startMic();};
+var log=document.getElementById("log"),box=document.getElementById("box"),send=document.getElementById("send");
+var big=document.getElementById("big"),state=document.getElementById("state"),endbtn=document.getElementById("endbtn");
+var veil=document.getElementById("pinveil"),pinIn=document.getElementById("pin"),pinErr=document.getElementById("pinerr");
 
-/* ---- one turn: SSE stream in, captions + audio out ---- */
-function go(){var text=box.value.trim();if(!text||busy)return;box.value='';add('me',text);chat.push({role:'user',text:text});
-busy=true;setState('thinking','thinking\\u2026');stopFlag=false;q=[];qNext=0;
-var aiDiv=null;var got='';
-fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json','x-app-pin':pin()},body:JSON.stringify({messages:chat})})
-.then(function(res){
-if(res.status===401){busy=false;setState('','');localStorage.removeItem(PINKEY);veil.style.display='flex';return;}
-var reader=res.body.getReader();var dec=new TextDecoder();var buf='';
-function step(){return reader.read().then(function(r){
-if(r.done){finish();return;}
-buf+=dec.decode(r.value,{stream:true});
-var lines=buf.split('\\n');buf=lines.pop();
-for(var i=0;i<lines.length;i++){var line=lines[i];if(line.indexOf('data: ')!==0)continue;var ev;try{ev=JSON.parse(line.slice(6));}catch(e){continue;}
-if(ev.t==='d'){got+=ev.x;if(!aiDiv)aiDiv=add('ai','');aiDiv.textContent=got;log.scrollTop=log.scrollHeight;setState('speaking','');}
-else if(ev.t==='a'){enqueue(ev.seq,ev.b64);}
-else if(ev.t==='err'){sys('Error: '+ev.x);}
+var chat=[];            /* shared transcript: voice finals + typed turns */
+var inCall=false,connecting=false,talking=false,typedBusy=false;
+var lastActivity=Date.now();
+var wakeLock=null;
+
+function add(c,t){var d=document.createElement("div");d.className="msg "+c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
+function sys(t){var d=document.createElement("div");d.className="sys";d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
+function setUI(){
+  big.className=connecting?"connecting":(inCall?(talking?"talking":"incall"):"");
+  big.innerHTML=inCall?"&#128308;":"&#127908;";
+  if(connecting)state.textContent="connecting…";
+  else if(inCall)state.textContent=talking?"talking — speak over it to interrupt":"on the line — just talk";
+  else state.textContent="tap the button to start talking";
+  if(inCall)big.innerHTML="&#9209;&#65039;";
 }
-return step();});}
-return step();
-function finish(){busy=false;if(got){chat.push({role:'assistant',text:got});}setState('','');maybeRelisten();}
-})
-.catch(function(err){busy=false;setState('','');sys('Network error \\u2014 try again.');chat.pop();});}
-send.onclick=function(){unlockAudio();go();};
-box.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go();}});
-</script></body></html>`;
+function bump(){lastActivity=Date.now();}
+
+/* ---- PIN gate: local page lock; typed /chat path is server-validated ---- */
+function pin(){return localStorage.getItem(PINKEY)||"";}
+function locked(){return veil.style.display!=="none";}
+function lock(){try{if(inCall)vapi.stop();}catch(e){}veil.style.display="flex";pinIn.value="";pinErr.textContent="";}
+if(pin())veil.style.display="none";
+document.getElementById("pingo").onclick=function(){
+  var v=pinIn.value.trim();if(!v)return;
+  var stored=pin();
+  if(stored&&v!==stored){pinErr.textContent="Wrong PIN";pinIn.value="";return;}
+  if(!stored)localStorage.setItem(PINKEY,v);
+  veil.style.display="none";bump();
+};
+
+/* ---- live caption bubbles for the voice call ---- */
+var liveUser=null,liveAi=null;
+function setLive(role,text){
+  if(role==="user"){if(!liveUser)liveUser=add("me live","");liveUser.textContent=text;}
+  else{if(!liveAi)liveAi=add("ai live","");liveAi.textContent=text;}
+  log.scrollTop=log.scrollHeight;
+}
+function commitLive(role,text){
+  var d=role==="user"?liveUser:liveAi;
+  if(!d)d=add(role==="user"?"me":"ai","");
+  d.textContent=text;d.className="msg "+(role==="user"?"me":"ai");
+  if(role==="user")liveUser=null;else liveAi=null;
+  chat.push({role:role==="user"?"user":"assistant",text:text});
+  bump();
+}
+
+/* ---- Vapi voice call ---- */
+var vapi=new Vapi(PUBKEY);
+vapi.on("call-start",function(){connecting=false;inCall=true;talking=false;setUI();bump();
+  try{if(navigator.wakeLock)navigator.wakeLock.request("screen").then(function(w){wakeLock=w;}).catch(function(){});}catch(e){}});
+vapi.on("call-end",function(){inCall=false;connecting=false;talking=false;liveUser=null;liveAi=null;setUI();bump();
+  try{if(wakeLock){wakeLock.release();wakeLock=null;}}catch(e){}});
+vapi.on("speech-start",function(){talking=true;setUI();});
+vapi.on("speech-end",function(){talking=false;setUI();});
+vapi.on("message",function(m){
+  if(!m||m.type!=="transcript")return;
+  if(m.transcriptType==="final")commitLive(m.role,m.transcript);
+  else setLive(m.role,m.transcript);
+});
+vapi.on("error",function(e){
+  connecting=false;inCall=false;setUI();
+  var msg=(e&&(e.errorMsg||e.message||e.error&&e.error.message))||"call failed";
+  sys("Voice error: "+msg);
+});
+
+function startCall(){
+  if(locked()||inCall||connecting)return;
+  connecting=true;setUI();bump();
+  try{vapi.start(ASSISTANT);}catch(e){connecting=false;setUI();sys("Couldn't start the call — "+(e.message||e));}
+}
+function endCall(){try{vapi.stop();}catch(e){}}
+
+big.onclick=function(){if(inCall||connecting){endCall();return;}startCall();};
+endbtn.onclick=function(){endCall();lock();setTimeout(function(){try{window.close();}catch(e){}},300);};
+
+/* safety: backgrounding the page hangs up; long idle re-locks */
+document.addEventListener("visibilitychange",function(){if(document.hidden&&(inCall||connecting))endCall();});
+setInterval(function(){if(!inCall&&!locked()&&Date.now()-lastActivity>IDLE_LOCK_MS)lock();},30000);
+
+/* ---- typed path (desk use): same brain via /chat, text-only ---- */
+function goTyped(){
+  var text=box.value.trim();if(!text||typedBusy||locked())return;
+  if(inCall){sys("End the call to type, or just say it.");return;}
+  box.value="";add("me",text);chat.push({role:"user",text:text});typedBusy=true;bump();
+  var aiDiv=null,got="";
+  fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json","x-app-pin":pin()},body:JSON.stringify({messages:chat,audio:false})})
+  .then(function(res){
+    if(res.status===401){typedBusy=false;localStorage.removeItem(PINKEY);lock();return;}
+    var reader=res.body.getReader();var dec=new TextDecoder();var buf="";
+    function step(){return reader.read().then(function(r){
+      if(r.done){finish();return;}
+      buf+=dec.decode(r.value,{stream:true});
+      var lines=buf.split("\n");buf=lines.pop();
+      for(var i=0;i<lines.length;i++){var line=lines[i];if(line.indexOf("data: ")!==0)continue;var ev;try{ev=JSON.parse(line.slice(6));}catch(e){continue;}
+        if(ev.t==="d"){got+=ev.x;if(!aiDiv)aiDiv=add("ai","");aiDiv.textContent=got;log.scrollTop=log.scrollHeight;}
+        else if(ev.t==="err"){sys("Error: "+ev.x);}
+      }
+      return step();});}
+    return step();
+    function finish(){typedBusy=false;if(got)chat.push({role:"assistant",text:got});bump();}
+  })
+  .catch(function(){typedBusy=false;sys("Network error — try again.");chat.pop();});
+}
+send.onclick=goTyped;
+box.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();goTyped();}});
+setUI();
+</script></body></html>
+`;

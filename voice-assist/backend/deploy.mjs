@@ -25,10 +25,13 @@ await import("./index.mjs").catch((e) => {
 const src = fs.readFileSync("index.mjs", "utf8");
 const htmlMatch = src.match(/const APP_HTML = `([\s\S]*)`;\s*$/);
 if (htmlMatch) {
-  const scriptMatch = htmlMatch[1].match(/<script>([\s\S]*)<\/script>/);
+  const scriptMatch = htmlMatch[1].match(/<script(?: type="module")?>([\s\S]*)<\/script>/);
   if (scriptMatch) {
     try {
-      new Function(scriptMatch[1].replace(/\\n/g, "\n").replace(/\\u/g, "\\u").replace(/\\\\/g, "\\"));
+      // Strip top-level import lines — new Function can't hold them, but the
+      // rest of the module body still parses (the point of this check).
+      const bodyJs = scriptMatch[1].replace(/^\s*import [^\n]*\n/gm, "");
+      new Function(bodyJs.replace(/\\n/g, "\n").replace(/\\u/g, "\\u").replace(/\\\\/g, "\\"));
       console.log("Pre-flight: app page script parses OK.");
     } catch (err) {
       console.error("❌ DEPLOY BLOCKED — app page script broken:", err.message);
