@@ -123,6 +123,31 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       try {
         body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : event.body || "{}");
       } catch {}
+
+      // Caller gate: this brain can WRITE to ServiceM8, and the phone number is
+      // public-facing (Henri's Text-us line). Only allowlisted callers get the
+      // assistant; anyone else gets a polite redirect. Calls with no caller
+      // number (dashboard/web tests) pass — they're already auth-gated above.
+      const caller = String(body.call?.customer?.number || "").replace(/[\s()-]/g, "");
+      const allowed = (process.env.ALLOWED_CALLERS || "").split(",").map((n) => n.trim()).filter(Boolean);
+      if (caller && allowed.length && !allowed.includes(caller)) {
+        console.log(`llm bridge: rejected caller ${caller}`);
+        const s2 = awslambda.HttpResponseStream.from(responseStream, {
+          statusCode: 200, headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+        });
+        const rid = "chatcmpl-" + Date.now().toString(36);
+        const rchunk = (delta, finish = null) => sse(s2, {
+          id: rid, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000),
+          model: "ai-assist-brain", choices: [{ index: 0, delta, finish_reason: finish }],
+        });
+        rchunk({ role: "assistant" });
+        rchunk({ content: "G'day — this line is for text messages only. For service or quotes, please call the office on 1300 770 771, or send us a text right here and the team will get back to you. Cheers!" });
+        rchunk({}, "stop");
+        s2.write("data: [DONE]\n\n");
+        s2.end();
+        return;
+      }
+
       // Vapi speaks OpenAI chat format; the brain wants {role, text} pairs and
       // supplies its own system prompt, so system messages are dropped.
       const messages = (Array.isArray(body.messages) ? body.messages : [])
