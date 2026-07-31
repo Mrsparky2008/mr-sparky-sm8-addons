@@ -261,8 +261,8 @@ header small{font-weight:400;color:#7d8ba1;font-size:12px}
 #pinveil button{background:#1a73e8;color:#fff;border:0;border-radius:10px;padding:12px 26px;font-size:16px}
 #pinveil .err{color:#e57373;font-size:13px;min-height:16px}
 </style></head><body>
-<div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN</div><input id="pin" inputmode="numeric" autocomplete="off"><div class="err" id="pinerr"></div><button id="pingo">Unlock</button></div>
-<header><span>AI Assist <small id="ver">voice v1.1 &#183; vapi</small></span><button id="endbtn" type="button">End session</button></header>
+<div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN &#183; v1.2</div><input id="pin" inputmode="numeric" autocomplete="off"><div class="err" id="pinerr"></div><button id="pingo">Unlock</button></div>
+<header><span>AI Assist <small id="ver">voice v1.2 &#183; vapi</small></span><button id="endbtn" type="button">End session</button></header>
 <div id="log"><div class="msg ai">G'day. Tap the button and we'll get into it.</div></div>
 <div id="state">tap the button to start talking</div>
 <div id="dock"><button id="big" type="button">&#127908;</button><textarea id="box" placeholder="or type here"></textarea><button id="send" type="button">Send</button></div>
@@ -345,7 +345,7 @@ function goTyped(){
     function step(){return reader.read().then(function(r){
       if(r.done){finish();return;}
       buf+=dec.decode(r.value,{stream:true});
-      var lines=buf.split("\n");buf=lines.pop();
+      var lines=buf.split("\\n");buf=lines.pop();
       for(var i=0;i<lines.length;i++){var line=lines[i];if(line.indexOf("data: ")!==0)continue;var ev;try{ev=JSON.parse(line.slice(6));}catch(e){continue;}
         if(ev.t==="d"){got+=ev.x;if(!aiDiv)aiDiv=add("ai","");aiDiv.textContent=got;log.scrollTop=log.scrollHeight;}
         else if(ev.t==="err"){sys("Error: "+ev.x);}
@@ -360,10 +360,21 @@ send.onclick=goTyped;
 box.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();goTyped();}});
 setUI();
 
-/* ---- voice engine: loaded separately so a failure never kills the page ---- */
-import("https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm").then(function(mod){
+/* ---- voice engine: loaded separately so a failure never kills the page.
+   Two CDNs tried in turn (content blockers commonly eat the first). ---- */
+var VAPI_URLS=["https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm","https://esm.sh/@vapi-ai/web"];
+function loadVapi(i){
+  if(i>=VAPI_URLS.length){sys("Voice engine failed to load on both sources — check any ad-blocker/content-blocker on Safari, then reload.");return;}
+  import(VAPI_URLS[i]).then(wireVapi).catch(function(e){
+    sys("Voice engine source "+(i+1)+" failed ("+((e&&e.message)||e)+") — trying another…");
+    loadVapi(i+1);
+  });
+}
+loadVapi(0);
+function wireVapi(mod){
   var Vapi=mod.default||mod.Vapi||mod;
   var vapi=new Vapi(PUBKEY);
+  sys("voice engine ready");
   vapi.on("call-start",function(){A.connecting=false;A.inCall=true;A.talking=false;setUI();bump();
     try{if(navigator.wakeLock)navigator.wakeLock.request("screen").then(function(w){wakeLock=w;}).catch(function(){});}catch(e){}});
   vapi.on("call-end",function(){A.inCall=false;A.connecting=false;A.talking=false;clearLive();setUI();bump();
@@ -386,8 +397,6 @@ import("https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm").then(function(mod){
     try{vapi.start(ASSISTANT);}catch(e){A.connecting=false;setUI();sys("Couldn't start the call — "+(e.message||e));}
   };
   A.stop=function(){try{vapi.stop();}catch(e){}};
-}).catch(function(e){
-  sys("Voice engine failed to load — "+((e&&e.message)||e)+". Check the connection and reload the page.");
-});
+}
 </script></body></html>
 `;
