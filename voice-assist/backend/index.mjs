@@ -146,7 +146,7 @@ header small{font-weight:400;color:#7d8ba1;font-size:12px}
 #pinveil button{background:#1a73e8;color:#fff;border:0;border-radius:10px;padding:12px 26px;font-size:16px}
 </style></head><body>
 <div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN</div><input id="pin" inputmode="numeric" autocomplete="off"><button id="pingo">Unlock</button></div>
-<header>AI Assist <small id="ver">voice v0.1</small></header>
+<header>AI Assist <small id="ver">voice v0.2</small></header>
 <div id="log"><div class="msg ai">G'day. Which job are we working on? Give me a job number and we'll get into it.</div></div>
 <div id="state">tap the button and talk</div>
 <div id="dock"><button id="big" type="button">&#127908;</button><textarea id="box" placeholder="or type here"></textarea><button id="send" type="button">Send</button></div>
@@ -162,14 +162,18 @@ function add(c,t){var d=document.createElement('div');d.className='msg '+c;d.tex
 function sys(t){var d=document.createElement('div');d.className='sys';d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
 function setState(s,label){big.className=s;state.textContent=label;}
 
-/* ---- audio queue: ordered mp3 chunks, plays as they arrive ---- */
-var q=[],qNext=0,playing=false,audioEl=null,stopFlag=false;
+/* ---- audio queue: ONE gesture-unlocked element reused for every chunk
+   (phone browsers mute Audio objects created outside a tap) ---- */
+var q=[],qNext=0,playing=false,stopFlag=false,audioUnlocked=false;
+var audioEl=new Audio();
+var SILENT='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+function unlockAudio(){if(audioUnlocked)return;audioUnlocked=true;try{audioEl.src=SILENT;var pr=audioEl.play();if(pr&&pr.catch)pr.catch(function(){});}catch(e){}}
+audioEl.onended=audioEl.onerror=function(){playing=false;pump();maybeRelisten();};
 function enqueue(seq,b64){q[seq]=b64;pump();}
 function pump(){if(playing||stopFlag)return;var b64=q[qNext];if(!b64)return;q[qNext]=null;qNext++;playing=true;
-audioEl=new Audio('data:audio/mpeg;base64,'+b64);
-audioEl.onended=audioEl.onerror=function(){playing=false;audioEl=null;pump();maybeRelisten();};
-audioEl.play().catch(function(){playing=false;maybeRelisten();});}
-function stopAudio(){stopFlag=true;try{if(audioEl){audioEl.pause();audioEl=null;}}catch(e){}playing=false;q=[];}
+audioEl.src='data:audio/mpeg;base64,'+b64;
+var pr=audioEl.play();if(pr&&pr.catch)pr.catch(function(){playing=false;sys('Tap the button once to enable sound.');});}
+function stopAudio(){stopFlag=true;try{audioEl.pause();}catch(e){}playing=false;q=[];}
 function audioDrained(){return !playing&&(qNext>=q.length||!q[qNext]);}
 function maybeRelisten(){if(!busy&&handsFree&&audioDrained()){startMic();}}
 
@@ -181,6 +185,7 @@ rec.onend=function(){listening=false;if(big.className==='listening')setState('',
 rec.onerror=function(e){listening=false;setState('','');if(e&&e.error==='not-allowed'){sys('Mic blocked - allow microphone for this site.');}};}
 function startMic(){if(!rec||listening||busy)return;stopFlag=false;try{box.value='';rec.start();listening=true;setState('listening','listening\\u2026 pause to send');}catch(e){}}
 big.onclick=function(){
+unlockAudio();
 if(playing||!audioDrained()){stopAudio();startMic();return;}
 if(listening){try{rec.stop();}catch(e){}return;}
 startMic();};
@@ -207,6 +212,6 @@ return step();
 function finish(){busy=false;if(got){chat.push({role:'assistant',text:got});}setState('','');maybeRelisten();}
 })
 .catch(function(err){busy=false;setState('','');sys('Network error \\u2014 try again.');chat.pop();});}
-send.onclick=go;
+send.onclick=function(){unlockAudio();go();};
 box.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go();}});
 </script></body></html>`;
