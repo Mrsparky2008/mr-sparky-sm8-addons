@@ -21,6 +21,15 @@ const transcribe = new TranscribeStreamingClient({});
 const PIN = process.env.APP_PIN || "";
 const LLM_TOKEN = process.env.LLM_TOKEN || "";
 
+// Per-call job anchor so the brain doesn't re-find the job every turn.
+// Container-lifetime memory: lost on cold start, which just costs one re-find.
+const callAnchors = new Map();
+function rememberAnchor(callId, anchor) {
+  if (!callId || !anchor) return;
+  callAnchors.set(callId, anchor);
+  if (callAnchors.size > 200) callAnchors.delete(callAnchors.keys().next().value);
+}
+
 function parseWav(buf) {
   if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") return null;
   let pos = 12, fmt = null, data = null;
@@ -135,9 +144,11 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         id, object: "chat.completion.chunk", created, model: "ai-assist-brain",
         choices: [{ index: 0, delta, finish_reason: finish }],
       });
+      const callId = body.call?.id || null;
       try {
         chunk({ role: "assistant" });
-        await runTurn(messages, async (delta) => chunk({ content: delta }));
+        const { anchor } = await runTurn(messages, async (delta) => chunk({ content: delta }), { anchor: callAnchors.get(callId) || null });
+        rememberAnchor(callId, anchor);
         chunk({}, "stop");
       } catch (err) {
         console.error("llm bridge turn failed:", err);

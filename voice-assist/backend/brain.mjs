@@ -412,7 +412,10 @@ async function executeTool(name, input) {
   return { error: `Unknown tool: ${name}` };
 }
 
-function systemPrompt() {
+function systemPrompt(anchor) {
+  const anchorNote = anchor && anchor.uuid
+    ? `\n\nCURRENT ANCHORED JOB (already confirmed earlier in this call — do NOT call find_job again unless the user names a different job): job ${anchor.job_number} at ${anchor.address}, uuid ${anchor.uuid}. Use this uuid directly and don't re-announce the job.`
+    : "";
   return `You are AI Assist, Mr Sparky Electrical's voice assistant. You are IN A SPOKEN CONVERSATION with Steven (the owner) or a staff member — your words are read aloud by text-to-speech. This is the standalone app: no job is pre-selected.
 
 Current date/time (Sydney): ${nowInTz()}.
@@ -421,6 +424,10 @@ All ServiceM8 dates are Sydney-local "YYYY-MM-DD HH:MM".
 SPOKEN STYLE — the most important rules:
 - Talk like a sharp Aussie office colleague, not a document. Short sentences. One thought at a time.
 - BREVITY IS EVERYTHING: this is ping-pong, not a briefing. Default reply = ONE or TWO short sentences (under ~6 seconds spoken), then stop and let them talk. Three sentences is the ceiling, and only when reading back drafted quote lines or a schedule answer. Never repeat back what they just said, never pad with pleasantries.
+- Don't narrate quick lookups ("let me look that up") — just answer. Save the spoken ack for genuinely slow work (writing billing lines, moving bookings), keep it 2-4 words, and NEVER use the same ack phrase twice in one conversation.
+- NO ARITHMETIC ALOUD: never sum totals or do price maths unless asked — billing calculates itself. Read back each drafted line with its price and stop.
+- If they say a bare filler ("okay", "yep", "hmm") with nothing pending, don't repeat your whole question — a two-word nudge at most.
+- Confirming a job, separate number from street or TTS mashes them: "Job ending 430 — at 60 Darling Drive, Haymarket."
 - NEVER read out lists of more than 3 items verbatim; summarise ("that's four lines, about $2,900 all up") — the screen shows the detail.
 - Say job numbers briefly ("job ending 430") unless asked for the full number.
 - No markdown, no bullet symbols, no emojis — pure speakable text.
@@ -435,7 +442,7 @@ QUOTE BUILDING (your main purpose) — draft-then-commit:
 
 OTHER ACTIONS: bookings (check get_schedule for clashes first; propose nearest free slot on clash), notes (address to a person by starting the note "NAME: ..."), status changes, clone for re-inspection. Act on clear instructions immediately; ask ONE short question only when genuinely ambiguous.
 
-HONESTY: if something fails, say what failed in plain words and what you'll try instead. Never invent data. You cannot send SMS/email, touch invoices/payments, or delete anything.`;
+HONESTY: if something fails, say what failed in plain words and what you'll try instead. Never invent data. You cannot send SMS/email, touch invoices/payments, or delete anything.` + anchorNote;
 }
 
 /**
@@ -443,7 +450,9 @@ HONESTY: if something fails, say what failed in plain words and what you'll try 
  *   onDelta(text)   — assistant text as it generates (final answer + pre-tool acks)
  * Returns { reply } when the turn is complete.
  */
-export async function runTurn(messages, onDelta) {
+// context.anchor: job carried across turns of one call (the transcript alone
+// loses tool results, which made every turn re-run find_job).
+export async function runTurn(messages, onDelta, context = {}) {
   const apiMessages = messages
     .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.text)
     .map((m) => ({ role: m.role, content: String(m.text).slice(0, 6000) }))
@@ -451,6 +460,7 @@ export async function runTurn(messages, onDelta) {
   while (apiMessages.length && apiMessages[0].role !== "user") apiMessages.shift();
   if (!apiMessages.length) throw new Error("No user message");
 
+  let anchor = context.anchor || null;
   let fullReply = "";
 
   for (let iteration = 0; iteration < 8; iteration++) {
@@ -463,7 +473,7 @@ export async function runTurn(messages, onDelta) {
       },
       body: JSON.stringify({
         model: MODEL, max_tokens: 1024, stream: true,
-        system: systemPrompt(), tools, messages: apiMessages,
+        system: systemPrompt(anchor), tools, messages: apiMessages,
       }),
     });
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -514,7 +524,7 @@ export async function runTurn(messages, onDelta) {
       }
     }
 
-    if (stopReason !== "tool_use") return { reply: fullReply };
+    if (stopReason !== "tool_use") return { reply: fullReply, anchor };
 
     const toolResults = [];
     for (const block of content) {
@@ -526,6 +536,7 @@ export async function runTurn(messages, onDelta) {
         console.error(`voice tool ${block.name} failed:`, err);
         result = { error: `${block.name} failed: ${err.message}` };
       }
+      if (block.name === "find_job" && result?.job?.uuid) anchor = result.job;
       toolResults.push({
         type: "tool_result", tool_use_id: block.id,
         content: JSON.stringify(result).slice(0, 30000),
@@ -536,5 +547,5 @@ export async function runTurn(messages, onDelta) {
     apiMessages.push({ role: "user", content: toolResults });
     if (fullReply && !fullReply.endsWith(" ")) { fullReply += " "; await onDelta(" "); }
   }
-  return { reply: fullReply };
+  return { reply: fullReply, anchor };
 }
