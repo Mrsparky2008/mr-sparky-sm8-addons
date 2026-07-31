@@ -146,7 +146,7 @@ header small{font-weight:400;color:#7d8ba1;font-size:12px}
 #pinveil button{background:#1a73e8;color:#fff;border:0;border-radius:10px;padding:12px 26px;font-size:16px}
 </style></head><body>
 <div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN</div><input id="pin" inputmode="numeric" autocomplete="off"><button id="pingo">Unlock</button></div>
-<header>AI Assist <small id="ver">voice v0.2</small></header>
+<header>AI Assist <small id="ver">voice v0.3</small></header>
 <div id="log"><div class="msg ai">G'day. Which job are we working on? Give me a job number and we'll get into it.</div></div>
 <div id="state">tap the button and talk</div>
 <div id="dock"><button id="big" type="button">&#127908;</button><textarea id="box" placeholder="or type here"></textarea><button id="send" type="button">Send</button></div>
@@ -175,14 +175,22 @@ audioEl.src='data:audio/mpeg;base64,'+b64;
 var pr=audioEl.play();if(pr&&pr.catch)pr.catch(function(){playing=false;sys('Tap the button once to enable sound.');});}
 function stopAudio(){stopFlag=true;try{audioEl.pause();}catch(e){}playing=false;q=[];}
 function audioDrained(){return !playing&&(qNext>=q.length||!q[qNext]);}
-function maybeRelisten(){if(!busy&&handsFree&&audioDrained()){startMic();}}
+function maybeRelisten(){if(!busy&&handsFree&&audioDrained()){retries=0;setTimeout(function(){if(!busy&&!listening&&audioDrained())startMic();},300);}}
 
 /* ---- speech recognition: tap → talk → pause sends ---- */
-var SR=window.SpeechRecognition||window.webkitSpeechRecognition;var rec=null,listening=false,handsFree=true;
+var SR=window.SpeechRecognition||window.webkitSpeechRecognition;var rec=null,listening=false,handsFree=true,retries=0;
 if(SR){rec=new SR();rec.lang='en-AU';rec.interimResults=true;rec.continuous=false;
 rec.onresult=function(e){var t='';for(var i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;box.value=t;};
-rec.onend=function(){listening=false;if(big.className==='listening')setState('','');if(box.value.trim()){go();}};
-rec.onerror=function(e){listening=false;setState('','');if(e&&e.error==='not-allowed'){sys('Mic blocked - allow microphone for this site.');}};}
+rec.onend=function(){listening=false;
+if(box.value.trim()){retries=0;setState('',''); go();return;}
+// Heard nothing — recognition often bails instantly on phones. Quietly re-arm
+// a few times so the mic doesn't silently die mid-conversation.
+if(handsFree&&!busy&&retries<4){retries++;setTimeout(function(){startMic();},250);return;}
+retries=0;setState('','tap the button and talk');};
+rec.onerror=function(e){listening=false;
+if(e&&e.error==='not-allowed'){setState('','');sys('Mic blocked - allow microphone for this site.');return;}
+// no-speech / aborted / network blips: treat like an empty round (re-arm above).
+};}
 function startMic(){if(!rec||listening||busy)return;stopFlag=false;try{box.value='';rec.start();listening=true;setState('listening','listening\\u2026 pause to send');}catch(e){}}
 big.onclick=function(){
 unlockAudio();
