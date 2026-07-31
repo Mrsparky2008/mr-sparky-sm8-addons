@@ -89,7 +89,7 @@ exports.handler = async (event) => {
 		</style>
 	</head>
 	<body style="font-family:sans-serif;margin:10px;">
-		<div id="aihead">AI Assist <a id="popout" target="_blank" rel="noopener" style="float:right;color:#fff;font-weight:normal;font-size:12px;text-decoration:underline;">Open in tab (for voice)</a></div>
+		<div id="aihead">AI Assist <a id="popout" target="_blank" rel="noopener" style="float:right;color:#fff;font-weight:normal;font-size:12px;text-decoration:underline;">Open in tab (for voice)</a><button id="spk" type="button" title="Read replies aloud" style="float:right;background:none;border:0;color:#fff;font-size:15px;cursor:pointer;margin-right:12px;padding:0;">&#128263;</button></div>
 		<div id="log">
 			<div class="msg ai">G'day. I'm your admin assistant for this job. I can book it in, move or cancel bookings, check the diary for free slots, add notes, set reminders, change status, or clone the job. What do you need?</div>
 		</div>
@@ -151,6 +151,7 @@ exports.handler = async (event) => {
 					if (!j || !j.ok) { sys((j && j.error) || 'Something went wrong \\u2014 try again.'); history.pop(); return; }
 					add('ai', j.reply);
 					history.push({ role: 'assistant', text: j.reply });
+					say(j.reply);
 					box.focus();
 				}, function (err) {
 					log.removeChild(t); setBusy(false);
@@ -178,6 +179,24 @@ exports.handler = async (event) => {
 			box.addEventListener('keydown', function (e) {
 				if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); }
 			});
+
+			// Read replies aloud (browser text-to-speech, en-AU). Toggle in header.
+			var speakOn = false;
+			var spk = document.getElementById('spk');
+			spk.onclick = function () {
+				speakOn = !speakOn;
+				spk.innerHTML = speakOn ? '&#128266;' : '&#128263;';
+				if (!speakOn) { try { speechSynthesis.cancel(); } catch (e) {} }
+			};
+			function say(text) {
+				if (!speakOn || !window.speechSynthesis) return;
+				try {
+					speechSynthesis.cancel();
+					var u = new SpeechSynthesisUtterance(text);
+					u.lang = 'en-AU';
+					speechSynthesis.speak(u);
+				} catch (e) {}
+			}
 
 			// Tap-to-talk (hidden when the webview lacks speech recognition).
 			var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
