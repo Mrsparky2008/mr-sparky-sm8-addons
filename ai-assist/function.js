@@ -25,11 +25,42 @@ function errorPage(msg) {
   };
 }
 
+// Chat relay: the popup page cannot fetch external domains directly (SM8's
+// frame CSP blocks it), so the page uses client.invoke() -> this event -> we
+// call the backend SERVER-SIDE (no CSP here) and hand the reply back.
+async function chatRelay(event) {
+  try {
+    var token = event && event.auth && event.auth.accessToken;
+    var args = (event && event.eventArgs) || {};
+    var res = await fetch(BACKEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: token,
+        jobUUID: args.jobUUID,
+        messages: Array.isArray(args.messages) ? args.messages : []
+      })
+    });
+    var text = await res.text();
+    console.log('AI Assist chat relay | backend HTTP', res.status, '| bytes', text.length);
+    // Pass the backend JSON straight through; the page parses it.
+    return { eventResponse: text };
+  } catch (e) {
+    console.log('AI Assist chat relay FAILED:', e && e.message);
+    return { eventResponse: JSON.stringify({ ok: false, error: 'Relay failed: ' + (e && e.message) }) };
+  }
+}
+
 exports.handler = async (event) => {
   try {
     var token = event && event.auth && event.auth.accessToken;
     var jobUUID = event && event.eventArgs && event.eventArgs.jobUUID;
-    console.log('AI Assist v3 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
+    console.log('AI Assist v4 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
+
+    if (event && event.eventName === 'ai_assist_chat') {
+      return chatRelay(event);
+    }
+
     if (!token || !jobUUID) {
       return errorPage('Missing session token or job — open a Job Card and click AI Assist again.');
     }
@@ -109,22 +140,21 @@ exports.handler = async (event) => {
 				history.push({ role: 'user', text: text });
 				var t = sysEl('thinking\\u2026');
 				setBusy(true);
-				fetch(URL_, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ token: TOKEN, jobUUID: JOB, messages: history })
-				}).then(function (r) {
-					return r.json().then(function (j) { return { status: r.status, j: j }; });
-				}).then(function (res) {
+				// SM8's frame blocks direct calls to outside domains, so we route via
+				// the SDK bridge: SM8 runs our function server-side, which relays to
+				// the backend and returns its JSON as a string.
+				client.invoke('ai_assist_chat', { jobUUID: JOB, messages: history }).then(function (message) {
 					log.removeChild(t); setBusy(false);
-					if (res.status === 401) { sys('Session expired \\u2014 close this window and open AI Assist again.'); return; }
-					if (!res.j || !res.j.ok) { sys((res.j && res.j.error) || 'Something went wrong \\u2014 try again.'); history.pop(); return; }
-					add('ai', res.j.reply);
-					history.push({ role: 'assistant', text: res.j.reply });
+					var j = null;
+					try { j = JSON.parse(message); } catch (e) {}
+					if (j && j.error === 'tokenExpired') { sys('Session expired \\u2014 close this window and open AI Assist again.'); return; }
+					if (!j || !j.ok) { sys((j && j.error) || 'Something went wrong \\u2014 try again.'); history.pop(); return; }
+					add('ai', j.reply);
+					history.push({ role: 'assistant', text: j.reply });
 					box.focus();
-				}).catch(function () {
+				}, function (err) {
 					log.removeChild(t); setBusy(false);
-					sys('Network error \\u2014 try again.');
+					sys('Request failed \\u2014 try again.' + (err ? ' (' + err + ')' : ''));
 					history.pop();
 				});
 			}
