@@ -135,6 +135,7 @@ exports.handler = async (event) => {
 			function go() {
 				var text = box.value.replace(/^\\s+|\\s+$/g, '');
 				if (!text || busy) return;
+				stopMic();
 				box.value = '';
 				add('me', text);
 				history.push({ role: 'user', text: text });
@@ -200,12 +201,13 @@ exports.handler = async (event) => {
 
 			// Tap-to-talk (hidden when the webview lacks speech recognition).
 			var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+			var rec = null; var listening = false;
+			function stopMic() { if (rec && listening) { try { rec.stop(); } catch (e) {} } }
 			if (SR) {
 				var mic = document.getElementById('mic');
 				mic.style.display = 'block';
-				var rec = new SR();
+				rec = new SR();
 				rec.lang = 'en-AU'; rec.interimResults = true; rec.continuous = false;
-				var listening = false;
 				rec.onresult = function (e) {
 					var t = '';
 					for (var i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
