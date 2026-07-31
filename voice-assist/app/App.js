@@ -45,7 +45,7 @@ const WAV_RECORDING = {
 
 // VAD tuning (Expo Go path). Metering is dBFS: speech ~ -30..-10, quiet ~ -50.
 const SPEECH_DB = -38;      // above this = someone is talking
-const SILENCE_MS = 1300;    // this much quiet after speech = utterance over
+const SILENCE_MS = 900;     // this much quiet after speech = utterance over
 const NO_SPEECH_MS = 9000;  // heard nothing at all -> recycle the round
 const MAX_UTTER_MS = 30000; // hard cap per utterance
 const MAX_QUIET_ROUNDS = 8; // ~72s of silence -> stop hands-free relistening
@@ -118,7 +118,7 @@ export default function App() {
   function afterTurn() {
     if (busyRef.current) return;
     if (handsFreeRef.current && quietRoundsRef.current < MAX_QUIET_ROUNDS) {
-      setTimeout(() => { if (!busyRef.current && phaseRef.current !== "listening") startListening(); }, 350);
+      setTimeout(() => { if (!busyRef.current && phaseRef.current !== "listening") startListening(); }, 150);
     } else {
       setPhase("idle");
     }
@@ -208,7 +208,7 @@ export default function App() {
 
   async function stopRecorder() {
     try { await recorder.stop(); } catch {}
-    await AQ.playbackMode();
+    AQ.playbackMode(); // not awaited — settles in ms, well before any audio plays
   }
 
   // Nothing said all round: keep hands-free alive quietly (no /stt call),

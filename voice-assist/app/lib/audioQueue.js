@@ -12,11 +12,13 @@ let player = null;
 let gen = 0;       // bumped by stopAudio so stale callbacks/writes are ignored
 let fileN = 0;
 let onDrain = null;
+let prePlayer = null; // next chunk, created early so it starts gap-free
+let preSeq = -1;
 
 export function setOnDrain(cb) { onDrain = cb; }
 
 // True while a chunk is playing or queued — "the assistant is still talking".
-export function isDraining() { return playing || !!q[next]; }
+export function isDraining() { return playing || !!q[next] || !!prePlayer; }
 
 // iOS routes output to the quiet earpiece while recording is allowed, so we
 // flip the audio mode: record mode while the mic is open, playback mode after.
@@ -42,7 +44,20 @@ export async function enqueue(seq, b64) {
   }
   if (myGen !== gen || stopped) return;
   q[seq] = uri;
-  pump();
+  if (playing) preload();
+  else pump();
+}
+
+function preload() {
+  if (prePlayer || stopped || !q[next]) return;
+  try {
+    prePlayer = createAudioPlayer({ uri: q[next] });
+    preSeq = next;
+    q[next] = null;
+  } catch {
+    prePlayer = null;
+    preSeq = -1;
+  }
 }
 
 function finishOne(myGen) {
@@ -51,25 +66,28 @@ function finishOne(myGen) {
   player = null;
   playing = false;
   pump();
-  if (!playing && !q[next] && onDrain) onDrain();
+  if (!playing && !q[next] && !prePlayer && onDrain) onDrain();
 }
 
 function pump() {
   if (playing || stopped) return;
+  const pre = prePlayer && preSeq === next ? prePlayer : null;
+  if (pre) { prePlayer = null; preSeq = -1; }
   const uri = q[next];
-  if (!uri) return;
+  if (!pre && !uri) return;
   q[next] = null;
   next++;
   playing = true;
   const myGen = gen;
   let done = false;
   try {
-    player = createAudioPlayer({ uri });
+    player = pre || createAudioPlayer({ uri });
     player.addListener("playbackStatusUpdate", (s) => {
       if (done || myGen !== gen) return;
       if (s && s.didJustFinish) { done = true; finishOne(myGen); }
     });
     player.play();
+    preload(); // warm the next chunk while this one speaks
     // If the finished event never lands (seen with some players), unstick.
     setTimeout(() => { if (!done && myGen === gen) { done = true; finishOne(myGen); } }, 60000);
   } catch {
@@ -83,7 +101,10 @@ export function stopAudio() {
   stopped = true;
   try { if (player) player.pause(); } catch {}
   try { if (player) player.release(); } catch {}
+  try { if (prePlayer) prePlayer.release(); } catch {}
   player = null;
+  prePlayer = null;
+  preSeq = -1;
   playing = false;
   q = [];
   next = 0;
