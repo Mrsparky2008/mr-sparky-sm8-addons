@@ -15,10 +15,11 @@ function jsEmbed(value) {
 }
 
 function errorPage(msg) {
-  return '<!doctype html><html><head><meta charset="utf-8"><title>AI Assist</title></head>' +
+  var html = '<!doctype html><html><head><meta charset="utf-8"><title>AI Assist</title></head>' +
     '<body style="font-family:system-ui;margin:24px"><h3>AI Assist could not start</h3><p>' +
     String(msg || 'Unknown error').replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }) +
     '</p><p>Close this window and try again from the job card.</p></body></html>';
+  return { eventResponse: html };
 }
 
 // Async handler — ServiceM8's Simple Function runtime is Node.js 24+, which no
@@ -68,7 +69,7 @@ exports.handler = async function (event) {
       'var JOB=' + jsEmbed(jobUUID) + ';' +
       'var URL_=' + jsEmbed(BACKEND_URL) + ';' +
       'var history=[];var busy=false;var smc=null;' +
-      'try{smc=SMClient.init();}catch(e){}' +
+      'try{smc=SMClient.init();if(smc&&smc.resizeWindow){smc.resizeWindow(760,640);}}catch(e){}' +
       'var log=document.getElementById("log"),box=document.getElementById("box"),send=document.getElementById("send");' +
       'document.getElementById("closeBtn").onclick=function(){if(smc&&smc.closeWindow){smc.closeWindow();}else{window.close();}};' +
       'function add(cls,text){var d=document.createElement("div");d.className="msg "+cls;d.textContent=text;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}' +
@@ -108,7 +109,9 @@ exports.handler = async function (event) {
       'box.focus();' +
       '<\/script></body></html>';
 
-    return html;
+    // SM8's async runtime renders the HTML from the eventResponse envelope
+    // (a bare string yields a blank popup).
+    return { eventResponse: html };
   } catch (e) {
     return errorPage(e && e.message || String(e));
   }
