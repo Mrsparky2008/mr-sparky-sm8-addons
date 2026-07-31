@@ -21,12 +21,14 @@ function errorPage(msg) {
     '</p><p>Close this window and try again from the job card.</p></body></html>';
 }
 
-exports.handler = function (event, context, callback) {
+// Async handler — ServiceM8's Simple Function runtime is Node.js 24+, which no
+// longer supports the old callback(event, context, callback) signature.
+exports.handler = async function (event) {
   try {
     var token = event && event.auth && event.auth.accessToken;
     var jobUUID = event && event.eventArgs && event.eventArgs.jobUUID;
     if (!token || !jobUUID) {
-      return callback(null, errorPage('Missing session token or job — open a Job Card and click AI Assist again.'));
+      return errorPage('Missing session token or job — open a Job Card and click AI Assist again.');
     }
 
     var html = '<!doctype html><html><head><meta charset="utf-8">' +
@@ -106,8 +108,8 @@ exports.handler = function (event, context, callback) {
       'box.focus();' +
       '<\/script></body></html>';
 
-    return callback(null, html);
+    return html;
   } catch (e) {
-    return callback(null, errorPage(e && e.message || String(e)));
+    return errorPage(e && e.message || String(e));
   }
 };
