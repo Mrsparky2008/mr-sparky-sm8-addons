@@ -4,13 +4,60 @@
 //   GET  /manifest.webmanifest PWA manifest
 //   POST /chat                one conversation turn — SSE stream of text deltas
 //                             and per-sentence Polly audio (neural en-AU Olivia)
+//   POST /stt                 speech-to-text for the native app's Expo Go path:
+//                             body {wav: base64 16-bit PCM WAV} -> {ok, text}
+//                             (Amazon Transcribe streaming, en-AU)
 // Auth: x-app-pin header must match env APP_PIN.
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
+import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
 import { runTurn } from "./brain.mjs";
 
 const polly = new PollyClient({});
+const transcribe = new TranscribeStreamingClient({});
 const PIN = process.env.APP_PIN || "";
+
+function parseWav(buf) {
+  if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") return null;
+  let pos = 12, fmt = null, data = null;
+  while (pos + 8 <= buf.length) {
+    const id = buf.toString("ascii", pos, pos + 4);
+    const size = buf.readUInt32LE(pos + 4);
+    const body = pos + 8;
+    if (id === "fmt ") fmt = { format: buf.readUInt16LE(body), channels: buf.readUInt16LE(body + 2), sampleRate: buf.readUInt32LE(body + 4), bits: buf.readUInt16LE(body + 14) };
+    else if (id === "data") data = buf.subarray(body, Math.min(body + size, buf.length));
+    pos = body + size + (size % 2);
+  }
+  if (!fmt || !data || fmt.format !== 1 || fmt.bits !== 16) return null;
+  if (fmt.channels === 2) {
+    const mono = Buffer.alloc(Math.floor(data.length / 4) * 2);
+    for (let i = 0; i < mono.length / 2; i++) mono.writeInt16LE(data.readInt16LE(i * 4), i * 2);
+    data = mono;
+  } else if (fmt.channels !== 1) return null;
+  return { sampleRate: fmt.sampleRate, pcm: data };
+}
+
+async function sttFromWav(wavBuf) {
+  const wav = parseWav(wavBuf);
+  if (!wav) throw new Error("expected 16-bit PCM WAV (mono or stereo)");
+  const CHUNK = 16 * 1024;
+  async function* audio() {
+    for (let i = 0; i < wav.pcm.length; i += CHUNK) {
+      yield { AudioEvent: { AudioChunk: wav.pcm.subarray(i, i + CHUNK) } };
+    }
+  }
+  const out = await transcribe.send(new StartStreamTranscriptionCommand({
+    LanguageCode: "en-AU", MediaEncoding: "pcm",
+    MediaSampleRateHertz: Math.min(Math.max(wav.sampleRate, 8000), 48000),
+    AudioStream: audio(),
+  }));
+  let text = "";
+  for await (const ev of out.TranscriptResultStream) {
+    const results = ev.TranscriptEvent?.Transcript?.Results || [];
+    for (const r of results) if (!r.IsPartial && r.Alternatives?.[0]?.Transcript) text += (text ? " " : "") + r.Alternatives[0].Transcript;
+  }
+  return text.trim();
+}
 
 async function tts(text) {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -53,6 +100,26 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, x-app-pin",
       }, "");
+    }
+    if (method === "POST" && path === "/stt") {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      if (!PIN || headers["x-app-pin"] !== PIN) {
+        return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ ok: false, error: "bad pin" }));
+      }
+      let body = {};
+      try {
+        body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : event.body || "{}");
+      } catch {}
+      if (typeof body.wav !== "string" || !body.wav) {
+        return respond(400, { "Content-Type": "application/json" }, JSON.stringify({ ok: false, error: "missing wav" }));
+      }
+      try {
+        const text = await sttFromWav(Buffer.from(body.wav, "base64"));
+        return respond(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }, JSON.stringify({ ok: true, text }));
+      } catch (err) {
+        console.error("stt failed:", err);
+        return respond(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }, JSON.stringify({ ok: false, error: String(err.message || err).slice(0, 200) }));
+      }
     }
     if (method === "POST" && path === "/chat") {
       const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));

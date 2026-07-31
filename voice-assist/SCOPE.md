@@ -58,6 +58,14 @@ number/address/identifier; the app looks the job up itself.
   - ~2-3 days to first working version; ~1 week polished
   - The PWA stays live as the desktop face (auto-loop works well there)
   - SUPERSEDED: the browser streaming-mic (Amazon Transcribe) plan — skip unless native path fails
+  - BUILT 2026-07-31 (app v0.1, `voice-assist/app`, Expo SDK 54 = App Store Expo Go): reality
+    check — expo-speech-recognition is dev-build-only (NOT loadable in Expo Go), and every iOS
+    dev-build route needs the $99 Apple account. So the app has TWO speech paths, auto-detected:
+    (a) Expo Go TODAY: native mic recording + silence auto-stop (metering VAD) → new backend
+    /stt endpoint (Amazon Transcribe streaming, en-AU — the one sanctioned exception to
+    "backend unchanged"; /chat and the PWA untouched) → normal /chat turn; hands-free loop
+    with auto-relisten, tap-to-interrupt. (b) Dev build LATER: expo-speech-recognition
+    continuous mic + true barge-in — code already wired, activates automatically.
 - Phase 3 (queued): SMS tool, Marites-notes, custom domain, wake word / lock-screen listening
   if wanted (native makes these possible)
 

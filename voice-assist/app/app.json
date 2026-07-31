@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "AI Assist",
+    "slug": "ai-assist",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f1b2d",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f1b2d"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "au.com.mrsparky.aiassist",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "AI Assist uses the microphone so you can talk to it.",
+        "NSSpeechRecognitionUsageDescription": "AI Assist transcribes what you say to hold the conversation."
+      }
+    },
+    "android": {
+      "package": "au.com.mrsparky.aiassist",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f1b2d"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "expo-audio",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "AI Assist uses the microphone so you can talk to it.",
+          "speechRecognitionPermission": "AI Assist transcribes what you say to hold the conversation."
+        }
+      ]
+    ]
+  }
+}
