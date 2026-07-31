@@ -55,7 +55,7 @@ exports.handler = async (event) => {
   try {
     var token = event && event.auth && event.auth.accessToken;
     var jobUUID = event && event.eventArgs && event.eventArgs.jobUUID;
-    console.log('AI Assist v4 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
+    console.log('AI Assist v4.5 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
 
     if (event && event.eventName === 'ai_assist_chat') {
       return chatRelay(event);
@@ -105,7 +105,7 @@ exports.handler = async (event) => {
 			var TOKEN = ` + jsEmbed(token) + `;
 			var JOB = ` + jsEmbed(jobUUID) + `;
 			var URL_ = ` + jsEmbed(BACKEND_URL) + `;
-			var history = [];
+			var chatlog = [];
 			var busy = false;
 			// Voice can't work inside SM8's embedded frame (no mic permission is
 			// ever granted to it) — the pop-out opens the same chat top-level.
@@ -138,26 +138,26 @@ exports.handler = async (event) => {
 				stopMic();
 				box.value = '';
 				add('me', text);
-				history.push({ role: 'user', text: text });
+				chatlog.push({ role: 'user', text: text });
 				var t = sysEl('thinking\\u2026');
 				setBusy(true);
 				// SM8's frame blocks direct calls to outside domains, so we route via
 				// the SDK bridge: SM8 runs our function server-side, which relays to
 				// the backend and returns its JSON as a string.
-				client.invoke('ai_assist_chat', { jobUUID: JOB, messages: history }).then(function (message) {
+				client.invoke('ai_assist_chat', { jobUUID: JOB, messages: chatlog }).then(function (message) {
 					log.removeChild(t); setBusy(false);
 					var j = null;
 					try { j = JSON.parse(message); } catch (e) {}
 					if (j && j.error === 'tokenExpired') { sys('Session expired \\u2014 close this window and open AI Assist again.'); return; }
-					if (!j || !j.ok) { sys((j && j.error) || 'Something went wrong \\u2014 try again.'); history.pop(); return; }
+					if (!j || !j.ok) { sys((j && j.error) || 'Something went wrong \\u2014 try again.'); chatlog.pop(); return; }
 					add('ai', j.reply);
-					history.push({ role: 'assistant', text: j.reply });
+					chatlog.push({ role: 'assistant', text: j.reply });
 					say(j.reply);
 					box.focus();
 				}, function (err) {
 					log.removeChild(t); setBusy(false);
 					sys('Request failed \\u2014 try again.' + (err ? ' (' + err + ')' : ''));
-					history.pop();
+					chatlog.pop();
 				});
 			}
 			function sysNote(text) {
