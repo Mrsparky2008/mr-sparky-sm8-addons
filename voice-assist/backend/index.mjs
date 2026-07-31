@@ -146,7 +146,7 @@ header small{font-weight:400;color:#7d8ba1;font-size:12px}
 #pinveil button{background:#1a73e8;color:#fff;border:0;border-radius:10px;padding:12px 26px;font-size:16px}
 </style></head><body>
 <div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN</div><input id="pin" inputmode="numeric" autocomplete="off"><button id="pingo">Unlock</button></div>
-<header>AI Assist <small id="ver">voice v0.4</small></header>
+<header>AI Assist <small id="ver">voice v0.5</small></header>
 <div id="log"><div class="msg ai">G'day. Which job are we working on? Give me a job number and we'll get into it.</div></div>
 <div id="state">tap the button and talk</div>
 <div id="dock"><button id="big" type="button">&#127908;</button><textarea id="box" placeholder="or type here"></textarea><button id="send" type="button">Send</button></div>
@@ -175,7 +175,12 @@ audioEl.src='data:audio/mpeg;base64,'+b64;
 var pr=audioEl.play();if(pr&&pr.catch)pr.catch(function(){playing=false;sys('Tap the button once to enable sound.');});}
 function stopAudio(){stopFlag=true;try{audioEl.pause();}catch(e){}playing=false;q=[];}
 function audioDrained(){return !playing&&(qNext>=q.length||!q[qNext]);}
-function maybeRelisten(){if(!busy&&handsFree&&audioDrained()){retries=0;setTimeout(function(){if(!busy&&!listening&&audioDrained())startMic();},300);}}
+// Phones only truly open the mic from a physical tap — auto-reopen "hangs".
+// So: desktop gets the full auto-loop; touch devices get a clear tap prompt.
+var TOUCH=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+function maybeRelisten(){if(busy||!handsFree||!audioDrained())return;
+if(TOUCH){setState('','your turn \\u2014 tap to talk');return;}
+retries=0;setTimeout(function(){if(!busy&&!listening&&audioDrained())startMic();},300);}
 
 /* ---- speech recognition: tap → talk → pause sends ---- */
 var SR=window.SpeechRecognition||window.webkitSpeechRecognition;var rec=null,listening=false,handsFree=true,retries=0,watchdog=null,heard=false;
@@ -187,7 +192,7 @@ rec.onresult=function(e){heard=true;var t='';for(var i=0;i<e.results.length;i++)
 rec.onstart=function(){heard=false;};
 rec.onend=function(){if(watchdog){clearTimeout(watchdog);watchdog=null;}listening=false;
 if(box.value.trim()){retries=0;setState('','');go();return;}
-if(handsFree&&!busy&&retries<4){retries++;setTimeout(function(){startMic();},250);return;}
+if(handsFree&&!busy&&!TOUCH&&retries<4){retries++;setTimeout(function(){startMic();},250);return;}
 retries=0;setState('','tap the button and talk');};
 rec.onerror=function(e){if(e&&e.error==='not-allowed'){killMic();setState('','');sys('Mic blocked - allow microphone for this site.');}};
 try{box.value='';rec.start();listening=true;setState('listening','listening\\u2026 pause to send');}catch(e){killMic();setState('','tap the button and talk');return;}
