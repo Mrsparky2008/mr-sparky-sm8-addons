@@ -50,12 +50,16 @@ exports.handler = function (event, context, callback) {
       'textarea:focus{border-color:#1a73e8}' +
       'footer button{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:0 18px;font-size:14px;cursor:pointer}' +
       'footer button:disabled{opacity:.5;cursor:default}' +
+      '#mic{background:#eef3fb;color:#1a73e8;padding:0 13px;font-size:17px}' +
+      '#mic.listening{background:#e53935;color:#fff;animation:micpulse 1.2s infinite}' +
+      '@keyframes micpulse{0%,100%{opacity:1}50%{opacity:.55}}' +
       '</style></head><body>' +
       '<header><b>AI Assist</b><button id="closeBtn" type="button">Close</button></header>' +
       '<div id="log">' +
       '<div class="msg ai">G\'day. I\'m your admin assistant for this job. I can book it in, move or cancel bookings, check the diary for free slots, add notes, set reminders, change status, or clone the job for a re-inspection. What do you need?</div>' +
       '</div>' +
-      '<footer><textarea id="box" placeholder="e.g. move this to Friday 9am, or cancel Thursday\'s booking" rows="1"></textarea>' +
+      '<footer><button id="mic" type="button" style="display:none" title="Tap to talk">&#127908;</button>' +
+      '<textarea id="box" placeholder="e.g. move this to Friday 9am, or cancel Thursday\'s booking" rows="1"></textarea>' +
       '<button id="send" type="button">Send</button></footer>' +
       '<script>' +
       'var TOKEN=' + jsEmbed(token) + ';' +
@@ -86,6 +90,19 @@ exports.handler = function (event, context, callback) {
       '}' +
       'send.onclick=go;' +
       'box.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();go();}});' +
+      // Tap-to-talk: browser speech recognition (en-AU). Button stays hidden when
+      // the webview doesn't support it — phone-keyboard dictation still works.
+      'var SR=window.SpeechRecognition||window.webkitSpeechRecognition;' +
+      'if(SR){var mic=document.getElementById("mic");mic.style.display="";' +
+        'var rec=new SR();rec.lang="en-AU";rec.interimResults=true;rec.continuous=false;var listening=false;' +
+        'rec.onresult=function(e){var t="";for(var i=0;i<e.results.length;i++){t+=e.results[i][0].transcript;}box.value=t;};' +
+        'rec.onend=function(){listening=false;mic.className="";box.focus();};' +
+        'rec.onerror=function(){listening=false;mic.className="";};' +
+        'mic.onclick=function(){' +
+          'if(listening){rec.stop();return;}' +
+          'try{box.value="";rec.start();listening=true;mic.className="listening";}catch(e){}' +
+        '};' +
+      '}' +
       'box.focus();' +
       '<\/script></body></html>';
 
