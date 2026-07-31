@@ -45,8 +45,21 @@ number/address/identifier; the app looks the job up itself.
 - This build is also the natural moment for the agreed backend split to its own Lambda/repo.
 
 ## Build phases
-- Phase 1 (~1 week): PWA + streaming voice loop + job lookup + quoting workflow end-to-end
-- Phase 2 (few days): barge-in, polish, install-to-home-screen niceties, SMS + named-note tools
+- Phase 1 (DONE 2026-07-31): PWA + voice loop + job lookup + quoting workflow end-to-end.
+  Verdict after live testing: backend/brain/voice-out excellent; browser round-based mic is
+  fundamentally unreliable on phones (works once, hangs on auto-restart). Browser ceiling hit.
+- Phase 2 (DECIDED 2026-07-31, Steven: "let's do it"): NATIVE APP via Expo (React Native).
+  - Native continuous speech recognition (SFSpeechRecognizer-grade) — mic opens once, stays
+    open, true barge-in, no tap-per-turn
+  - Backend UNCHANGED — the app is a new front-end on the same Lambda /chat SSE + Polly
+  - Test path: Expo Go on Steven's iPhone (free, no Apple account) → TestFlight later ($99/yr,
+    optional, only for a standalone home-screen install)
+  - OTA updates via Expo Updates = keep one-minute deploys, no app-store review per change
+  - ~2-3 days to first working version; ~1 week polished
+  - The PWA stays live as the desktop face (auto-loop works well there)
+  - SUPERSEDED: the browser streaming-mic (Amazon Transcribe) plan — skip unless native path fails
+- Phase 3 (queued): SMS tool, Marites-notes, custom domain, wake word / lock-screen listening
+  if wanted (native makes these possible)
 
 ## Explicitly rejected
 - Job-card-launch as the primary entry (kept only as a secondary door via existing add-on)
