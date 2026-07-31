@@ -262,13 +262,13 @@ header small{font-weight:400;color:#7d8ba1;font-size:12px}
 #pinveil .err{color:#e57373;font-size:13px;min-height:16px}
 </style></head><body>
 <div id="pinveil"><div style="font-size:20px;font-weight:700">AI Assist</div><div style="color:#7d8ba1">Enter PIN</div><input id="pin" inputmode="numeric" autocomplete="off"><div class="err" id="pinerr"></div><button id="pingo">Unlock</button></div>
-<header><span>AI Assist <small id="ver">voice v1.0 &#183; vapi</small></span><button id="endbtn" type="button">End session</button></header>
+<header><span>AI Assist <small id="ver">voice v1.1 &#183; vapi</small></span><button id="endbtn" type="button">End session</button></header>
 <div id="log"><div class="msg ai">G'day. Tap the button and we'll get into it.</div></div>
 <div id="state">tap the button to start talking</div>
 <div id="dock"><button id="big" type="button">&#127908;</button><textarea id="box" placeholder="or type here"></textarea><button id="send" type="button">Send</button></div>
-<script type="module">
-import Vapi from "https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm";
-
+<script>
+/* Core UI + PIN gate: plain script, zero dependencies — must never be taken
+   down by the voice engine failing to load. Voice wires in via import() below. */
 var PUBKEY="13a3a262-9ccf-4fb5-a69e-0c943718dce6";
 var ASSISTANT="8ff8436f-b6b3-4c3b-9226-0a70d22f2c63";
 var PINKEY="aiassist_pin";
@@ -278,27 +278,24 @@ var log=document.getElementById("log"),box=document.getElementById("box"),send=d
 var big=document.getElementById("big"),state=document.getElementById("state"),endbtn=document.getElementById("endbtn");
 var veil=document.getElementById("pinveil"),pinIn=document.getElementById("pin"),pinErr=document.getElementById("pinerr");
 
-var chat=[];            /* shared transcript: voice finals + typed turns */
-var inCall=false,connecting=false,talking=false,typedBusy=false;
-var lastActivity=Date.now();
-var wakeLock=null;
+var chat=[];
+var A={inCall:false,connecting:false,talking:false,start:null,stop:null};
+var typedBusy=false,lastActivity=Date.now(),wakeLock=null;
 
 function add(c,t){var d=document.createElement("div");d.className="msg "+c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
 function sys(t){var d=document.createElement("div");d.className="sys";d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
 function setUI(){
-  big.className=connecting?"connecting":(inCall?(talking?"talking":"incall"):"");
-  big.innerHTML=inCall?"&#128308;":"&#127908;";
-  if(connecting)state.textContent="connecting…";
-  else if(inCall)state.textContent=talking?"talking — speak over it to interrupt":"on the line — just talk";
+  big.className=A.connecting?"connecting":(A.inCall?(A.talking?"talking":"incall"):"");
+  big.innerHTML=A.inCall||A.connecting?"&#9209;&#65039;":"&#127908;";
+  if(A.connecting)state.textContent="connecting…";
+  else if(A.inCall)state.textContent=A.talking?"talking — speak over it to interrupt":"on the line — just talk";
   else state.textContent="tap the button to start talking";
-  if(inCall)big.innerHTML="&#9209;&#65039;";
 }
 function bump(){lastActivity=Date.now();}
 
-/* ---- PIN gate: local page lock; typed /chat path is server-validated ---- */
 function pin(){return localStorage.getItem(PINKEY)||"";}
 function locked(){return veil.style.display!=="none";}
-function lock(){try{if(inCall)vapi.stop();}catch(e){}veil.style.display="flex";pinIn.value="";pinErr.textContent="";}
+function lock(){if(A.stop)try{A.stop();}catch(e){}veil.style.display="flex";pinIn.value="";pinErr.textContent="";}
 if(pin())veil.style.display="none";
 document.getElementById("pingo").onclick=function(){
   var v=pinIn.value.trim();if(!v)return;
@@ -307,8 +304,8 @@ document.getElementById("pingo").onclick=function(){
   if(!stored)localStorage.setItem(PINKEY,v);
   veil.style.display="none";bump();
 };
+pinIn.addEventListener("keydown",function(e){if(e.key==="Enter")document.getElementById("pingo").onclick();});
 
-/* ---- live caption bubbles for the voice call ---- */
 var liveUser=null,liveAi=null;
 function setLive(role,text){
   if(role==="user"){if(!liveUser)liveUser=add("me live","");liveUser.textContent=text;}
@@ -323,44 +320,22 @@ function commitLive(role,text){
   chat.push({role:role==="user"?"user":"assistant",text:text});
   bump();
 }
+function clearLive(){liveUser=null;liveAi=null;}
 
-/* ---- Vapi voice call ---- */
-var vapi=new Vapi(PUBKEY);
-vapi.on("call-start",function(){connecting=false;inCall=true;talking=false;setUI();bump();
-  try{if(navigator.wakeLock)navigator.wakeLock.request("screen").then(function(w){wakeLock=w;}).catch(function(){});}catch(e){}});
-vapi.on("call-end",function(){inCall=false;connecting=false;talking=false;liveUser=null;liveAi=null;setUI();bump();
-  try{if(wakeLock){wakeLock.release();wakeLock=null;}}catch(e){}});
-vapi.on("speech-start",function(){talking=true;setUI();});
-vapi.on("speech-end",function(){talking=false;setUI();});
-vapi.on("message",function(m){
-  if(!m||m.type!=="transcript")return;
-  if(m.transcriptType==="final")commitLive(m.role,m.transcript);
-  else setLive(m.role,m.transcript);
-});
-vapi.on("error",function(e){
-  connecting=false;inCall=false;setUI();
-  var msg=(e&&(e.errorMsg||e.message||e.error&&e.error.message))||"call failed";
-  sys("Voice error: "+msg);
-});
+big.onclick=function(){
+  if(locked())return;
+  if(A.inCall||A.connecting){if(A.stop)A.stop();return;}
+  if(!A.start){sys("Voice engine still loading — give it a second and tap again.");return;}
+  A.start();
+};
+endbtn.onclick=function(){if(A.stop)try{A.stop();}catch(e){}lock();setTimeout(function(){try{window.close();}catch(e){}},300);};
 
-function startCall(){
-  if(locked()||inCall||connecting)return;
-  connecting=true;setUI();bump();
-  try{vapi.start(ASSISTANT);}catch(e){connecting=false;setUI();sys("Couldn't start the call — "+(e.message||e));}
-}
-function endCall(){try{vapi.stop();}catch(e){}}
+document.addEventListener("visibilitychange",function(){if(document.hidden&&(A.inCall||A.connecting)&&A.stop)A.stop();});
+setInterval(function(){if(!A.inCall&&!locked()&&Date.now()-lastActivity>IDLE_LOCK_MS)lock();},30000);
 
-big.onclick=function(){if(inCall||connecting){endCall();return;}startCall();};
-endbtn.onclick=function(){endCall();lock();setTimeout(function(){try{window.close();}catch(e){}},300);};
-
-/* safety: backgrounding the page hangs up; long idle re-locks */
-document.addEventListener("visibilitychange",function(){if(document.hidden&&(inCall||connecting))endCall();});
-setInterval(function(){if(!inCall&&!locked()&&Date.now()-lastActivity>IDLE_LOCK_MS)lock();},30000);
-
-/* ---- typed path (desk use): same brain via /chat, text-only ---- */
 function goTyped(){
   var text=box.value.trim();if(!text||typedBusy||locked())return;
-  if(inCall){sys("End the call to type, or just say it.");return;}
+  if(A.inCall){sys("End the call to type, or just say it.");return;}
   box.value="";add("me",text);chat.push({role:"user",text:text});typedBusy=true;bump();
   var aiDiv=null,got="";
   fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json","x-app-pin":pin()},body:JSON.stringify({messages:chat,audio:false})})
@@ -384,5 +359,35 @@ function goTyped(){
 send.onclick=goTyped;
 box.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();goTyped();}});
 setUI();
+
+/* ---- voice engine: loaded separately so a failure never kills the page ---- */
+import("https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm").then(function(mod){
+  var Vapi=mod.default||mod.Vapi||mod;
+  var vapi=new Vapi(PUBKEY);
+  vapi.on("call-start",function(){A.connecting=false;A.inCall=true;A.talking=false;setUI();bump();
+    try{if(navigator.wakeLock)navigator.wakeLock.request("screen").then(function(w){wakeLock=w;}).catch(function(){});}catch(e){}});
+  vapi.on("call-end",function(){A.inCall=false;A.connecting=false;A.talking=false;clearLive();setUI();bump();
+    try{if(wakeLock){wakeLock.release();wakeLock=null;}}catch(e){}});
+  vapi.on("speech-start",function(){A.talking=true;setUI();});
+  vapi.on("speech-end",function(){A.talking=false;setUI();});
+  vapi.on("message",function(m){
+    if(!m||m.type!=="transcript")return;
+    if(m.transcriptType==="final")commitLive(m.role,m.transcript);
+    else setLive(m.role,m.transcript);
+  });
+  vapi.on("error",function(e){
+    A.connecting=false;A.inCall=false;setUI();
+    var msg=(e&&(e.errorMsg||e.message||(e.error&&e.error.message)))||"call failed";
+    sys("Voice error: "+msg);
+  });
+  A.start=function(){
+    if(locked()||A.inCall||A.connecting)return;
+    A.connecting=true;setUI();bump();
+    try{vapi.start(ASSISTANT);}catch(e){A.connecting=false;setUI();sys("Couldn't start the call — "+(e.message||e));}
+  };
+  A.stop=function(){try{vapi.stop();}catch(e){}};
+}).catch(function(e){
+  sys("Voice engine failed to load — "+((e&&e.message)||e)+". Check the connection and reload the page.");
+});
 </script></body></html>
 `;
