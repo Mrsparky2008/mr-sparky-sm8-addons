@@ -37,7 +37,8 @@
           "microphonePermission": "AI Assist uses the microphone so you can talk to it.",
           "speechRecognitionPermission": "AI Assist transcribes what you say to hold the conversation."
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }
