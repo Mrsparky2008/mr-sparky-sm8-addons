@@ -71,6 +71,15 @@ One brain, many faces. Nothing here replaces anything already built.
 - **This is also the seed of the broader company app** (job lists, timesheets, whatever) —
   Charlie is feature #1, not the whole app.
 
+## Monetisation (Steven, 2026-08-01)
+- **AI Assist = chargeable per-tech feature, ~$99/mo** ("enhance productivity / performance").
+  App's dashboard/portal side = free for all crew; Charlie = paid seat.
+- Mechanics: entitlement FLAG on the portal user account (admin toggles in a settings tab);
+  backend enforces before Charlie responds; no access → button pitches the upgrade.
+- **Billing OUTSIDE the app** (Apple takes 15-30% of in-app purchases): add it as a line on
+  the EXISTING subcontractor invoicing/arrangement — no Stripe, no IAP, Apple-compliant
+  (standard B2B external-billing pattern). Margin: ~$99 vs a few $ of tokens per seat.
+
 ## Cost summary (locked assumptions)
 | Surface | Per-use cost | Flat cost |
 |---|---|---|
