@@ -66,6 +66,15 @@ One brain, many faces. Nothing here replaces anything already built.
 | Staff app | ~zero (Claude tokens only) | 11labs $5-22/mo + Apple $99/yr |
 | Add-on + web app | Claude tokens only | — |
 
+## App build — live coordination facts (2026-08-01)
+- **EAS/Expo project created by Steven**: id `d31c0122-3886-4d57-8388-ec1bfd817f9f`
+  (link the app with: `npx eas-cli@latest init --id d31c0122-3886-4d57-8388-ec1bfd817f9f`)
+- **Apple Developer enrolment: PENDING** (individual; submitted 2026-08-01, expect ≤48h).
+  When active, Steven supplies: Team ID, enrolment Apple ID, App Store Connect API key
+  (.p8 saved to voice-assist/, Key ID + Issuer ID), for EAS-signed TestFlight builds.
+- **Session ownership**: the Expo-app session owns voice-assist/app/; other sessions keep to
+  backend/brain/Vapi. Coordinate through this file + git.
+
 ## Execution order (no backtracking)
 1. NOW: Steven uses the phone line daily; audition voices in Vapi dashboard; get ElevenLabs
    sub + BYO keys into Vapi (cost drop, also pre-req for Henri's voice).
