@@ -94,9 +94,11 @@ One brain, many faces. Nothing here replaces anything already built.
 ## App build — live coordination facts (2026-08-01)
 - **EAS/Expo project created by Steven**: id `d31c0122-3886-4d57-8388-ec1bfd817f9f`
   (link the app with: `npx eas-cli@latest init --id d31c0122-3886-4d57-8388-ec1bfd817f9f`)
-- **Apple Developer enrolment: PENDING** (individual; submitted 2026-08-01, expect ≤48h).
-  When active, Steven supplies: Team ID, enrolment Apple ID, App Store Connect API key
-  (.p8 saved to voice-assist/, Key ID + Issuer ID), for EAS-signed TestFlight builds.
+- **Apple Developer enrolment: ✅ ACTIVE 2026-08-02** — Individual, **Team ID VR62HF74UQ**,
+  renewal 2027-08-02, A$149/yr (AU pricing, not US$99). STILL NEEDED from Steven:
+  App Store Connect API key (appstoreconnect.apple.com → Users and Access → Integrations →
+  App Store Connect API → "+", role Admin → save the .p8 file into voice-assist/ and note
+  the Key ID + Issuer ID here) — then EAS can sign TestFlight builds unattended.
 - **Session ownership**: the Expo-app session owns voice-assist/app/; other sessions keep to
   backend/brain/Vapi. Coordinate through this file + git.
 
