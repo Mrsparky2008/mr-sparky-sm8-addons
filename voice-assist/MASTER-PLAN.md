@@ -56,8 +56,18 @@ One brain, many faces. Nothing here replaces anything already built.
   portal role drives permissions: bookings self-assign, signed notes, contractors scoped);
   screen feedback (live captions + drafted quote lines on screen — Steven's standing request).
 - **Skin locked 2026-08-01**: https://claude.ai/code/artifact/0dc1b247-0554-4100-bb63-7ca3b28539b1
-  (4 screens; AU-wiring-code state colours: active brown = mic live, neutral blue = idle,
-  earth green = locked in; dark cab UI, glove-sized targets). Build to match screen-for-screen.
+  (AU-wiring-code state colours: active brown = mic live, neutral blue = idle, earth green =
+  locked in; dark cab UI, glove-sized targets). Build to match screen-for-screen.
+- **Steven's final picks (2026-08-01)**: LOOK A (Switchboard dark) + BOTH bonus screens
+  (Day diary + Job card) in v1. Real Mr Sparky logo embedded (SVG from mrsparky.com.au;
+  true brand = navy #19488F + yellow #FEDA00 — consider tuning accents to true navy later).
+- **GRAND PLAN (Steven, 2026-08-01)**: the app grows into the PRIMARY ServiceM8 interface
+  for the whole crew — staff eventually interact with SM8 "through the app only". And the
+  SUBBIE PORTAL (mr-sparky-portal, live on AWS — read ~/Documents/mr-sparky-app CLAUDE.md
+  before touching) becomes an app module: since app sign-in ALREADY = portal credentials,
+  a contractor logging in simply sees portal features (job pool, claims, expenses) + scoped
+  Charlie; staff see diary/jobs/quoting. One app, role-shaped. Sequence unchanged: Charlie
+  v1 first, portal module after.
 - **This is also the seed of the broader company app** (job lists, timesheets, whatever) —
   Charlie is feature #1, not the whole app.
 
