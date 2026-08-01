@@ -8,10 +8,13 @@ One brain, many faces. Nothing here replaces anything already built.
   (find_job, quote workshop w/ add-only billing + dupe guard, bookings, notes, status, clone).
   Repo: github.com/Mrsparky2008/mr-sparky-sm8-addons → voice-assist/backend/.
   ALL surfaces talk to this one brain. Improvements land everywhere at once.
-- **Voice identity**: "Charlie" (ElevenLabs) for STAFF surfaces. Customer agent gets its own
-  DISTINCT voice (pick female, so staff/customer agents are never confused).
-- **ElevenLabs subscription (Steven's own, ~US$5-22/mo)**: ONE sub feeds everything —
-  BYO key into Vapi for calls, direct API for the app.
+- **Voice policy (LOCKED, Steven 2026-08-01)**: staff surfaces (app + Steven's line) run on
+  POLLY (near-free; "techs and myself can manage with Polly") — ElevenLabs is reserved for
+  CUSTOMER-FACING Voice Henri ("happy to pay for a good voice for paying customers"), sub
+  starts only when Henri goes live. Upgrade staff to 11labs later "when we're making money
+  and have a company image to maintain" — it's a one-setting swap, no rebuild.
+- App stack final: Apple ears (free) + our orchestration + brain + Polly voice. No Vapi,
+  no ElevenLabs, no per-minute cost. App runs on: Apple $99/yr + Claude tokens.
 
 ## Scenario 1 — Steven, driving (LIVE TODAY)
 - **Stack**: Phone call → 0482 088 317 (voice side) → Twilio → Vapi (timing/barge-in/ears)
