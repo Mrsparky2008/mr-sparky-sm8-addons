@@ -76,9 +76,12 @@ One brain, many faces. Nothing here replaces anything already built.
   App's dashboard/portal side = free for all crew; Charlie = paid seat.
 - Mechanics: entitlement FLAG on the portal user account (admin toggles in a settings tab);
   backend enforces before Charlie responds; no access → button pitches the upgrade.
-- **Billing OUTSIDE the app** (Apple takes 15-30% of in-app purchases): add it as a line on
-  the EXISTING subcontractor invoicing/arrangement — no Stripe, no IAP, Apple-compliant
-  (standard B2B external-billing pattern). Margin: ~$99 vs a few $ of tokens per seat.
+- **Billing OUTSIDE the app** (confirmed Steven 2026-08-01 — "we don't have to do it via
+  Apple"): the $99 is a DEDUCTION FROM THE SUBBIE'S EXISTING CLAIMS (the claims/job-share
+  process already runs through Steven). No Stripe, no IAP, Apple sees nothing.
+- **Quiet-month rule**: if a tech's claims that month don't cover the $99, the shortfall
+  carries as a balance against future claims (or Steven pauses their seat) — decide per
+  case; the entitlement flag makes pausing one toggle. Margin: ~$99 vs a few $ tokens/seat.
 
 ## Cost summary (locked assumptions)
 | Surface | Per-use cost | Flat cost |
