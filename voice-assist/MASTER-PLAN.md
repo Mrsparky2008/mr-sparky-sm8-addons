@@ -48,9 +48,13 @@ One brain, many faces. Nothing here replaces anything already built.
   **Apple on-device speech (free ears) + brain via /chat SSE + ElevenLabs direct (Charlie)**.
   NO Vapi, NO per-minute cost. Polly = fallback voice if 11labs sub lapses.
 - **Needs**: Apple Developer US$99/yr; TestFlight distribution (covers 100 users);
-  per-person logins (bookings self-assign, signed notes, scoped powers — contractors can
-  quote but not cancel, etc.); screen feedback (live captions + drafted quote lines on
-  screen — Steven's standing request).
+  **auth = EXISTING PORTAL CREDENTIALS** (Steven's call 2026-08-01: sign in once with the
+  mr-sparky-portal account, persistent session + Face ID unlock — no separate users/PINs;
+  portal role drives permissions: bookings self-assign, signed notes, contractors scoped);
+  screen feedback (live captions + drafted quote lines on screen — Steven's standing request).
+- **Skin locked 2026-08-01**: https://claude.ai/code/artifact/0dc1b247-0554-4100-bb63-7ca3b28539b1
+  (4 screens; AU-wiring-code state colours: active brown = mic live, neutral blue = idle,
+  earth green = locked in; dark cab UI, glove-sized targets). Build to match screen-for-screen.
 - **This is also the seed of the broader company app** (job lists, timesheets, whatever) —
   Charlie is feature #1, not the whole app.
 
