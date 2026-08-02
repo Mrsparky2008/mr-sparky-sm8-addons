@@ -79,6 +79,8 @@ export default function App() {
   // Echo guard: without AEC the mic hears the app's own voice. Everything the
   // recogniser reports while we're speaking (plus a short tail) is discarded.
   const deafUntilRef = useRef(0);
+  const recActiveRef = useRef(false); // is the native recognition session live
+
   const nativeWantRef = useRef(false);
   const scrollRef = useRef(null);
   const pulse = useRef(new Animated.Value(1)).current;
@@ -181,13 +183,14 @@ export default function App() {
   async function startListening() {
     if (busyRef.current || phaseRef.current === "listening" || !pinRef.current) return;
     if (nativeSpeechAvailable) {
-      // Fresh round: flush anything the recogniser buffered while we were
-      // speaking (echo), then restart the session clean. The "end" listener
-      // re-opens recognition automatically.
+      // Fresh round: clear echo buffers WITHOUT restarting the session —
+      // stop+start races itself and kills recognition (v0.3 lesson).
       lastResultRef.current = null;
       setLiveText("");
-      try { SpeechModule.stop(); } catch {}
-      return nativeStart();
+      deafUntilRef.current = Math.max(deafUntilRef.current, Date.now() + 250);
+      if (!recActiveRef.current) return nativeStart();
+      setPhase("listening");
+      return;
     }
     const perm = await requestRecordingPermissionsAsync();
     if (!perm.granted) { sysMsg("Microphone permission needed — allow it in iPhone Settings."); return; }
@@ -280,13 +283,15 @@ export default function App() {
         iosCategory: {
           category: "playAndRecord",
           categoryOptions: ["defaultToSpeaker", "allowBluetooth"],
-          // voiceChat engages iOS's voice-processing audio unit — hardware
-          // echo cancellation, the long-term fix that lets barge-in return.
-          mode: "voiceChat",
+          // NOT voiceChat: it routes output through call-processing (ducked,
+          // pumping volume, HFP Bluetooth). The deaf-guard alone handles echo.
+          mode: "default",
         },
       });
+      recActiveRef.current = true;
       setPhase("listening");
     } catch (e) {
+      recActiveRef.current = false;
       sysMsg("Speech recognition failed to start — " + (e.message || e));
       setPhase("idle");
     }
@@ -325,8 +330,10 @@ export default function App() {
         if (ev?.error === "not-allowed") sysMsg("Mic blocked — allow microphone access in Settings.");
       }),
       SpeechModule.addListener("end", () => {
-        // Recognition service stopped (timeout etc) — re-open if still wanted.
-        if (nativeWantRef.current && !busyRef.current) setTimeout(nativeStart, 300);
+        // Recognition service stopped (timeout etc) — re-open ONLY if hands-free
+        // still wants it; otherwise stay properly off (no restart storms).
+        recActiveRef.current = false;
+        if (nativeWantRef.current && handsFreeRef.current && !busyRef.current) setTimeout(nativeStart, 300);
       }),
     ];
     // iOS can be slow to flag isFinal in continuous mode — a stable interim
@@ -376,7 +383,19 @@ export default function App() {
     const v = !handsFreeRef.current;
     handsFreeRef.current = v;
     setHandsFree(v);
-    if (!v && nativeSpeechAvailable) { nativeWantRef.current = false; try { SpeechModule.stop(); } catch {} }
+    if (!v) {
+      // OFF must mean OFF: recognition stopped, buffers cleared, UI idle.
+      if (nativeSpeechAvailable) {
+        nativeWantRef.current = false;
+        recActiveRef.current = false;
+        try { SpeechModule.stop(); } catch {}
+      }
+      lastResultRef.current = null;
+      setLiveText("");
+      if (phaseRef.current === "listening") setPhase("idle");
+    } else if (phaseRef.current === "idle" && !busyRef.current) {
+      startListening();
+    }
   }
 
   async function unlock() {
