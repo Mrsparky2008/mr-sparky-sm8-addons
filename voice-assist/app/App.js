@@ -132,6 +132,16 @@ export default function App() {
   async function send(text) {
     if (!text || busyRef.current) return;
     busyRef.current = true;
+    // Kill recognition for the whole speaking turn: the session transcript is
+    // CUMULATIVE, so anything overheard (echo) gets glued onto the user's next
+    // utterance. Stopping now is race-safe — busy=true blocks the auto-restart,
+    // and startListening opens a fresh session afterwards.
+    if (nativeSpeechAvailable) {
+      recActiveRef.current = false;
+      try { SpeechModule.stop(); } catch {}
+      lastResultRef.current = null;
+      setLiveText("");
+    }
     quietRoundsRef.current = 0;
     lastSentRef.current = { text, at: Date.now() };
     addMsg("me", text);
