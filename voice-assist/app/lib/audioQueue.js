@@ -14,11 +14,21 @@ let fileN = 0;
 let onDrain = null;
 let prePlayer = null; // next chunk, created early so it starts gap-free
 let preSeq = -1;
+let expectMore = false; // backend still streaming chunks for this turn
 
 export function setOnDrain(cb) { onDrain = cb; }
 
-// True while a chunk is playing or queued — "the assistant is still talking".
-export function isDraining() { return playing || !!q[next] || !!prePlayer; }
+// The reply is only over when the stream has closed AND nothing is left to play.
+// Without expectMore, a network gap mid-reply empties the queue for a moment,
+// the app calls the turn finished, reopens the mic — and the next chunk plays
+// straight into it. That was the echo.
+export function setExpectMore(v) {
+  expectMore = !!v;
+  if (!expectMore && !playing && !q[next] && !prePlayer && onDrain) onDrain();
+}
+
+// True while the assistant is still talking (or about to).
+export function isDraining() { return playing || expectMore || !!q[next] || !!prePlayer; }
 
 // iOS routes output to the quiet earpiece while recording is allowed, so we
 // flip the audio mode: record mode while the mic is open, playback mode after.
@@ -66,7 +76,7 @@ function finishOne(myGen) {
   player = null;
   playing = false;
   pump();
-  if (!playing && !q[next] && !prePlayer && onDrain) onDrain();
+  if (!playing && !q[next] && !prePlayer && !expectMore && onDrain) onDrain();
 }
 
 function pump() {
@@ -99,6 +109,7 @@ function pump() {
 export function stopAudio() {
   gen++;
   stopped = true;
+  expectMore = false;
   try { if (player) player.pause(); } catch {}
   try { if (player) player.release(); } catch {}
   try { if (prePlayer) prePlayer.release(); } catch {}

@@ -80,6 +80,7 @@ export default function App() {
   // recogniser reports while we're speaking (plus a short tail) is discarded.
   const deafUntilRef = useRef(0);
   const recActiveRef = useRef(false); // is the native recognition session live
+  const lastReplyRef = useRef("");    // last thing the assistant said (echo filter)
 
   const nativeWantRef = useRef(false);
   const scrollRef = useRef(null);
@@ -149,6 +150,7 @@ export default function App() {
     setLiveText("");
     setPhase("thinking");
     AQ.resetQueue();
+    AQ.setExpectMore(true); // reply audio is still streaming in
     if (!nativeSpeechAvailable) await AQ.playbackMode();
     let got = "";
     try {
@@ -163,10 +165,15 @@ export default function App() {
         onAudio: (seq, b64) => AQ.enqueue(seq, b64),
       });
       const final = (reply || got).trim();
-      if (final) chatRef.current = [...chatRef.current, { role: "assistant", text: final }];
+      if (final) {
+        chatRef.current = [...chatRef.current, { role: "assistant", text: final }];
+        lastReplyRef.current = final; // echo filter reference
+      }
       setStreamAi("");
       if (final) addMsg("ai", final);
+      AQ.setExpectMore(false); // stream closed; queue may still have chunks
     } catch (e) {
+      AQ.setExpectMore(false);
       setStreamAi("");
       busyRef.current = false;
       chatRef.current = chatRef.current.slice(0, -1);
@@ -307,12 +314,26 @@ export default function App() {
     }
   }
 
+  // Safety net: even with the mic closed during replies, a stray tail can be
+  // transcribed. If most of what we "heard" is words the assistant just said,
+  // it's echo — drop it and keep listening.
+  function isEcho(t) {
+    const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+    const said = norm(lastReplyRef.current);
+    const heard = norm(t);
+    if (said.length < 3 || heard.length < 3) return false;
+    const bag = new Set(said);
+    const overlap = heard.filter((w) => bag.has(w)).length / heard.length;
+    return overlap >= 0.7;
+  }
+
   function nativeConsume(text) {
     const t = (text || "").trim();
     if (!t || busyRef.current) return;
     const last = lastSentRef.current;
     if (t === last.text && Date.now() - last.at < 4000) return; // isFinal + timer double-fire
     lastResultRef.current = null;
+    if (isEcho(t)) { setLiveText(""); return; }
     send(t);
   }
 
