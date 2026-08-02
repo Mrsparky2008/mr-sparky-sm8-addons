@@ -80,7 +80,9 @@ export default function App() {
   // recogniser reports while we're speaking (plus a short tail) is discarded.
   const deafUntilRef = useRef(0);
   const recActiveRef = useRef(false); // is the native recognition session live
-  const lastReplyRef = useRef("");    // last thing the assistant said (echo filter)
+  const lastReplyRef = useRef("");    // reply being spoken right now (echo filter)
+  const prevReplyRef = useRef("");    // the one before it — tails can still be in the air
+  const speakStartRef = useRef(0);    // when this reply started playing
   const listenThroughRef = useRef(false); // recognising WHILE the assistant talks (barge-in)
   const echoPrefixRef = useRef("");   // transcript so far that was pure echo — stripped off
   const turnIdRef = useRef(0);        // stale replies from an interrupted turn are dropped
@@ -149,6 +151,7 @@ export default function App() {
       setLiveText("");
     }
     const myTurn = ++turnIdRef.current;
+    prevReplyRef.current = lastReplyRef.current; // its tail may still be echoing
     quietRoundsRef.current = 0;
     lastSentRef.current = { text, at: Date.now() };
     addMsg("me", text);
@@ -166,19 +169,25 @@ export default function App() {
         onDelta: (x) => {
           got += x;
           setStreamAi(got);
+          // Echo reference must track the reply being spoken RIGHT NOW — using
+          // only the previous reply made the assistant interrupt itself.
+          lastReplyRef.current = got;
           if (phaseRef.current === "thinking") setPhase("speaking");
         },
         onAudio: (seq, b64) => {
           AQ.enqueue(seq, b64);
           // First chunk of the reply: reopen the mic so the user can cut in.
-          if (!listenThroughRef.current && myTurn === turnIdRef.current) startListenThrough();
+          if (!listenThroughRef.current && myTurn === turnIdRef.current) {
+            speakStartRef.current = Date.now();
+            startListenThrough();
+          }
         },
       });
       if (myTurn !== turnIdRef.current) return; // user barged in — this turn is stale
       const final = (reply || got).trim();
       if (final) {
         chatRef.current = [...chatRef.current, { role: "assistant", text: final }];
-        lastReplyRef.current = final; // echo filter reference
+        lastReplyRef.current = final; // echo filter reference (full reply)
       }
       setStreamAi("");
       if (final) addMsg("ai", final);
@@ -331,14 +340,19 @@ export default function App() {
   // Safety net: even with the mic closed during replies, a stray tail can be
   // transcribed. If most of what we "heard" is words the assistant just said,
   // it's echo — drop it and keep listening.
+  const normWords = (s) => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+
+  // Words heard that the assistant did NOT just say — the real signal that a
+  // human is talking. (Transcription mangles echo, so exact matching is out.)
+  function foreignWords(t) {
+    const bag = new Set([...normWords(lastReplyRef.current), ...normWords(prevReplyRef.current)]);
+    return normWords(t).filter((w) => !bag.has(w));
+  }
+
   function isEcho(t) {
-    const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
-    const said = norm(lastReplyRef.current);
-    const heard = norm(t);
-    if (said.length < 3 || heard.length < 3) return false;
-    const bag = new Set(said);
-    const overlap = heard.filter((w) => bag.has(w)).length / heard.length;
-    return overlap >= 0.7;
+    const heard = normWords(t);
+    if (heard.length < 2) return false;
+    return foreignWords(t).length / heard.length <= 0.4;
   }
 
   // Listen WHILE the assistant speaks so the user can cut in. The session
@@ -374,9 +388,11 @@ export default function App() {
           const spoken = t.startsWith(echoPrefixRef.current)
             ? t.slice(echoPrefixRef.current.length).trim()
             : t.trim();
-          // Two real words = the user is talking over the assistant. Cut it off
-          // and carry their words straight into this listening round.
-          if (spoken.split(/\s+/).filter(Boolean).length >= 2) {
+          // A real interruption needs THREE words the assistant didn't just say,
+          // and not in the first second of the reply (that window is almost
+          // always echo of its own opening). Anything less, keep talking.
+          const foreign = foreignWords(spoken).length;
+          if (foreign >= 3 && Date.now() - speakStartRef.current > 1000) {
             AQ.stopAudio();
             AQ.setExpectMore(false);
             listenThroughRef.current = false;
