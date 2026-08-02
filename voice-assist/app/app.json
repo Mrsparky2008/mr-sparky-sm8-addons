@@ -1,8 +1,14 @@
 {
   "expo": {
     "name": "AI Assist",
-    "slug": "ai-assist",
+    "slug": "mr-sparky-ai-assistant",
+    "owner": "mr_sparky",
     "version": "0.1.0",
+    "extra": {
+      "eas": {
+        "projectId": "d31c0122-3886-4d57-8388-ec1bfd817f9f"
+      }
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,7 +24,8 @@
       "bundleIdentifier": "au.com.mrsparky.aiassist",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "AI Assist uses the microphone so you can talk to it.",
-        "NSSpeechRecognitionUsageDescription": "AI Assist transcribes what you say to hold the conversation."
+        "NSSpeechRecognitionUsageDescription": "AI Assist transcribes what you say to hold the conversation.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
