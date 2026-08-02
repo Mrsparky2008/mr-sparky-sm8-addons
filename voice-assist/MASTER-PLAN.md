@@ -110,3 +110,12 @@ One brain, many faces. Nothing here replaces anything already built.
 2. NEXT (Steven's go): Voice Henri — switchboard + customer brain + own voice.
 3. THEN (second user demand): Apple account + Mr Sparky app (staff Charlie, logins, screen).
 4. ONGOING: brain polish items land for every surface simultaneously.
+
+## Post-TestFlight adjustments (Steven, 2026-08-03 — app is live on his iPhone)
+- If the app proves out on the road (give it ~a week incl. Bluetooth-in-ute testing):
+  CLOSE the Vapi phone line for STEVEN'S OWN use — one API call to unwind, $0 parked.
+  The number's voice side stays reserved for its real long-term job: customer-facing
+  Voice Henri. Steven's daily driver becomes the app.
+- DEEP LINK (queued): app registers a URL scheme (e.g. mrsparky-aiassist://job/<number>);
+  the SM8 job-card add-on button launches the installed app anchored to that job —
+  "add-on becomes the doorway, app becomes the room."
