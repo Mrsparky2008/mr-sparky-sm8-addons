@@ -25,6 +25,9 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "AI Assist uses the microphone so you can talk to it.",
         "NSSpeechRecognitionUsageDescription": "AI Assist transcribes what you say to hold the conversation.",
+        "NSPhotoLibraryUsageDescription": "AI Assist can attach photos from your library to job cards.",
+        "NSPhotoLibraryAddUsageDescription": "AI Assist can save job photos to your library.",
+        "NSCameraUsageDescription": "AI Assist can take photos to attach to job cards.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
