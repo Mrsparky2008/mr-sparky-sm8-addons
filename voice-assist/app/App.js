@@ -81,6 +81,9 @@ export default function App() {
   const deafUntilRef = useRef(0);
   const recActiveRef = useRef(false); // is the native recognition session live
   const lastReplyRef = useRef("");    // last thing the assistant said (echo filter)
+  const listenThroughRef = useRef(false); // recognising WHILE the assistant talks (barge-in)
+  const echoPrefixRef = useRef("");   // transcript so far that was pure echo — stripped off
+  const turnIdRef = useRef(0);        // stale replies from an interrupted turn are dropped
 
   const nativeWantRef = useRef(false);
   const scrollRef = useRef(null);
@@ -139,10 +142,13 @@ export default function App() {
     // and startListening opens a fresh session afterwards.
     if (nativeSpeechAvailable) {
       recActiveRef.current = false;
+      listenThroughRef.current = false;
+      echoPrefixRef.current = "";
       try { SpeechModule.stop(); } catch {}
       lastResultRef.current = null;
       setLiveText("");
     }
+    const myTurn = ++turnIdRef.current;
     quietRoundsRef.current = 0;
     lastSentRef.current = { text, at: Date.now() };
     addMsg("me", text);
@@ -162,8 +168,13 @@ export default function App() {
           setStreamAi(got);
           if (phaseRef.current === "thinking") setPhase("speaking");
         },
-        onAudio: (seq, b64) => AQ.enqueue(seq, b64),
+        onAudio: (seq, b64) => {
+          AQ.enqueue(seq, b64);
+          // First chunk of the reply: reopen the mic so the user can cut in.
+          if (!listenThroughRef.current && myTurn === turnIdRef.current) startListenThrough();
+        },
       });
+      if (myTurn !== turnIdRef.current) return; // user barged in — this turn is stale
       const final = (reply || got).trim();
       if (final) {
         chatRef.current = [...chatRef.current, { role: "assistant", text: final }];
@@ -173,6 +184,7 @@ export default function App() {
       if (final) addMsg("ai", final);
       AQ.setExpectMore(false); // stream closed; queue may still have chunks
     } catch (e) {
+      if (myTurn !== turnIdRef.current) return; // stale turn, user already moved on
       AQ.setExpectMore(false);
       setStreamAi("");
       busyRef.current = false;
@@ -204,8 +216,9 @@ export default function App() {
       // stop+start races itself and kills recognition (v0.3 lesson).
       lastResultRef.current = null;
       setLiveText("");
+      listenThroughRef.current = false; // the reply is over; this is the user's turn
       deafUntilRef.current = Math.max(deafUntilRef.current, Date.now() + 250);
-      if (!recActiveRef.current) return nativeStart();
+      if (!recActiveRef.current) { echoPrefixRef.current = ""; return nativeStart(); }
       setPhase("listening");
       return;
     }
@@ -288,7 +301,7 @@ export default function App() {
   }
 
   // ---------- dev-build path: continuous native recognition ----------
-  async function nativeStart() {
+  async function nativeStart(opts = {}) {
     try {
       const perm = await SpeechModule.requestPermissionsAsync();
       if (!perm.granted) { sysMsg("Speech permission needed — allow it in Settings."); return; }
@@ -306,7 +319,8 @@ export default function App() {
         },
       });
       recActiveRef.current = true;
-      setPhase("listening");
+      // silent = listen-through during a reply: the UI stays "speaking".
+      if (!opts.silent) setPhase("listening");
     } catch (e) {
       recActiveRef.current = false;
       sysMsg("Speech recognition failed to start — " + (e.message || e));
@@ -327,6 +341,17 @@ export default function App() {
     return overlap >= 0.7;
   }
 
+  // Listen WHILE the assistant speaks so the user can cut in. The session
+  // transcript will contain echo of the reply; echoPrefixRef tracks how much of
+  // it was pure echo, so the user's actual words can be split off cleanly.
+  async function startListenThrough() {
+    if (!nativeSpeechAvailable || !handsFreeRef.current) return;
+    listenThroughRef.current = true;
+    echoPrefixRef.current = "";
+    lastResultRef.current = null;
+    if (!recActiveRef.current) await nativeStart({ silent: true });
+  }
+
   function nativeConsume(text) {
     const t = (text || "").trim();
     if (!t || busyRef.current) return;
@@ -343,18 +368,37 @@ export default function App() {
       SpeechModule.addListener("result", (ev) => {
         const t = ev?.results?.[0]?.transcript || "";
         if (!t.trim()) return;
-        // Echo guard: while the assistant is talking (or just finished), the
-        // recogniser is mostly hearing US through the speaker — discard it all.
-        // (Barge-in returns once echo cancellation is proven; without it the
-        // app interrupts itself and loops its own replies back as input.)
-        if (phaseRef.current === "speaking" || AQ.isDraining() || Date.now() < deafUntilRef.current) {
-          lastResultRef.current = null;
+        // While the assistant is speaking: separate echo from a real interruption.
+        if (listenThroughRef.current) {
+          if (isEcho(t)) { echoPrefixRef.current = t; return; } // just our own voice
+          const spoken = t.startsWith(echoPrefixRef.current)
+            ? t.slice(echoPrefixRef.current.length).trim()
+            : t.trim();
+          // Two real words = the user is talking over the assistant. Cut it off
+          // and carry their words straight into this listening round.
+          if (spoken.split(/\s+/).filter(Boolean).length >= 2) {
+            AQ.stopAudio();
+            AQ.setExpectMore(false);
+            listenThroughRef.current = false;
+            busyRef.current = false;
+            turnIdRef.current++; // abandon the interrupted turn's bookkeeping
+            setStreamAi("");
+            setPhase("listening");
+            setLiveText(spoken);
+            lastResultRef.current = { text: spoken, at: Date.now() };
+          }
           return;
         }
+        if (Date.now() < deafUntilRef.current) { lastResultRef.current = null; return; }
         if (phaseRef.current === "listening") {
-          setLiveText(t);
-          lastResultRef.current = { text: t, at: Date.now() };
-          if (ev.isFinal) nativeConsume(t);
+          // The session transcript is cumulative and may still carry the echo
+          // of the reply we listened through — strip that prefix off.
+          const pre = echoPrefixRef.current;
+          const spoken = pre && t.startsWith(pre) ? t.slice(pre.length).trim() : t.trim();
+          if (!spoken) return;
+          setLiveText(spoken);
+          lastResultRef.current = { text: spoken, at: Date.now() };
+          if (ev.isFinal) nativeConsume(spoken);
         }
       }),
       SpeechModule.addListener("error", (ev) => {
@@ -364,7 +408,9 @@ export default function App() {
         // Recognition service stopped (timeout etc) — re-open ONLY if hands-free
         // still wants it; otherwise stay properly off (no restart storms).
         recActiveRef.current = false;
-        if (nativeWantRef.current && handsFreeRef.current && !busyRef.current) setTimeout(nativeStart, 300);
+        if (nativeWantRef.current && handsFreeRef.current && !busyRef.current) {
+          setTimeout(() => { if (!recActiveRef.current && !busyRef.current) nativeStart(); }, 300);
+        }
       }),
     ];
     // iOS can be slow to flag isFinal in continuous mode — a stable interim
