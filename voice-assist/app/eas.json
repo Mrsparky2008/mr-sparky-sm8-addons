@@ -7,13 +7,14 @@
     "production": {
       "autoIncrement": true,
       "ios": {
-        "credentialsSource": "remote"
+        "credentialsSource": "local"
       }
     }
   },
   "submit": {
     "production": {
       "ios": {
+        "ascAppId": "6797197265",
         "ascApiKeyPath": "../AuthKey_R59FG54N39.p8",
         "ascApiKeyId": "R59FG54N39",
         "ascApiKeyIssuerId": "7d0a56f3-d390-494c-8ce7-b230e421b189",
