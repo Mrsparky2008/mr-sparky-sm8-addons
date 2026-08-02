@@ -3,3 +3,6 @@
 **/.claude/
 *.p8
 voice-assist/expo-token.txt
+credentials.json
+*.p12
+*.mobileprovision

@@ -76,6 +76,9 @@ export default function App() {
   const quietRoundsRef = useRef(0);
   const lastResultRef = useRef(null); // native path: { text, at }
   const lastSentRef = useRef({ text: "", at: 0 });
+  // Echo guard: without AEC the mic hears the app's own voice. Everything the
+  // recogniser reports while we're speaking (plus a short tail) is discarded.
+  const deafUntilRef = useRef(0);
   const nativeWantRef = useRef(false);
   const scrollRef = useRef(null);
   const pulse = useRef(new Animated.Value(1)).current;
@@ -94,7 +97,7 @@ export default function App() {
       setPin(s.pin || "");
     });
     AQ.playbackMode();
-    AQ.setOnDrain(() => { if (!busyRef.current) afterTurn(); });
+    AQ.setOnDrain(() => { deafUntilRef.current = Date.now() + 700; if (!busyRef.current) afterTurn(); });
   }, []);
 
   // ---------- listening-state pulse ----------
@@ -177,7 +180,15 @@ export default function App() {
   // ---------- Expo Go path: record -> VAD stop -> /stt ----------
   async function startListening() {
     if (busyRef.current || phaseRef.current === "listening" || !pinRef.current) return;
-    if (nativeSpeechAvailable) return nativeStart();
+    if (nativeSpeechAvailable) {
+      // Fresh round: flush anything the recogniser buffered while we were
+      // speaking (echo), then restart the session clean. The "end" listener
+      // re-opens recognition automatically.
+      lastResultRef.current = null;
+      setLiveText("");
+      try { SpeechModule.stop(); } catch {}
+      return nativeStart();
+    }
     const perm = await requestRecordingPermissionsAsync();
     if (!perm.granted) { sysMsg("Microphone permission needed — allow it in iPhone Settings."); return; }
     AQ.stopAudio();
@@ -269,7 +280,9 @@ export default function App() {
         iosCategory: {
           category: "playAndRecord",
           categoryOptions: ["defaultToSpeaker", "allowBluetooth"],
-          mode: "default",
+          // voiceChat engages iOS's voice-processing audio unit — hardware
+          // echo cancellation, the long-term fix that lets barge-in return.
+          mode: "voiceChat",
         },
       });
       setPhase("listening");
@@ -294,10 +307,13 @@ export default function App() {
       SpeechModule.addListener("result", (ev) => {
         const t = ev?.results?.[0]?.transcript || "";
         if (!t.trim()) return;
-        // Barge-in: real speech while the assistant is talking cuts it off.
-        if ((phaseRef.current === "speaking" || AQ.isDraining()) && t.trim().split(/\s+/).length >= 2) {
-          AQ.stopAudio();
-          if (!busyRef.current) setPhase("listening");
+        // Echo guard: while the assistant is talking (or just finished), the
+        // recogniser is mostly hearing US through the speaker — discard it all.
+        // (Barge-in returns once echo cancellation is proven; without it the
+        // app interrupts itself and loops its own replies back as input.)
+        if (phaseRef.current === "speaking" || AQ.isDraining() || Date.now() < deafUntilRef.current) {
+          lastResultRef.current = null;
+          return;
         }
         if (phaseRef.current === "listening") {
           setLiveText(t);
@@ -317,7 +333,7 @@ export default function App() {
     // transcript for 1.1s counts as end-of-utterance.
     const timer = setInterval(() => {
       const r = lastResultRef.current;
-      if (r && phaseRef.current === "listening" && Date.now() - r.at > 1100) nativeConsume(r.text);
+      if (r && phaseRef.current === "listening" && Date.now() > deafUntilRef.current && Date.now() - r.at > 1100) nativeConsume(r.text);
     }, 300);
     return () => { subs.forEach((s) => s.remove()); clearInterval(timer); };
   }, []);
