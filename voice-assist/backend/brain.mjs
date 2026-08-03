@@ -377,6 +377,32 @@ async function preferences() {
 
 // ---- job index: address / customer / work keywords -> job, so a job can be
 // found the way people actually refer to it, not just by number.
+// Voice mangles proper nouns badly ("Mortlake" -> "Morelake" / "Moj Lake" /
+// "Mote like"), so matching has to be fuzzy or the assistant looks like an idiot
+// asking people to spell their own suburbs.
+function editDistance(a, b) {
+  if (Math.abs(a.length - b.length) > 3) return 99;
+  const prev = Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let last = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, last + (a[i - 1] === b[j - 1] ? 0 : 1));
+      last = tmp;
+    }
+  }
+  return prev[b.length];
+}
+// How well a heard word matches a known one: 1 exact, less as it drifts.
+function fuzzyScore(heard, known) {
+  if (heard === known) return 1;
+  if (known.startsWith(heard) || heard.startsWith(known)) return 0.8;
+  const d = editDistance(heard, known);
+  const tolerance = heard.length >= 7 ? 3 : heard.length >= 5 ? 2 : 1;
+  return d <= tolerance ? 0.9 - d * 0.2 : 0;
+}
+
 let jobCache = { at: 0, jobs: [] };
 async function jobIndex() {
   if (Date.now() - jobCache.at < 10 * 60 * 1000 && jobCache.jobs.length) return jobCache.jobs;
@@ -599,13 +625,27 @@ async function executeTool(name, input) {
     const q = tokens(input.query);
     const rawQ = String(input.query || "").toLowerCase();
     if (!q.length) return { error: "Nothing to search for" };
+    // Also try adjacent words glued together — "Moj Lake" is one word misheard.
+    const terms = [...q];
+    for (let i = 0; i < q.length - 1; i++) terms.push(q[i] + q[i + 1]);
     const wantStatus = String(input.status || "").toLowerCase();
     const scored = [];
     for (const j of index) {
       if (wantStatus && (j.status || "").toLowerCase() !== wantStatus) continue;
-      let score = q.filter((w) => j.tokens.has(w)).length / q.length;
+      // Each query word scores its best fuzzy match anywhere in this job.
+      let score = 0;
+      for (const t of terms) {
+        let best = 0;
+        for (const w of j.tokens) {
+          const s = fuzzyScore(t, w);
+          if (s > best) best = s;
+          if (best === 1) break;
+        }
+        score += best;
+      }
+      score /= q.length;
       if (j.haystack.includes(rawQ)) score += 0.5; // whole phrase, e.g. a street name
-      if (score <= 0) continue;
+      if (score < 0.45) continue; // one solid fuzzy hit is enough to surface it
       scored.push({ j, score });
     }
     // Best match first; newer jobs win ties (job numbers climb over time).
@@ -618,11 +658,35 @@ async function executeTool(name, input) {
       contact: j.contact || undefined,
       work: j.description ? j.description.slice(0, 90) : undefined,
     }));
+    if (!matches.length) {
+      // Nothing matched: offer the closest real suburbs/streets we do have, so
+      // the reply is "did you mean Mortlake?" instead of "spell it for me".
+      const places = new Map();
+      for (const j of index) {
+        const m = /,?\s*([A-Za-z\s]+?)\s+(NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\b/.exec(j.address || "");
+        const suburb = (m ? m[1] : "").trim().toLowerCase();
+        if (suburb.length > 2) places.set(suburb, (places.get(suburb) || 0) + 1);
+      }
+      const near = [];
+      for (const t of terms) {
+        for (const [place] of places) {
+          const s = fuzzyScore(t, place.replace(/\s+/g, ""));
+          if (s >= 0.5) near.push({ place, s });
+        }
+      }
+      near.sort((a, b) => b.s - a.s);
+      const suggestions = [...new Set(near.map((n) => n.place))].slice(0, 3);
+      return {
+        matches: [],
+        sounds_like: suggestions,
+        note: suggestions.length
+          ? "No exact match, but these real suburbs sound like what was heard. Offer the closest ONE as a question ('Mortlake?') — voice mangles place names, so assume mishearing rather than asking them to spell it."
+          : "No match. Ask for the job number, or a street name.",
+      };
+    }
     return {
       matches,
-      note: matches.length
-        ? "If one is clearly the job they mean, just use it and name it once. Ask only when two are genuinely equal."
-        : "No match — ask them for the job number.",
+      note: "If one is clearly the job they mean, just use it and name it once. Ask only when two are genuinely equal.",
     };
   }
 
@@ -736,6 +800,8 @@ THINK LIKE A COLLEAGUE, NOT A FORM (this matters as much as brevity):
 - ONE exception where you always confirm: writing quote lines to billing. Draft, read back, and wait for a clear go-ahead. That is the only gate.
 - Anticipate: if they mention something that obviously implies work (a callback needed, parts to order, a job running over), offer to note or book it in the same breath — don't make them ask.
 - Never re-ask for something already said in this conversation. Never re-announce a job you already anchored.
+- ASSUME MISHEARING, NOT MYSTERY. Voice transcription mangles names, suburbs and numbers constantly ("Mortlake" arrives as "Morelake", "Moj Lake", "Mote like"). When a search comes back empty, do NOT ask them to spell it or "check the suburb" — that's the dumbest thing you can do. Use the sounds_like suggestions and offer the closest real one as a quick question ("Mortlake?"), or search again with your own best guess at what they actually said. Only after two failed attempts ask for the job number.
+- IGNORE NOISE: filler like "mhmm", "uh huh", coughs, or a stream of repeated syllables is the microphone picking up room noise, not an instruction. Say nothing and keep waiting.
 
 ANCHORING: your first move is to know which job this is about. If they DESCRIBE it instead of numbering it ("the Haymarket one", "Taku's job", "that switchboard job in Earlwood"), call search_jobs — never make them dig out a number. If they give a number, call find_job and just start working on it, naming it once so they know you got it right ("Righto — job ending 430, Darling Drive."). Do NOT ask them to confirm it. Only if two jobs genuinely match do you ask which one. Keep using that uuid until they name a different job.
 
