@@ -20,7 +20,13 @@ import { chatTurn, sttTranscribe } from "./lib/api";
 import * as AQ from "./lib/audioQueue";
 import { nativeSpeechAvailable, SpeechModule } from "./lib/nativeSpeech";
 import { loadSettings, saveSettings } from "./lib/settings";
-import { VERSION } from "./lib/config";
+import { VERSION, VOICE_ENGINE } from "./lib/config";
+import * as VV from "./lib/vapiVoice";
+
+// Vapi mode: the whole audio layer (mic, echo cancellation, turn-taking,
+// barge-in, voice) is WebRTC's job, and the brain runs server-side through the
+// assistant's custom-LLM bridge. The local path below stays as a fallback.
+const VAPI_MODE = VOICE_ENGINE === "vapi";
 
 // Expo Go path records 16k mono WAV (linear PCM) — exactly what /stt expects.
 // (Android's MediaRecorder can't write WAV; iPhone is the target device.)
@@ -104,9 +110,51 @@ export default function App() {
       pinRef.current = s.pin || "";
       setPin(s.pin || "");
     });
-    AQ.playbackMode();
-    AQ.setOnDrain(() => { deafUntilRef.current = Date.now() + 700; if (!busyRef.current) afterTurn(); });
+    if (!VAPI_MODE) {
+      AQ.playbackMode();
+      AQ.setOnDrain(() => { deafUntilRef.current = Date.now() + 700; if (!busyRef.current) afterTurn(); });
+    }
+    return () => { if (VAPI_MODE) VV.stop(); };
   }, []);
+
+  // ---------- Vapi session ----------
+  const vapiLiveRef = useRef(false);
+  const partialRef = useRef({ user: "", ai: "" });
+
+  function onVapiEvent(kind, payload) {
+    if (kind === "status") {
+      if (payload === "connecting") setPhase("thinking");
+      if (payload === "live") { vapiLiveRef.current = true; setPhase("listening"); }
+      if (payload === "ended") { vapiLiveRef.current = false; setPhase("idle"); setLiveText(""); setStreamAi(""); }
+      return;
+    }
+    if (kind === "speaking") {
+      setPhase(payload.on ? "speaking" : "listening");
+      return;
+    }
+    if (kind === "speech") {
+      const { who, text, final } = payload;
+      if (who === "user") {
+        if (final) { if (text.trim()) addMsg("me", text.trim()); setLiveText(""); }
+        else setLiveText(text);
+      } else {
+        if (final) { if (text.trim()) addMsg("ai", text.trim()); setStreamAi(""); }
+        else setStreamAi(text);
+      }
+      return;
+    }
+    if (kind === "error") sysMsg("Voice error — " + payload);
+  }
+
+  async function vapiToggle() {
+    if (vapiLiveRef.current) { await VV.stop(); return; }
+    try {
+      await VV.start({ onEvent: onVapiEvent });
+    } catch (e) {
+      sysMsg("Couldn't start the voice session — " + (e?.message || e));
+      setPhase("idle");
+    }
+  }
 
   // ---------- listening-state pulse ----------
   useEffect(() => {
@@ -377,7 +425,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!nativeSpeechAvailable) return;
+    if (!nativeSpeechAvailable || VAPI_MODE) return;
     const subs = [
       SpeechModule.addListener("result", (ev) => {
         const t = ev?.results?.[0]?.transcript || "";
@@ -441,6 +489,7 @@ export default function App() {
   // ---------- controls ----------
   function onBigPress() {
     Keyboard.dismiss();
+    if (VAPI_MODE) return void vapiToggle();
     quietRoundsRef.current = 0;
     if (phaseRef.current === "speaking" || AQ.isDraining()) {
       AQ.stopAudio();
@@ -464,6 +513,12 @@ export default function App() {
     if (!t) return;
     setTyped("");
     Keyboard.dismiss();
+    if (VAPI_MODE) {
+      if (!vapiLiveRef.current) { sysMsg("Tap the button to start the voice session first."); return; }
+      addMsg("me", t);
+      VV.say(t);
+      return;
+    }
     if (phaseRef.current === "listening" && !nativeSpeechAvailable) {
       vadRef.current = null;
       stopRecorder();
@@ -476,6 +531,7 @@ export default function App() {
     const v = !handsFreeRef.current;
     handsFreeRef.current = v;
     setHandsFree(v);
+    if (VAPI_MODE) { VV.setMuted(!v); return; } // mute the mic, keep the session
     if (!v) {
       // OFF must mean OFF: recognition stopped, buffers cleared, UI idle.
       if (nativeSpeechAvailable) {
@@ -522,13 +578,21 @@ export default function App() {
     );
   }
 
-  const stateLabel = {
-    idle: "tap the mic and talk",
-    listening: "listening… pause to send",
-    transcribing: "transcribing…",
-    thinking: "thinking…",
-    speaking: "tap to interrupt",
-  }[phase];
+  const stateLabel = VAPI_MODE
+    ? {
+        idle: "tap to start talking",
+        listening: "listening — just talk",
+        transcribing: "…",
+        thinking: "connecting…",
+        speaking: "speaking — talk over it any time",
+      }[phase]
+    : {
+        idle: "tap the mic and talk",
+        listening: "listening… pause to send",
+        transcribing: "transcribing…",
+        thinking: "thinking…",
+        speaking: "tap to interrupt",
+      }[phase];
 
   const bigColor = {
     idle: "#1a73e8", listening: "#e53935", transcribing: "#f9ab00",
@@ -549,10 +613,10 @@ export default function App() {
       >
         <View style={st.header}>
           <Text style={st.headerTitle}>
-            AI Assist <Text style={st.headerVer}>{VERSION} · {nativeSpeechAvailable ? "native mic" : "Expo Go"}</Text>
+            AI Assist <Text style={st.headerVer}>{VERSION} · {VAPI_MODE ? "vapi voice" : nativeSpeechAvailable ? "native mic" : "Expo Go"}</Text>
           </Text>
           <Pressable onPress={toggleHandsFree}>
-            <Text style={[st.hf, handsFree && st.hfOn]}>{handsFree ? "hands-free ✓" : "hands-free off"}</Text>
+            <Text style={[st.hf, handsFree && st.hfOn]}>{VAPI_MODE ? (handsFree ? "mic on" : "mic muted") : handsFree ? "hands-free ✓" : "hands-free off"}</Text>
           </Pressable>
         </View>
 
