@@ -199,6 +199,25 @@ const tools = [
     },
   },
   {
+    name: "search_jobs",
+    description:
+      "Find a job WITHOUT its number — by address, suburb, customer name, or what the work is. " +
+      "Use this whenever they describe a job instead of naming a number ('the Haymarket one', " +
+      "'Taku's job', 'that switchboard job in Earlwood'). Returns the best matches, newest first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Address, suburb, customer name, or keywords about the work" },
+        status: {
+          type: "string",
+          description: "Optional filter: Quote, Work Order, Completed, Unsuccessful",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "recall_similar_lines",
     description:
       "Search everything Mr Sparky has EVER quoted for lines like this one, so you can reuse " +
@@ -297,6 +316,43 @@ async function materialHistory() {
   };
   console.log(`voice: quoting history indexed — ${histCache.lines.length} distinct lines`);
   return histCache.lines;
+}
+
+// ---- job index: address / customer / work keywords -> job, so a job can be
+// found the way people actually refer to it, not just by number.
+let jobCache = { at: 0, jobs: [] };
+async function jobIndex() {
+  if (Date.now() - jobCache.at < 10 * 60 * 1000 && jobCache.jobs.length) return jobCache.jobs;
+  const [jobsRes, contactsRes] = await Promise.all([
+    sm8("GET", "/job.json"),
+    sm8("GET", "/jobcontact.json"),
+  ]);
+  if (jobsRes.status !== 200) return jobCache.jobs;
+  const contactByJob = new Map();
+  for (const c of toArray(contactsRes.body)) {
+    if (String(c.active) !== "1" && c.active !== 1) continue;
+    const nm = `${c.first || ""} ${c.last || ""}`.trim();
+    if (!nm || contactByJob.has(c.job_uuid)) continue;
+    contactByJob.set(c.job_uuid, nm);
+  }
+  const jobs = [];
+  for (const j of toArray(jobsRes.body)) {
+    if (String(j.active) !== "1" && j.active !== 1) continue;
+    const address = String(j.job_address || "").replace(/\s+/g, " ").trim();
+    const description = String(j.job_description || "").replace(/\s+/g, " ").trim();
+    const contact = contactByJob.get(j.uuid) || "";
+    const haystack = `${address} ${contact} ${description}`.toLowerCase();
+    jobs.push({
+      uuid: j.uuid,
+      number: j.generated_job_id,
+      status: j.status,
+      address, contact, description, haystack,
+      tokens: new Set(tokens(`${address} ${contact} ${description}`)),
+    });
+  }
+  jobCache = { at: Date.now(), jobs };
+  console.log(`voice: job index built — ${jobs.length} jobs`);
+  return jobs;
 }
 
 let staffCache = null;
@@ -465,6 +521,38 @@ async function executeTool(name, input) {
     return { ok: true };
   }
 
+  if (name === "search_jobs") {
+    const index = await jobIndex();
+    const q = tokens(input.query);
+    const rawQ = String(input.query || "").toLowerCase();
+    if (!q.length) return { error: "Nothing to search for" };
+    const wantStatus = String(input.status || "").toLowerCase();
+    const scored = [];
+    for (const j of index) {
+      if (wantStatus && (j.status || "").toLowerCase() !== wantStatus) continue;
+      let score = q.filter((w) => j.tokens.has(w)).length / q.length;
+      if (j.haystack.includes(rawQ)) score += 0.5; // whole phrase, e.g. a street name
+      if (score <= 0) continue;
+      scored.push({ j, score });
+    }
+    // Best match first; newer jobs win ties (job numbers climb over time).
+    scored.sort((a, b) => b.score - a.score || Number(b.j.number) - Number(a.j.number));
+    const matches = scored.slice(0, 6).map(({ j }) => ({
+      job_uuid: j.uuid,
+      job_number: j.number,
+      status: j.status,
+      address: j.address,
+      contact: j.contact || undefined,
+      work: j.description ? j.description.slice(0, 90) : undefined,
+    }));
+    return {
+      matches,
+      note: matches.length
+        ? "If one is clearly the job they mean, just use it and name it once. Ask only when two are genuinely equal."
+        : "No match — ask them for the job number.",
+    };
+  }
+
   if (name === "recall_similar_lines") {
     const hist = await materialHistory();
     const q = tokens(input.description);
@@ -573,7 +661,7 @@ THINK LIKE A COLLEAGUE, NOT A FORM (this matters as much as brevity):
 - Anticipate: if they mention something that obviously implies work (a callback needed, parts to order, a job running over), offer to note or book it in the same breath — don't make them ask.
 - Never re-ask for something already said in this conversation. Never re-announce a job you already anchored.
 
-ANCHORING: your first move is to know which job this is about. If they give a number, call find_job and just start working on it, naming it once so they know you got it right ("Righto — job ending 430, Darling Drive."). Do NOT ask them to confirm it. Only if two jobs genuinely match do you ask which one. Keep using that uuid until they name a different job.
+ANCHORING: your first move is to know which job this is about. If they DESCRIBE it instead of numbering it ("the Haymarket one", "Taku's job", "that switchboard job in Earlwood"), call search_jobs — never make them dig out a number. If they give a number, call find_job and just start working on it, naming it once so they know you got it right ("Righto — job ending 430, Darling Drive."). Do NOT ask them to confirm it. Only if two jobs genuinely match do you ask which one. Keep using that uuid until they name a different job.
 
 QUOTE BUILDING (your main purpose) — draft on screen, then commit:
 1. They rattle off work conversationally. Turn it into professional quote lines ("Supply & install 1 x 63A circuit breaker / main switch") — trade shorthand is right HERE, in line names.
