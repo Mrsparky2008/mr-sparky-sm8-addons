@@ -199,6 +199,36 @@ const tools = [
     },
   },
   {
+    name: "show_quote_draft",
+    description:
+      "Put the quote draft ON THE USER'S SCREEN, exactly as it will be written to " +
+      "ServiceM8. Call this whenever you have drafted or amended quote lines — the user " +
+      "reads it themselves instead of having it read aloud. Then say one short sentence " +
+      "asking if they're happy. Line names here MUST be the exact strings you will pass to " +
+      "add_billing_item.",
+    input_schema: {
+      type: "object",
+      properties: {
+        lines: {
+          type: "array",
+          description: "The full current draft — every line, in order.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Exact line name as it will appear on the quote" },
+              quantity: { type: "number" },
+              unit_price: { type: "number", description: "Unit price ex GST" },
+            },
+            required: ["name", "unit_price"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["lines"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "clone_job",
     description: "Duplicate a job for a re-inspection/follow-up (Quote status, contacts copied).",
     input_schema: {
@@ -376,6 +406,19 @@ async function executeTool(name, input) {
     return { ok: true };
   }
 
+  if (name === "show_quote_draft") {
+    const lines = Array.isArray(input.lines) ? input.lines : [];
+    const total = lines.reduce((t, l) => t + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0);
+    // The app renders this from the tool call itself; the result just tells the
+    // model what to do next.
+    return {
+      ok: true,
+      shown: lines.length,
+      total_ex_gst: Number(total.toFixed(2)),
+      note: "Draft is on the user's screen. Do NOT read the lines aloud. Say one short sentence asking if they're happy with it, then wait.",
+    };
+  }
+
   if (name === "clone_job") {
     const j = await sm8("GET", `/job/${encodeURIComponent(jobU)}.json`);
     if (j.status !== 200 || !j.body) return { error: `Could not read source job (${j.status})` };
@@ -446,10 +489,13 @@ THINK LIKE A COLLEAGUE, NOT A FORM (this matters as much as brevity):
 
 ANCHORING: your first move is to know which job this is about. If they give a number, call find_job and just start working on it, naming it once so they know you got it right ("Righto — job ending 430, Darling Drive."). Do NOT ask them to confirm it. Only if two jobs genuinely match do you ask which one. Keep using that uuid until they name a different job.
 
-QUOTE BUILDING (your main purpose) — draft-then-commit:
-1. The user will rattle off work items conversationally. Turn them into professional quote lines ("Supply & install ...") and read back a SHORT spoken summary of the drafted lines with prices. Iterate on wording/prices until they're happy. Never invent prices — ask.
-2. Only after clear approval ("go for it", "apply", "lock it in"): check list_billing_items first, add only lines not already there, then confirm what landed and the ex-GST total.
-3. You can ADD lines only — never delete or edit existing ones (no such ability exists). Removals are manual; say so if asked.
+QUOTE BUILDING (your main purpose) — draft on screen, then commit:
+1. They rattle off work conversationally. Turn it into professional quote lines ("Supply & install 1 x 63A circuit breaker / main switch") — trade shorthand is right HERE, in line names.
+2. SHOW, DON'T RECITE. Every time the draft changes, call show_quote_draft with the complete current draft — the exact names, quantities and prices you would write. Then say ONE short sentence and stop: "That's the draft on your screen — happy with it?". NEVER read the lines aloud. Never read a total aloud. They will read it themselves and tell you what to change.
+3. GROUPING IS THEIR CALL, and it can change mid-conversation. "Group those together" / "make it one line" = ONE line whose name covers the lot (e.g. "Upgrade DB to RCBOs — supply & install 1 x 63A main switch, 4 x 20A, 1 x 32A and 1 x 10A RCBOs"), priced as they say (a lump sum, or a quantity times a rate). "Itemise it" / "separate lines" = one line each. When they change their mind, REBUILD the whole draft their way and show it again — never keep the old structure because it was drafted first.
+4. Never invent prices — ask once, plainly.
+5. Only after clear approval ("yep", "go", "lock it in"): check list_billing_items, add each approved line EXACTLY as shown on the draft, then one short line confirming it's on. If they say no or amend, redraft and show again.
+6. You can ADD lines only — never delete or edit existing ones (no such ability exists). Removals are manual; say so if asked.
 
 OTHER ACTIONS: bookings (check get_schedule for clashes first; propose nearest free slot on clash), notes (address to a person by starting the note "NAME: ..."), status changes, clone for re-inspection. Act on clear instructions immediately; ask ONE short question only when genuinely ambiguous.
 

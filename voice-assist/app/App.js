@@ -132,6 +132,10 @@ export default function App() {
       setPhase(payload.on ? "speaking" : "listening");
       return;
     }
+    if (kind === "draft") {
+      setLog((l) => [...l, { id: msgId++, cls: "draft", lines: payload }]);
+      return;
+    }
     if (kind === "speech") {
       const { who, text, final } = payload;
       if (who === "user") {
@@ -624,6 +628,29 @@ export default function App() {
           {log.map((m) =>
             m.cls === "sys" ? (
               <Text key={m.id} style={st.sys}>{m.text}</Text>
+            ) : m.cls === "draft" ? (
+              <View key={m.id} style={st.draft}>
+                <Text style={st.draftHead}>QUOTE DRAFT — not saved yet</Text>
+                {m.lines.map((l, i) => {
+                  const qty = Number(l.quantity) > 0 ? Number(l.quantity) : 1;
+                  const price = Number(l.unit_price) || 0;
+                  return (
+                    <View key={i} style={st.draftRow}>
+                      <Text style={st.draftName}>{l.name}</Text>
+                      <View style={st.draftNums}>
+                        <Text style={st.draftQty}>{qty} × ${price.toFixed(2)}</Text>
+                        <Text style={st.draftLine}>${(qty * price).toFixed(2)}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+                <View style={st.draftTotalRow}>
+                  <Text style={st.draftTotalLabel}>Total ex GST</Text>
+                  <Text style={st.draftTotal}>
+                    ${m.lines.reduce((t, l) => t + (Number(l.quantity) > 0 ? Number(l.quantity) : 1) * (Number(l.unit_price) || 0), 0).toFixed(2)}
+                  </Text>
+                </View>
+              </View>
             ) : (
               <View key={m.id} style={[st.msg, m.cls === "me" ? st.me : st.ai]}>
                 <Text style={st.msgText}>{m.text}</Text>
@@ -668,6 +695,22 @@ const st = StyleSheet.create({
   },
   headerTitle: { color: "#e8eef7", fontWeight: "700", fontSize: 17 },
   headerVer: { color: "#7d8ba1", fontWeight: "400", fontSize: 12 },
+  draft: {
+    backgroundColor: "#16233a", borderColor: "#c96a2b", borderWidth: 1,
+    borderRadius: 14, padding: 12, marginVertical: 8,
+  },
+  draftHead: {
+    color: "#efa96a", fontSize: 10, fontWeight: "800", letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  draftRow: { borderBottomColor: "#25375a", borderBottomWidth: 1, paddingVertical: 8 },
+  draftName: { color: "#e9eff8", fontSize: 14, lineHeight: 19 },
+  draftNums: { flexDirection: "row", justifyContent: "space-between", marginTop: 3 },
+  draftQty: { color: "#8da0bc", fontSize: 12, fontVariant: ["tabular-nums"] },
+  draftLine: { color: "#e9eff8", fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] },
+  draftTotalRow: { flexDirection: "row", justifyContent: "space-between", paddingTop: 10 },
+  draftTotalLabel: { color: "#8da0bc", fontSize: 13 },
+  draftTotal: { color: "#fff", fontSize: 16, fontWeight: "800", fontVariant: ["tabular-nums"] },
   hf: { color: "#61708a", fontSize: 13, padding: 4 },
   hfOn: { color: "#34a853" },
   log: { flex: 1, paddingHorizontal: 14 },

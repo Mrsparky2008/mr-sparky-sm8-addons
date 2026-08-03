@@ -36,6 +36,20 @@ export async function start({ onEvent }) {
           text: m.transcript || "",
           final: m.transcriptType === "final",
         });
+        return;
+      }
+      // Quote drafts arrive as a tool call so they can be RENDERED, not spoken.
+      const calls =
+        m.toolCalls || m.toolCallList || m.functionCall ||
+        (m.type === "tool-calls" ? m.toolCallList || m.toolCalls : null);
+      const list = Array.isArray(calls) ? calls : calls ? [calls] : [];
+      for (const c of list) {
+        const fn = c.function || c;
+        const name = fn.name || fn.functionName;
+        if (name !== "show_quote_draft") continue;
+        let args = fn.arguments ?? fn.parameters ?? {};
+        if (typeof args === "string") { try { args = JSON.parse(args); } catch { args = {}; } }
+        if (Array.isArray(args.lines)) handlers.onEvent("draft", args.lines);
       }
     });
     vapi.on("error", (e) => handlers.onEvent("error", String(e?.message || e)));
