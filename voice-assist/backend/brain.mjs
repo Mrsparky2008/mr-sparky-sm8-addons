@@ -438,6 +438,11 @@ async function jobIndex() {
   return jobs;
 }
 
+const WRITE_TOOLS = new Set([
+  "book_job", "reschedule_booking", "cancel_booking", "add_note",
+  "update_job_description", "update_job_status", "add_billing_item", "clone_job",
+]);
+
 let staffCache = null;
 async function getStaff() {
   if (staffCache) return staffCache;
@@ -766,12 +771,48 @@ async function executeTool(name, input) {
   return { error: `Unknown tool: ${name}` };
 }
 
+// Everything about the anchored job, fetched ONCE and carried in the prompt so
+// the assistant answers from what it already knows instead of narrating lookups.
+async function buildDossier(uuid) {
+  const [j, contacts, notes, acts, mats, staff] = await Promise.all([
+    sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),
+    sm8("GET", "/jobcontact.json"),
+    sm8("GET", `/note.json?%24filter=related_object_uuid%20eq%20'${encodeURIComponent(uuid)}'`),
+    sm8("GET", "/jobactivity.json?%24filter=active%20eq%20'1'"),
+    sm8("GET", `/jobmaterial.json?%24filter=job_uuid%20eq%20'${encodeURIComponent(uuid)}'`),
+    getStaff().catch(() => []),
+  ]);
+  const job = j.body || {};
+  return {
+    status: job.status,
+    description: String(job.job_description || "").slice(0, 700),
+    contacts: toArray(contacts.body).filter((c) => c.job_uuid === uuid)
+      .map((c) => `${c.type}: ${`${c.first || ""} ${c.last || ""}`.trim()}${c.mobile ? ` ${c.mobile}` : ""}`),
+    bookings: toArray(acts.body).filter((a) => a.job_uuid === uuid)
+      .map((a) => ({ activity_uuid: a.uuid, staff: staffName(staff, a.staff_uuid), start: a.start_date, end: a.end_date })),
+    billing: toArray(mats.body).filter((m) => String(m.active) === "1" || m.active === 1)
+      .map((m) => ({ name: m.name, qty: Number(m.quantity), price: Number(m.price) })),
+    notes: toArray(notes.body).slice(-6).map((n) => String(n.note || "").replace(/\s+/g, " ").slice(0, 160)),
+  };
+}
+
 function systemPrompt(anchor, prefs = []) {
   const prefNote = prefs.length
     ? `\n\nWHAT YOU'VE LEARNED FROM STEVEN (carry these into everything you do — don't recite them back):\n${prefs.map((p) => `- ${p.text}`).join("\n")}`
     : "";
+  const d = anchor?.dossier;
   const anchorNote = anchor && anchor.uuid
-    ? `\n\nCURRENT ANCHORED JOB (already confirmed earlier in this call — do NOT call find_job again unless the user names a different job): job ${anchor.job_number} at ${anchor.address}, uuid ${anchor.uuid}. Use this uuid directly and don't re-announce the job.`
+    ? `\n\nTHE JOB YOU'RE ON — job ${anchor.job_number}, ${anchor.address}, uuid ${anchor.uuid}. Don't re-find it, don't re-announce it.${
+        d ? `
+YOU ALREADY KNOW ALL OF THIS — answer straight from it. Do NOT call a tool to look up anything listed here, and never say you're checking:
+- Status: ${d.status || "unknown"}
+- Contacts: ${d.contacts?.length ? d.contacts.join("; ") : "none on the card"}
+- Work: ${d.description || "(no description)"}
+- Bookings: ${d.bookings?.length ? d.bookings.map((b) => `${b.staff} ${b.start}${b.end ? " to " + b.end : ""} [${b.activity_uuid}]`).join("; ") : "none"}
+- Billing already on the job: ${d.billing?.length ? d.billing.map((b) => `${b.qty} x $${b.price} ${b.name}`).join("; ") : "nothing yet"}
+- Recent notes: ${d.notes?.length ? d.notes.join(" | ") : "none"}
+This snapshot is current as of this moment in the call, and it updates itself after anything you change. Use tools ONLY to CHANGE something, or for things genuinely not listed above (the wider diary, other jobs, quoting history).` : ""
+      }`
     : "";
   return `You are AI Assist, Mr Sparky Electrical's voice assistant. You are IN A SPOKEN CONVERSATION with Steven (the owner) or a staff member — your words are read aloud by text-to-speech. This is the standalone app: no job is pre-selected.
 
@@ -888,7 +929,8 @@ export async function runTurn(messages, onDelta, context = {}) {
               let input = {};
               try { input = current.inputJson ? JSON.parse(current.inputJson) : {}; } catch {}
               content.push({ type: "tool_use", id: current.id, name: current.name, input });
-            } else {
+            } else if (current.text.trim()) {
+              // Empty text blocks are rejected outright by newer models.
               content.push({ type: "text", text: current.text });
             }
             current = null;
@@ -911,12 +953,24 @@ export async function runTurn(messages, onDelta, context = {}) {
         console.error(`voice tool ${block.name} failed:`, err);
         result = { error: `${block.name} failed: ${err.message}` };
       }
-      if (block.name === "find_job" && result?.job?.uuid) anchor = result.job;
+      if (block.name === "find_job" && result?.job?.uuid) anchor = { ...result.job };
+      // One clear search hit anchors just as well as a number.
+      if (block.name === "search_jobs" && result?.matches?.length === 1) {
+        const m = result.matches[0];
+        anchor = { uuid: m.job_uuid, job_number: m.job_number, address: m.address, status: m.status };
+      }
+      // Anything that CHANGES the job invalidates what we know about it.
+      if (WRITE_TOOLS.has(block.name) && anchor) anchor.dossier = null;
       toolResults.push({
         type: "tool_result", tool_use_id: block.id,
         content: JSON.stringify(result).slice(0, 30000),
         ...(result?.error ? { is_error: true } : {}),
       });
+    }
+    // Refresh the dossier before the next thinking step, so the assistant sees
+    // the consequences of what it just did without asking ServiceM8 again.
+    if (anchor?.uuid && !anchor.dossier) {
+      try { anchor.dossier = await buildDossier(anchor.uuid); } catch (err) { console.error("dossier failed:", err.message); }
     }
     apiMessages.push({ role: "assistant", content });
     apiMessages.push({ role: "user", content: toolResults });
