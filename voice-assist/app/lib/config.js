@@ -1,7 +1,7 @@
 // AI Assist native app — shared constants.
 // Same backend as the PWA: Lambda mr-sparky-ai-assist streaming Function URL.
 export const BACKEND = "https://ty7yjtyvwm5jhuk7hu2tztpxaq0htqpm.lambda-url.ap-southeast-2.on.aws";
-export const VERSION = "app v1.0";
+export const VERSION = "app v1.1";
 
 // Voice engine: "vapi" = WebRTC session (real echo cancellation, Deepgram ears,
 // ElevenLabs voice, our brain via the assistant's custom-LLM bridge).

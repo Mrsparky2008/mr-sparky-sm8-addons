@@ -22,6 +22,7 @@ import { nativeSpeechAvailable, SpeechModule } from "./lib/nativeSpeech";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { VERSION, VOICE_ENGINE } from "./lib/config";
 import * as VV from "./lib/vapiVoice";
+import * as Thinking from "./lib/thinking";
 
 // Vapi mode: the whole audio layer (mic, echo cancellation, turn-taking,
 // barge-in, voice) is WebRTC's job, and the brain runs server-side through the
@@ -96,6 +97,7 @@ export default function App() {
   const nativeWantRef = useRef(false);
   const scrollRef = useRef(null);
   const pulse = useRef(new Animated.Value(1)).current;
+  const think = useRef(new Animated.Value(0)).current; // 0..1 while thinking
 
   const recorder = useAudioRecorder(WAV_RECORDING);
   const recState = useAudioRecorderState(recorder, 150);
@@ -114,8 +116,21 @@ export default function App() {
       AQ.playbackMode();
       AQ.setOnDrain(() => { deafUntilRef.current = Date.now() + 700; if (!busyRef.current) afterTurn(); });
     }
-    return () => { if (VAPI_MODE) VV.stop(); };
+    return () => { if (VAPI_MODE) VV.stop(); Thinking.release(); };
   }, []);
+
+  // Thinking bed + on-screen pulse follow the phase, wherever it's set from.
+  useEffect(() => {
+    if (phase === "thinking") Thinking.start(); else Thinking.stop();
+    if (phase === "thinking") {
+      const loop = Animated.loop(Animated.sequence([
+        Animated.timing(think, { toValue: 1, duration: 620, useNativeDriver: true }),
+        Animated.timing(think, { toValue: 0, duration: 620, useNativeDriver: true }),
+      ]));
+      loop.start();
+      return () => { loop.stop(); think.setValue(0); };
+    }
+  }, [phase]);
 
   // ---------- Vapi session ----------
   const vapiLiveRef = useRef(false);
@@ -665,10 +680,35 @@ export default function App() {
           )}
         </ScrollView>
 
-        <Text style={st.state}>{stateLabel}</Text>
+        {phase === "thinking" ? (
+          <View style={st.thinkRow}>
+            {[0, 1, 2].map((i) => (
+              <Animated.View
+                key={i}
+                style={[st.thinkDot, {
+                  opacity: think.interpolate({
+                    inputRange: [0, 0.34, 0.67, 1],
+                    outputRange: i === 0 ? [1, 0.3, 0.3, 1] : i === 1 ? [0.3, 1, 0.3, 0.3] : [0.3, 0.3, 1, 0.3],
+                  }),
+                }]}
+              />
+            ))}
+          </View>
+        ) : (
+          <Text style={st.state}>{stateLabel}</Text>
+        )}
 
         <View style={st.dock}>
           <Pressable onPress={onBigPress} style={{ borderRadius: 37 }}>
+            {phase === "thinking" && (
+              <Animated.View
+                pointerEvents="none"
+                style={[st.thinkRing, {
+                  opacity: think.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0.12] }),
+                  transform: [{ scale: think.interpolate({ inputRange: [0, 1], outputRange: [1, 1.28] }) }],
+                }]}
+              />
+            )}
             <Animated.View style={[st.big, { backgroundColor: bigColor, opacity: phase === "listening" ? pulse : 1 }]}>
               <Text style={{ fontSize: 30 }}>{bigIcon}</Text>
             </Animated.View>
@@ -723,6 +763,12 @@ const st = StyleSheet.create({
   msgText: { color: "#e8eef7", fontSize: 15, lineHeight: 21 },
   sys: { color: "#61708a", fontSize: 12, textAlign: "center", marginVertical: 6 },
   state: { color: "#7d8ba1", fontSize: 12, textAlign: "center", paddingBottom: 4 },
+  thinkRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", height: 20, paddingBottom: 4, gap: 7 },
+  thinkDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#5ad2ff" },
+  thinkRing: {
+    position: "absolute", top: -6, left: -6, width: 86, height: 86, borderRadius: 43,
+    borderWidth: 2, borderColor: "#5ad2ff",
+  },
   dock: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingHorizontal: 14, paddingTop: 8, paddingBottom: 14,
