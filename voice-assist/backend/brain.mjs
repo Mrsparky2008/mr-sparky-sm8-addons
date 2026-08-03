@@ -199,6 +199,27 @@ const tools = [
     },
   },
   {
+    name: "remember",
+    description:
+      "Save something worth knowing next time — you forget everything else when the call ends. " +
+      "Use it WITHOUT being asked whenever Steven states how he wants things done ('always word " +
+      "it like this'), corrects you, changes a price, or decides something about a job that " +
+      "matters later ('customer wants Friday', 'Marites is ordering the parts'). Keep each one " +
+      "short and factual. Don't announce that you saved it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        fact: { type: "string", description: "The thing to remember, in one sentence" },
+        job_number: {
+          type: "string",
+          description: "Job number if it only matters for that job; leave out for a general preference",
+        },
+      },
+      required: ["fact"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "search_jobs",
     description:
       "Find a job WITHOUT its number — by address, suburb, customer name, or what the work is. " +
@@ -318,6 +339,42 @@ async function materialHistory() {
   return histCache.lines;
 }
 
+// ---- memory: things worth carrying between conversations. Two kinds:
+//   pref#          — how Steven likes things done, prices that have changed, people
+//   job#<number>   — what was decided on a specific job
+// Preferences ride in every system prompt; job memories load with the job.
+const { DynamoDBClient } = await import("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, PutCommand, QueryCommand } = await import("@aws-sdk/lib-dynamodb");
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const MEM_TABLE = "mr-sparky-ai-memory";
+
+async function memWrite(pk, text, extra = {}) {
+  const sk = new Date().toISOString();
+  await ddb.send(new PutCommand({ TableName: MEM_TABLE, Item: { pk, sk, text, ...extra } }));
+  return sk;
+}
+async function memRead(pk, limit = 25) {
+  try {
+    const r = await ddb.send(new QueryCommand({
+      TableName: MEM_TABLE,
+      KeyConditionExpression: "pk = :p",
+      ExpressionAttributeValues: { ":p": pk },
+      ScanIndexForward: false,
+      Limit: limit,
+    }));
+    return (r.Items || []).map((i) => ({ when: String(i.sk).slice(0, 10), text: i.text }));
+  } catch (err) {
+    console.error("memory read failed:", err.message);
+    return [];
+  }
+}
+let prefCache = { at: 0, items: [] };
+async function preferences() {
+  if (Date.now() - prefCache.at < 60 * 1000) return prefCache.items;
+  prefCache = { at: Date.now(), items: await memRead("pref#", 30) };
+  return prefCache.items;
+}
+
 // ---- job index: address / customer / work keywords -> job, so a job can be
 // found the way people actually refer to it, not just by number.
 let jobCache = { at: 0, jobs: [] };
@@ -380,11 +437,13 @@ async function executeTool(name, input) {
     const hits = toArray(r.body).filter((j) => String(j.active) === "1" || j.active === 1);
     if (!hits.length) return { error: `No job found with number ${num}` };
     const j = hits[0];
+    const remembered = await memRead(`job#${num}`, 8);
     return {
       job: {
         uuid: j.uuid, job_number: j.generated_job_id, status: j.status,
         address: j.job_address, description: String(j.job_description || "").slice(0, 800),
       },
+      ...(remembered.length ? { remembered } : {}),
     };
   }
 
@@ -521,6 +580,20 @@ async function executeTool(name, input) {
     return { ok: true };
   }
 
+  if (name === "remember") {
+    const fact = String(input.fact || "").trim().slice(0, 500);
+    if (!fact) return { error: "Nothing to remember" };
+    const num = String(input.job_number || "").replace(/\D/g, "");
+    try {
+      await memWrite(num ? `job#${num}` : "pref#", fact);
+      if (!num) prefCache = { at: 0, items: [] };
+      return { ok: true };
+    } catch (err) {
+      console.error("memory write failed:", err.message);
+      return { error: "Couldn't save that" };
+    }
+  }
+
   if (name === "search_jobs") {
     const index = await jobIndex();
     const q = tokens(input.query);
@@ -629,7 +702,10 @@ async function executeTool(name, input) {
   return { error: `Unknown tool: ${name}` };
 }
 
-function systemPrompt(anchor) {
+function systemPrompt(anchor, prefs = []) {
+  const prefNote = prefs.length
+    ? `\n\nWHAT YOU'VE LEARNED FROM STEVEN (carry these into everything you do — don't recite them back):\n${prefs.map((p) => `- ${p.text}`).join("\n")}`
+    : "";
   const anchorNote = anchor && anchor.uuid
     ? `\n\nCURRENT ANCHORED JOB (already confirmed earlier in this call — do NOT call find_job again unless the user names a different job): job ${anchor.job_number} at ${anchor.address}, uuid ${anchor.uuid}. Use this uuid directly and don't re-announce the job.`
     : "";
@@ -673,7 +749,9 @@ QUOTE BUILDING (your main purpose) — draft on screen, then commit:
 
 OTHER ACTIONS: bookings (check get_schedule for clashes first; propose nearest free slot on clash), notes (address to a person by starting the note "NAME: ..."), status changes, clone for re-inspection. Act on clear instructions immediately; ask ONE short question only when genuinely ambiguous.
 
-HONESTY: if something fails, say what failed in plain words and what you'll try instead. Never invent data. You cannot send SMS/email, touch invoices/payments, or delete anything.` + anchorNote;
+MEMORY: you keep notes between conversations. Save anything that would help next time with the remember tool — a preference, a price change, a decision about a job — quietly, without saying you did. Anything already remembered about a job comes back with it; use it naturally ("last time you said Taku wants a call Tuesday") rather than reciting it.
+
+HONESTY: if something fails, say what failed in plain words and what you'll try instead. Never invent data. You cannot send SMS/email, touch invoices/payments, or delete anything.` + anchorNote + prefNote;
 }
 
 /**
@@ -704,7 +782,7 @@ export async function runTurn(messages, onDelta, context = {}) {
       },
       body: JSON.stringify({
         model: MODEL, max_tokens: 1024, stream: true,
-        system: systemPrompt(anchor), tools, messages: apiMessages,
+        system: systemPrompt(anchor, await preferences()), tools, messages: apiMessages,
       }),
     });
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 300)}`);
