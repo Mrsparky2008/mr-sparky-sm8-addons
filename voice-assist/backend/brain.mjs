@@ -199,6 +199,25 @@ const tools = [
     },
   },
   {
+    name: "recall_similar_lines",
+    description:
+      "Search everything Mr Sparky has EVER quoted for lines like this one, so you can reuse " +
+      "Steven's own wording and see what he normally charges. Call this while drafting, once " +
+      "per distinct item, before you put a price on it. Returns past line names with how often " +
+      "they were used and the price range.",
+    input_schema: {
+      type: "object",
+      properties: {
+        description: {
+          type: "string",
+          description: "What the item is, in plain words — e.g. 'RCBO switchboard upgrade' or 'LED downlights'",
+        },
+      },
+      required: ["description"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "show_quote_draft",
     description:
       "Put the quote draft ON THE USER'S SCREEN, exactly as it will be written to " +
@@ -239,6 +258,46 @@ const tools = [
     },
   },
 ];
+
+// ---- quoting history: every line Mr Sparky has ever billed, cached per container.
+// This is the "learning" — Steven's own wording and prices, not a hand-built price book.
+const STOP = new Set(["and", "the", "a", "of", "to", "for", "with", "install", "supply", "new", "x", "in", "on", "at", "1", "2"]);
+function tokens(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP.has(w));
+}
+let histCache = { at: 0, lines: [] };
+async function materialHistory() {
+  if (Date.now() - histCache.at < 30 * 60 * 1000 && histCache.lines.length) return histCache.lines;
+  const res = await sm8("GET", "/jobmaterial.json");
+  if (res.status !== 200) return histCache.lines;
+  const byName = new Map();
+  for (const m of toArray(res.body)) {
+    if (String(m.active) !== "1" && m.active !== 1) continue;
+    const name = String(m.name || "").trim();
+    const price = Number(m.price);
+    if (!name || name.length < 4 || !isFinite(price) || price <= 0) continue;
+    const cur = byName.get(name) || { name, prices: [] };
+    cur.prices.push(price);
+    byName.set(name, cur);
+  }
+  histCache = {
+    at: Date.now(),
+    lines: [...byName.values()].map((v) => {
+      const s = v.prices.sort((a, b) => a - b);
+      return {
+        name: v.name,
+        tokens: new Set(tokens(v.name)),
+        times: s.length,
+        median: Number(s[Math.floor(s.length / 2)].toFixed(2)),
+        min: Number(s[0].toFixed(2)),
+        max: Number(s[s.length - 1].toFixed(2)),
+      };
+    }),
+  };
+  console.log(`voice: quoting history indexed — ${histCache.lines.length} distinct lines`);
+  return histCache.lines;
+}
 
 let staffCache = null;
 async function getStaff() {
@@ -406,6 +465,33 @@ async function executeTool(name, input) {
     return { ok: true };
   }
 
+  if (name === "recall_similar_lines") {
+    const hist = await materialHistory();
+    const q = tokens(input.description);
+    if (!q.length || !hist.length) return { matches: [], note: "No history to draw on." };
+    const scored = [];
+    for (const h of hist) {
+      const hit = q.filter((w) => h.tokens.has(w)).length;
+      if (!hit) continue;
+      // Relevance: how much of the query it covers, lightly favouring shorter,
+      // more specific names over sprawling ones.
+      scored.push({ ...h, score: hit / q.length + Math.min(h.tokens.size, 12) / 400 });
+    }
+    scored.sort((a, b) => b.score - a.score || b.times - a.times);
+    const matches = scored.slice(0, 8).map((m) => ({
+      name: m.name,
+      times_quoted: m.times,
+      price_typical: m.median,
+      price_range: m.min === m.max ? undefined : `${m.min} - ${m.max}`,
+    }));
+    return {
+      matches,
+      note: matches.length
+        ? "Steven's own past wording and prices. Draft using this wording and the typical price, and say the price so he can adjust it."
+        : "Nothing similar quoted before — ask him for the price.",
+    };
+  }
+
   if (name === "show_quote_draft") {
     const lines = Array.isArray(input.lines) ? input.lines : [];
     const total = lines.reduce((t, l) => t + (Number(l.quantity) || 1) * (Number(l.unit_price) || 0), 0);
@@ -493,7 +579,7 @@ QUOTE BUILDING (your main purpose) — draft on screen, then commit:
 1. They rattle off work conversationally. Turn it into professional quote lines ("Supply & install 1 x 63A circuit breaker / main switch") — trade shorthand is right HERE, in line names.
 2. SHOW, DON'T RECITE. Every time the draft changes, call show_quote_draft with the complete current draft — the exact names, quantities and prices you would write. Then say ONE short sentence and stop: "That's the draft on your screen — happy with it?". NEVER read the lines aloud. Never read a total aloud. They will read it themselves and tell you what to change.
 3. GROUPING IS THEIR CALL, and it can change mid-conversation. "Group those together" / "make it one line" = ONE line whose name covers the lot (e.g. "Upgrade DB to RCBOs — supply & install 1 x 63A main switch, 4 x 20A, 1 x 32A and 1 x 10A RCBOs"), priced as they say (a lump sum, or a quantity times a rate). "Itemise it" / "separate lines" = one line each. When they change their mind, REBUILD the whole draft their way and show it again — never keep the old structure because it was drafted first.
-4. Never invent prices — ask once, plainly.
+4. LEARN FROM HIS OWN HISTORY instead of asking for every price. For each distinct item, call recall_similar_lines first. If there's a clear match, draft it in HIS past wording at the typical price and mention the price in your one spoken sentence ("Priced the board work at 165 a line like last time — sing out if that's changed"). He corrects prices as he reads the draft; that's expected and welcome. Only ask for a price when nothing similar has ever been quoted.
 5. Only after clear approval ("yep", "go", "lock it in"): check list_billing_items, add each approved line EXACTLY as shown on the draft, then one short line confirming it's on. If they say no or amend, redraft and show again.
 6. You can ADD lines only — never delete or edit existing ones (no such ability exists). Removals are manual; say so if asked.
 
