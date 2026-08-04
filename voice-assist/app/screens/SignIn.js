@@ -2,8 +2,7 @@
 // one identity per person and nothing new to remember.
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView,
-  StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Cta, Logo } from "../components/ui";
 import { C, R, S, T } from "../lib/theme";
@@ -114,9 +113,17 @@ export default function SignIn({ onSignedIn }) {
     );
   }
 
+  // Keyboard handling is iOS's own (automaticallyAdjustKeyboardInsets) rather
+  // than KeyboardAvoidingView: the JS relayout on focus is what took the whole
+  // screen out the moment the cursor landed in the email field.
   return (
-    <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+    <View style={s.screen}>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive"
+      >
         <View style={s.logoWrap}>
           <Logo width={224} />
         </View>
@@ -162,7 +169,7 @@ export default function SignIn({ onSignedIn }) {
 
         <Text style={s.footer}>Same login as the Mr Sparky portal</Text>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

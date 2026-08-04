@@ -7,8 +7,7 @@
 // visual for that reason.
 import { useEffect, useRef, useState } from "react";
 import {
-  Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView,
-  StyleSheet, Text, TextInput, View,
+  Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { useKeepAwake } from "expo-keep-awake";
 import { Header, JobChip } from "../components/ui";
@@ -173,14 +172,22 @@ export default function CharlieLive({ job, onBack, onDraft }) {
     <View style={s.screen}>
       <Header title="Charlie" meta={phase === "idle" ? undefined : timer} onBack={onBack} />
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* No KeyboardAvoidingView — see SignIn: its relayout on focus is what
+          blacked the screen out. The transcript scroller takes keyboard insets
+          natively instead. */}
+      <View style={{ flex: 1 }}>
         {!!job && (
           <View style={s.chipWrap}>
             <JobChip job={job} />
           </View>
         )}
 
-        <ScrollView ref={scrollRef} style={s.log} contentContainerStyle={{ paddingBottom: 12 }}>
+        <ScrollView
+          ref={scrollRef}
+          style={s.log}
+          contentContainerStyle={{ paddingBottom: 12 }}
+          automaticallyAdjustKeyboardInsets
+        >
           {log.map((m) =>
             m.cls === "sys" ? (
               <Text key={m.id} style={s.sys}>{m.text}</Text>
@@ -243,7 +250,7 @@ export default function CharlieLive({ job, onBack, onDraft }) {
             <Text style={s.sendText}>Send</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

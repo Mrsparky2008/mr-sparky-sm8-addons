@@ -9,6 +9,7 @@
 import { useCallback, useState } from "react";
 import { SafeAreaView, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import ErrorBoundary from "./components/ErrorBoundary";
 import SignIn from "./screens/SignIn";
 import Jobs from "./screens/Jobs";
 import JobCard from "./screens/JobCard";
@@ -20,6 +21,14 @@ import * as VV from "./lib/vapiVoice";
 import { C, suburb } from "./lib/theme";
 
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <Shell />
+    </ErrorBoundary>
+  );
+}
+
+function Shell() {
   const [email, setEmail] = useState(null);           // null = not signed in
   const [stack, setStack] = useState([{ name: "jobs" }]);
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
