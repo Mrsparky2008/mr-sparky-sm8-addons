@@ -3,6 +3,32 @@
 Implement exactly. Visual reference: https://claude.ai/code/artifact/0dc1b247-0554-4100-bb63-7ca3b28539b1
 This file wins over the artifact if they ever disagree. Steven approves changes; nobody else.
 
+## BUILT — app v2.0 (build 16), 2026-08-04
+
+All six screens exist. Where the code lives:
+- Tokens/type/spacing → `app/lib/theme.js` (this file is the source; theme.js follows it)
+- Shared furniture (Header, JobChip, StatusChip, Card, Cta, Empty) → `app/components/ui.js`
+- Real logo, generated from `ms-logo.svg`, colours untouched → `app/components/Logo.js`
+- Screens → `app/screens/{SignIn,Jobs,CharlieLive,QuoteWorkshop,Diary,JobCard}.js`
+- Router → `App.js` (plain stack in state; six screens don't need React Navigation)
+
+Decisions taken during the build, worth knowing before changing anything:
+- **Sign-in is Cognito, same pool as the subcontractor portal** (`us-east-1_xOJ0DPHK6`,
+  client `5pvilebmogbvcf1edja0uatcrj`). USER_AUTH answers the password challenge in one
+  call, so it's a native email/password screen, not a hosted-UI redirect. Refresh token
+  in the Keychain behind Face ID; ID token in memory only.
+- **Charlie stays mounted behind the quote screen.** Unmounting runs his cleanup, which
+  hangs up the call — "Keep talking" would come back to a dead line.
+- **"Lock it in" speaks the approval to Charlie** rather than writing billing itself, so
+  the commit keeps going through the one add-only, duplicate-guarded path already proven.
+- **The screens are fed by new backend routes** `/api/jobs`, `/api/job/{n}`, `/api/diary`
+  on the same Lambda, reusing the brain's ServiceM8 code and verifying the Cognito token
+  in-process (no API Gateway — the Function URL is what gives us response streaming).
+- **The local-mic voice path is not in the new structure.** Dead since the Vapi pivot on
+  31 Jul; recoverable from git if ever wanted.
+
+Not yet built: the entitlement gate (paid-seat pitch instead of a dead control).
+
 ## Tokens
 ```
 bg           #0F1B24 → use #0f1b2d (matches scaffold)   app background

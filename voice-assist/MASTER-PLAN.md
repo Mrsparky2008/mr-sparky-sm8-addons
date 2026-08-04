@@ -46,6 +46,12 @@ One brain, many faces. Nothing here replaces anything already built.
   ANY Vapi number operation — Vapi hijacks it on import, proven 2026-08-01).
 
 ## Scenario 4 — Techs/contractors: "MR SPARKY APP" (the $99 moment)
+- **STATUS 2026-08-04: the six designed screens are BUILT** (app v2.0, build 16) — sign in,
+  jobs, Charlie live, quote workshop, day diary, job card. Sign-in is the SAME Cognito pool
+  as the subbie portal, which is the "auth = existing portal credentials" decision below,
+  delivered. See DESIGN.md "BUILT" for where everything lives. Voice still runs through
+  Vapi in-app; the Apple-ears/no-per-minute stack below is still the eventual target.
+  Not yet built: the entitlement gate.
 - **Trigger**: Charlie proven + a second person wants access. NOT before.
 - **Stack**: Native app (Expo/React Native, iPhone first) —
   **Apple on-device speech (free ears) + brain via /chat SSE + ElevenLabs direct (Charlie)**.
