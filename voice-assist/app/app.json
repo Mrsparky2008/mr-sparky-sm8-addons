@@ -3,7 +3,8 @@
     "name": "AI Assist",
     "slug": "mr-sparky-ai-assistant",
     "owner": "mr_sparky",
-    "version": "2.0.0",
+    "version": "2.1.0",
+    "scheme": "mrsparky-aiassist",
     "extra": {
       "eas": {
         "projectId": "d31c0122-3886-4d57-8388-ec1bfd817f9f"

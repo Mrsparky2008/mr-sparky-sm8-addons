@@ -6,9 +6,10 @@
 //
 // The router is a plain stack in state. React Navigation would bring a native
 // dependency and a lot of ceremony for six screens that only ever push and pop.
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import * as Linking from "expo-linking";
 import ErrorBoundary from "./components/ErrorBoundary";
 import SignIn from "./screens/SignIn";
 import Jobs from "./screens/Jobs";
@@ -30,6 +31,7 @@ export default function App() {
 
 function Shell() {
   const [email, setEmail] = useState(null);           // null = not signed in
+  const emailRef = useRef(null);                      // readable from listeners
   const [stack, setStack] = useState([{ name: "jobs" }]);
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
   const [committing, setCommitting] = useState(false);
@@ -63,11 +65,48 @@ function Shell() {
     setTimeout(() => { setCommitting(false); pop(); }, 900);
   }, [pop]);
 
+  // Deep link from the ServiceM8 job card: mrsparky-aiassist://job/167483.
+  // The add-on is the doorway, this is the room — it opens the job card for
+  // that job, from which Charlie is one tap away already anchored. It stops
+  // short of dialling straight into a live mic session off a single tap.
+  const pendingJob = useRef(null);
+
+  const openLink = useCallback((url) => {
+    const number = /(?:^|\/)job\/(\d+)/.exec(String(url || ""))?.[1];
+    if (!number) return;
+    // Arrived before sign-in finished — hold it and replay once we're in.
+    if (!emailRef.current) { pendingJob.current = number; return; }
+    setStack((s) => {
+      const already = s[s.length - 1];
+      if (already?.name === "job" && already.job?.job_number === number) return s;
+      return [{ name: "jobs" }, { name: "job", job: { job_number: number, address: "" } }];
+    });
+  }, []);
+
+  useEffect(() => {
+    Linking.getInitialURL().then((url) => { if (url) openLink(url); }).catch(() => {});
+    const sub = Linking.addEventListener("url", ({ url }) => openLink(url));
+    return () => sub.remove();
+  }, [openLink]);
+
+  // A cold launch from the job card lands here before Face ID has finished,
+  // so the job waits and is replayed the moment we're signed in.
+  const handleSignedIn = useCallback((who) => {
+    emailRef.current = who;
+    setEmail(who);
+    const held = pendingJob.current;
+    if (held) {
+      pendingJob.current = null;
+      setStack([{ name: "jobs" }, { name: "job", job: { job_number: held, address: "" } }]);
+    }
+  }, []);
+
   async function handleSignOut() {
     await VV.stop().catch(() => {});
     await signOut();
     setStack([{ name: "jobs" }]);
     setDraft(null);
+    emailRef.current = null;
     setEmail(null);
   }
 
@@ -75,7 +114,7 @@ function Shell() {
     return (
       <SafeAreaView style={s.root}>
         <StatusBar style="light" />
-        <SignIn onSignedIn={setEmail} />
+        <SignIn onSignedIn={handleSignedIn} />
       </SafeAreaView>
     );
   }

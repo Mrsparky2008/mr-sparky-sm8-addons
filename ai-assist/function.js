@@ -51,11 +51,28 @@ async function chatRelay(event) {
   }
 }
 
+// The app deep-links by JOB NUMBER (that is what its screens and the brain
+// speak), but the add-on is handed a UUID. Resolve it here, server-side, where
+// the temp OAuth token works and there is no frame CSP in the way.
+async function jobNumberFor(uuid, token) {
+  try {
+    var res = await fetch('https://api.servicem8.com/api_1.0/job/' + encodeURIComponent(uuid) + '.json', {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+    });
+    if (!res.ok) { console.log('AI Assist: job lookup HTTP', res.status); return ''; }
+    var job = await res.json();
+    return String((job && job.generated_job_id) || '');
+  } catch (e) {
+    console.log('AI Assist: job lookup failed:', e && e.message);
+    return '';
+  }
+}
+
 exports.handler = async (event) => {
   try {
     var token = event && event.auth && event.auth.accessToken;
     var jobUUID = event && event.eventArgs && event.eventArgs.jobUUID;
-    console.log('AI Assist v4.7 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
+    console.log('AI Assist v5.1 invoked | event:', event && event.eventName, '| token:', !!token, '| job:', jobUUID || '(none)');
 
     if (event && event.eventName === 'ai_assist_chat') {
       return chatRelay(event);
@@ -64,6 +81,8 @@ exports.handler = async (event) => {
     if (!token || !jobUUID) {
       return errorPage('Missing session token or job — open a Job Card and click AI Assist again.');
     }
+
+    var jobNumber = await jobNumberFor(jobUUID, token);
 
     var html = `
 <html>
@@ -86,10 +105,13 @@ exports.handler = async (event) => {
 			#mic{background:#eef3fb;color:#1a73e8;border:0;border-radius:8px;padding:0 13px;font-size:17px;cursor:pointer;display:none;}
 			#mic.listening{background:#e53935;color:#fff;}
 			button:disabled{opacity:.5;}
+			#applaunch{display:block;background:#19488f;color:#fff;text-decoration:none;padding:13px 14px;font-size:15px;font-weight:bold;text-align:center;border-radius:8px;margin:0 0 10px;}
+			#applaunch small{display:block;font-weight:normal;font-size:12px;opacity:.85;margin-top:3px;}
 		</style>
 	</head>
 	<body style="font-family:sans-serif;margin:10px;">
 		<div id="aihead">AI Assist <a id="popout" target="_blank" rel="noopener" style="float:right;color:#fff;font-weight:normal;font-size:12px;text-decoration:underline;">Open in tab (for voice)</a><button id="spk" type="button" title="Read replies aloud" style="float:right;background:none;border:0;color:#fff;font-size:15px;cursor:pointer;margin-right:12px;padding:0;">&#128263;</button></div>
+		<a id="applaunch" style="display:none">Open in AI Assist app<small>Talk to Charlie about this job</small></a>
 		<div id="log">
 			<div class="msg ai">G'day. I'm your admin assistant for this job. I can book it in, move or cancel bookings, check the diary for free slots, add notes, set reminders, change status, or clone the job. What do you need?</div>
 		</div>
@@ -104,6 +126,16 @@ exports.handler = async (event) => {
 
 			var TOKEN = ` + jsEmbed(token) + `;
 			var JOB = ` + jsEmbed(jobUUID) + `;
+			var JOBNUM = ` + jsEmbed(jobNumber) + `;
+			// The app registers mrsparky-aiassist://. A real anchor the user taps
+			// is the reliable way out of a webview — a scripted redirect gets
+			// swallowed without a gesture. Hidden entirely if we could not
+			// resolve a job number, so it can never be a button that does nothing.
+			if (JOBNUM) {
+				var launch = document.getElementById('applaunch');
+				launch.href = 'mrsparky-aiassist://job/' + encodeURIComponent(JOBNUM);
+				launch.style.display = 'block';
+			}
 			var URL_ = ` + jsEmbed(BACKEND_URL) + `;
 			var chatlog = [];
 			var busy = false;
