@@ -168,12 +168,25 @@ export async function unlock() {
     await refresh();
     return { ok: true, email: cachedEmail || (await storedEmail()) };
   } catch (err) {
-    // A refresh token that no longer works means a real sign-in is needed —
-    // password changed, or Steven revoked the session.
-    await signOut();
-    return { ok: false, expired: true };
+    // Only throw the session away when Cognito says it is genuinely dead —
+    // password changed, or revoked. A refresh that failed because the ute is
+    // in a tunnel must NOT wipe a good sign-in and demand a password from
+    // someone who has no signal to type it into.
+    if (REJECTED.has(err?.code)) {
+      await signOut();
+      return { ok: false, expired: true };
+    }
+    return { ok: false, offline: true };
   }
 }
+
+// Cognito's verdicts that mean "this refresh token will never work again".
+const REJECTED = new Set([
+  "NotAuthorizedException",
+  "UserNotFoundException",
+  "PasswordResetRequiredException",
+  "UserNotConfirmedException",
+]);
 
 async function refresh() {
   const token = await SecureStore.getItemAsync(KEY_REFRESH);

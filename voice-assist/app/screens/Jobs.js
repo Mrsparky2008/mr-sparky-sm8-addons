@@ -15,9 +15,9 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, email }) {
   const [error, setError] = useState("");
   const seq = useRef(0);
 
-  async function load(query, { quiet } = {}) {
+  async function load(query) {
     const mine = ++seq.current;
-    if (!quiet) setLoading(true);
+    setLoading(true);
     setError("");
     try {
       const list = await fetchJobs(query);
@@ -60,7 +60,7 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, email }) {
         contentContainerStyle={s.list}
         keyboardShouldPersistTaps="handled"
         refreshControl={
-          <RefreshControl refreshing={loading && jobs.length > 0} onRefresh={() => load(q.trim(), { quiet: true })} tintColor={C.muted} />
+          <RefreshControl refreshing={loading && jobs.length > 0} onRefresh={() => load(q.trim())} tintColor={C.muted} />
         }
       >
         <Text style={[T.label, { marginBottom: 10 }]}>{q.trim() ? "Matches" : "Recent"}</Text>

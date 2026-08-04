@@ -38,8 +38,14 @@ export default function SignIn({ onSignedIn }) {
         const res = await unlock();
         if (cancelled) return;
         if (res.ok) { onSignedIn(res.email); return; }
-        if (res.expired) setError("That session has expired — sign in again.");
-        setReturning(false);
+        // Only a dead session sends them back to the password field. Dismissing
+        // Face ID should leave the Unlock button sitting there to try again.
+        if (res.expired) {
+          setError("That session has expired — sign in again.");
+          setReturning(false);
+        } else if (res.offline) {
+          setError("Can't reach the network. Try again once you've got signal.");
+        }
       } catch {
         if (!cancelled) setReturning(false);
       } finally {
@@ -89,8 +95,12 @@ export default function SignIn({ onSignedIn }) {
     setReturning(true);
     const res = await unlock();
     if (res.ok) { onSignedIn(res.email); return; }
-    if (res.expired) setError("That session has expired — sign in again.");
-    setReturning(false);
+    if (res.expired) {
+      setError("That session has expired — sign in again.");
+      setReturning(false);
+    } else if (res.offline) {
+      setError("Can't reach the network. Try again once you've got signal.");
+    }
   }
 
   // Hold the logo until we know whether this phone already has a session —
