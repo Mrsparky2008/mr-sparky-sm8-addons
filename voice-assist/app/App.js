@@ -97,7 +97,12 @@ function Shell() {
         )}
 
         {top.name === "job" && (
-          <JobCard jobNumber={top.job.job_number} onBack={pop} onTalk={openCharlie} />
+          <JobCard
+            jobNumber={top.job.job_number}
+            onBack={pop}
+            onTalk={openCharlie}
+            onDiary={() => push({ name: "diary" })}
+          />
         )}
 
         {top.name === "diary" && <Diary onBack={pop} onTalk={openCharlie} />}

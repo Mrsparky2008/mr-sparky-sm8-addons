@@ -4,7 +4,7 @@ import {
   ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet,
   Text, TextInput, View,
 } from "react-native";
-import { Card, Cta, Empty, Header, StatusChip } from "../components/ui";
+import { Card, Empty, Header, StatusChip, Tile, TileGrid } from "../components/ui";
 import { C, R, S, T, mono, oneLine, suburb } from "../lib/theme";
 import { fetchJobs } from "../lib/api";
 
@@ -76,12 +76,16 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, email }) {
         )}
       </ScrollView>
 
+      {/* Job-Actions style tiles: the rest of the app has to be VISIBLE, not
+          hidden behind two grey words. */}
       <View style={s.dock}>
-        <Cta label="🎙  Talk to Charlie" onPress={() => onTalk(null)} sub="or pick a job first" />
-        <View style={s.dockRow}>
-          <Pressable onPress={onDiary} hitSlop={8}><Text style={s.link}>My day</Text></Pressable>
-          <Pressable onPress={onSignOut} hitSlop={8}><Text style={s.link}>Sign out</Text></Pressable>
-        </View>
+        <TileGrid>
+          <Tile icon="🎙" label="Talk to Charlie" tone="brand" onPress={() => onTalk(null)} />
+          <Tile icon="📖" label="My day" onPress={onDiary} />
+        </TileGrid>
+        <Pressable onPress={onSignOut} hitSlop={8} style={s.signOutWrap}>
+          <Text style={s.link}>Sign out</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -122,6 +126,6 @@ const s = StyleSheet.create({
     paddingHorizontal: S.screen, paddingTop: 12, paddingBottom: 8,
     borderTopColor: C.line, borderTopWidth: 1, backgroundColor: C.bg,
   },
-  dockRow: { flexDirection: "row", justifyContent: "space-between", paddingTop: 12, paddingBottom: 4 },
+  signOutWrap: { alignItems: "center", paddingTop: 12, paddingBottom: 2 },
   link: { color: C.muted, fontSize: 13, fontWeight: "600" },
 });

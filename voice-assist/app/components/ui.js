@@ -78,6 +78,36 @@ export function Empty({ children }) {
   return <Text style={s.empty}>{children}</Text>;
 }
 
+/**
+ * ServiceM8's job-card row: icon, label, right-aligned value, chevron. Reading
+ * the same way in both apps is the point — Steven moves between them all day.
+ */
+export function Row({ icon, label, value, onPress, dim, last }) {
+  const body = (
+    <View style={[s.row, last && { borderBottomWidth: 0 }]}>
+      {!!icon && <Text style={s.rowIcon}>{icon}</Text>}
+      <Text style={[s.rowLabel, dim && { color: C.muted }]}>{label}</Text>
+      {!!value && <Text style={[s.rowValue, mono]}>{value}</Text>}
+      {!!onPress && <Text style={s.chevron}>›</Text>}
+    </View>
+  );
+  return onPress ? <Pressable onPress={onPress}>{body}</Pressable> : body;
+}
+
+/** A Job-Actions style tile. Two per row, glove-sized. */
+export function Tile({ icon, label, onPress, tone }) {
+  return (
+    <Pressable onPress={onPress} style={[s.tile, tone === "brand" && { borderColor: C.brand }]}>
+      <Text style={s.tileIcon}>{icon}</Text>
+      <Text style={s.tileLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+export function TileGrid({ children }) {
+  return <View style={s.grid}>{children}</View>;
+}
+
 const s = StyleSheet.create({
   header: {
     flexDirection: "row", alignItems: "center", gap: 10,
@@ -117,4 +147,22 @@ const s = StyleSheet.create({
   ctaSub: { color: C.muted, fontSize: 12, textAlign: "center", marginTop: 7 },
 
   empty: { color: C.muted, fontSize: 13.5, textAlign: "center", paddingVertical: 26, lineHeight: 19 },
+
+  row: {
+    flexDirection: "row", alignItems: "center", gap: 12, minHeight: S.touch,
+    paddingVertical: 12, borderBottomColor: C.line, borderBottomWidth: 1,
+  },
+  rowIcon: { fontSize: 16, width: 22, textAlign: "center" },
+  rowLabel: { flex: 1, color: C.ink, fontSize: 15 },
+  rowValue: { color: C.muted, fontSize: 15 },
+  chevron: { color: C.muted, fontSize: 22, lineHeight: 24, marginLeft: 2 },
+
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  tile: {
+    flexGrow: 1, flexBasis: "47%", minHeight: 84, backgroundColor: C.panel,
+    borderColor: C.line, borderWidth: 1, borderRadius: R.card,
+    padding: 14, justifyContent: "space-between",
+  },
+  tileIcon: { fontSize: 22 },
+  tileLabel: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
 });
