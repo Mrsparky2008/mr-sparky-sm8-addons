@@ -3,7 +3,7 @@
     "name": "AI Assist",
     "slug": "mr-sparky-ai-assistant",
     "owner": "mr_sparky",
-    "version": "0.1.0",
+    "version": "2.0.0",
     "extra": {
       "eas": {
         "projectId": "d31c0122-3886-4d57-8388-ec1bfd817f9f"
@@ -28,6 +28,7 @@
         "NSPhotoLibraryUsageDescription": "AI Assist can attach photos from your library to job cards.",
         "NSPhotoLibraryAddUsageDescription": "AI Assist can save job photos to your library.",
         "NSCameraUsageDescription": "AI Assist can take photos to attach to job cards.",
+        "NSFaceIDUsageDescription": "Face ID unlocks AI Assist so you only sign in once on this phone.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -48,7 +49,8 @@
           "speechRecognitionPermission": "AI Assist transcribes what you say to hold the conversation."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-secure-store"
     ]
   }
 }

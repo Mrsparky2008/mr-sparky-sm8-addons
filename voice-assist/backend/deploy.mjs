@@ -9,7 +9,9 @@ import fs from "node:fs";
 const FUNCTION = "mr-sparky-ai-assist";
 const REGION = "ap-southeast-2";
 const ZIP = "function.zip";
-const FILES = ["index.mjs", "brain.mjs"];
+// Every .mjs in this directory — a forgotten entry here ships a Lambda that
+// cannot even import itself, which takes the phone line down with it.
+const FILES = fs.readdirSync(".").filter((f) => f.endsWith(".mjs") && f !== "deploy.mjs").sort();
 
 // Pre-flight: the app page's inline <script> lives in a template literal that
 // node --check never parses — parse it for real (lesson from Henri's dashboard).

@@ -404,7 +404,7 @@ function fuzzyScore(heard, known) {
 }
 
 let jobCache = { at: 0, jobs: [] };
-async function jobIndex() {
+export async function jobIndex() {
   if (Date.now() - jobCache.at < 10 * 60 * 1000 && jobCache.jobs.length) return jobCache.jobs;
   const [jobsRes, contactsRes] = await Promise.all([
     sm8("GET", "/job.json"),
@@ -458,7 +458,7 @@ function staffName(staff, uuid) {
   return hit ? hit.name : uuid || "(unassigned)";
 }
 
-async function executeTool(name, input) {
+export async function executeTool(name, input) {
   const jobU = String(input.job_uuid || "").trim();
 
   if (name === "find_job") {
@@ -773,7 +773,7 @@ async function executeTool(name, input) {
 
 // Everything about the anchored job, fetched ONCE and carried in the prompt so
 // the assistant answers from what it already knows instead of narrating lookups.
-async function buildDossier(uuid) {
+export async function buildDossier(uuid) {
   const [j, contacts, notes, acts, mats, staff] = await Promise.all([
     sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),
     sm8("GET", "/jobcontact.json"),

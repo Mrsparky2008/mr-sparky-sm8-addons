@@ -14,7 +14,8 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
-import { runTurn } from "./brain.mjs";
+import { runTurn, jobIndex, buildDossier, executeTool } from "./brain.mjs";
+import { verifyIdToken, bearer } from "./auth.mjs";
 
 const polly = new PollyClient({});
 const transcribe = new TranscribeStreamingClient({});
@@ -83,6 +84,15 @@ async function tts(text) {
   return Buffer.from(bytes).toString("base64");
 }
 
+// "Today" means today where the van is, not where the Lambda is.
+function todayInSydney() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 function sse(stream, obj) {
   stream.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
@@ -111,7 +121,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
     if (method === "OPTIONS") {
       return respond(204, {
         "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, x-app-pin",
+        "Access-Control-Allow-Headers": "Content-Type, x-app-pin, Authorization",
       }, "");
     }
     if (method === "POST" && path === "/llm/chat/completions") {
@@ -148,9 +158,20 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         return;
       }
 
+      const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+
+      // The app pre-anchors: when Charlie is opened from a job card it injects
+      // a system line naming the job, so the conversation starts where the user
+      // already is instead of asking which job we're on.
+      const appJob = rawMessages
+        .filter((m) => m.role === "system" && typeof m.content === "string" && m.content.startsWith("APP_CONTEXT:"))
+        .map((m) => /job\s+(\d+)/i.exec(m.content)?.[1])
+        .filter(Boolean)
+        .pop();
+
       // Vapi speaks OpenAI chat format; the brain wants {role, text} pairs and
       // supplies its own system prompt, so system messages are dropped.
-      const messages = (Array.isArray(body.messages) ? body.messages : [])
+      const messages = rawMessages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({
           role: m.role,
@@ -172,7 +193,17 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       const callId = body.call?.id || null;
       try {
         chunk({ role: "assistant" });
-        const { anchor } = await runTurn(messages, async (delta) => chunk({ content: delta }), { anchor: callAnchors.get(callId) || null });
+        let anchorIn = callAnchors.get(callId) || null;
+        // Anchor from the app's context line once per call — after that the
+        // per-call anchor carries it, and a re-find would just cost latency.
+        if (!anchorIn && appJob) {
+          try {
+            const found = await executeTool("find_job", { job_number: appJob });
+            // runTurn fills in the dossier itself for any anchor with a uuid.
+            if (found?.job?.uuid) anchorIn = { ...found.job };
+          } catch (err) { console.error("app pre-anchor failed:", err); }
+        }
+        const { anchor } = await runTurn(messages, async (delta) => chunk({ content: delta }), { anchor: anchorIn });
         rememberAnchor(callId, anchor);
         chunk({}, "stop");
       } catch (err) {
@@ -205,7 +236,13 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
     }
     if (method === "POST" && path === "/chat") {
       const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
-      if (!PIN || headers["x-app-pin"] !== PIN) {
+      // Two ways in: the web page's PIN, or a signed-in app's Cognito token.
+      // The app stopped carrying a PIN once it grew a real sign-in screen.
+      let authed = Boolean(PIN) && headers["x-app-pin"] === PIN;
+      if (!authed && bearer(headers)) {
+        try { await verifyIdToken(bearer(headers)); authed = true; } catch {}
+      }
+      if (!authed) {
         return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ ok: false, error: "bad pin" }));
       }
       let body = {};
@@ -257,6 +294,70 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       stream.end();
       return;
     }
+    // ---- Native app data routes -------------------------------------------
+    // The voice loop is Charlie's; these are for the screens around him — the
+    // jobs list, the day diary, a job card. Signed in with the SAME Cognito
+    // identity as the subcontractor portal, so there is one login per person.
+    if (method === "GET" && path.startsWith("/api/")) {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const jsonOut = (status, body) => respond(status, {
+        "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      }, JSON.stringify(body));
+
+      let who;
+      try {
+        who = await verifyIdToken(bearer(headers));
+      } catch (err) {
+        // The app treats 401 as "sign in again", which is the right move for
+        // every failure here — expired, forged or misconfigured all end the
+        // same way from the phone's point of view.
+        return jsonOut(401, { ok: false, error: "not signed in" });
+      }
+
+      const q = event.queryStringParameters || {};
+
+      if (path === "/api/me") return jsonOut(200, { ok: true, ...who });
+
+      if (path === "/api/jobs") {
+        const query = String(q.q || "").trim();
+        if (!query) {
+          // No search yet: the most recent jobs, which is what "recents" means
+          // on a phone that has just been opened. Job numbers climb over time.
+          const index = await jobIndex();
+          const recent = [...index]
+            .sort((a, b) => Number(b.number) - Number(a.number))
+            .slice(0, 12)
+            .map((j) => ({ job_uuid: j.uuid, job_number: j.number, status: j.status, address: j.address, contact: j.contact || undefined, work: j.description ? j.description.slice(0, 90) : undefined }));
+          return jsonOut(200, { ok: true, matches: recent });
+        }
+        const result = await executeTool("search_jobs", { query });
+        return jsonOut(200, { ok: true, ...result });
+      }
+
+      const jobMatch = /^\/api\/job\/(\d+)$/.exec(path);
+      if (jobMatch) {
+        const index = await jobIndex();
+        const job = index.find((j) => String(j.number) === jobMatch[1]);
+        if (!job) return jsonOut(404, { ok: false, error: "no such job" });
+        const dossier = await buildDossier(job.uuid);
+        return jsonOut(200, {
+          ok: true,
+          job: { job_uuid: job.uuid, job_number: job.number, address: job.address, contact: job.contact || "" },
+          ...dossier,
+        });
+      }
+
+      if (path === "/api/diary") {
+        // A day in Sydney time. get_schedule wants "YYYY-MM-DD HH:MM:SS".
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(q.date || "")) ? q.date : todayInSydney();
+        const result = await executeTool("get_schedule", { from: `${date} 00:00:00`, to: `${date} 23:59:59` });
+        return jsonOut(200, { ok: true, date, ...result });
+      }
+
+      return jsonOut(404, { ok: false, error: "no such route" });
+    }
+
     return respond(404, { "Content-Type": "text/plain" }, "Not found");
   } catch (err) {
     console.error("handler error:", err);

@@ -20,11 +20,28 @@ export function isReady() { return !!vapi; }
  *   "speaking"   : { who: "assistant", on: bool }
  *   "error"      : message
  */
-export async function start({ onEvent }) {
-  handlers = { onEvent: onEvent || (() => {}) };
+export async function start({ onEvent, job }) {
+  handlers = { onEvent: onEvent || (() => {}), job: job || null };
   if (!vapi) {
     vapi = new Vapi(VAPI_PUBLIC_KEY);
-    vapi.on("call-start", () => handlers.onEvent("status", "live"));
+    vapi.on("call-start", () => {
+      // Opened from a job card or the jobs list: tell the brain which job we
+      // are on so it doesn't open by asking a question we already answered.
+      // Sent as a system line, so it never appears as something the user said.
+      const j = handlers.job;
+      if (j?.job_number) {
+        try {
+          vapi.send({
+            type: "add-message",
+            message: {
+              role: "system",
+              content: `APP_CONTEXT: the user has job ${j.job_number}${j.address ? ` (${j.address})` : ""} open on screen. Anchor to it and get straight to work.`,
+            },
+          });
+        } catch {}
+      }
+      handlers.onEvent("status", "live");
+    });
     vapi.on("call-end", () => handlers.onEvent("status", "ended"));
     vapi.on("speech-start", () => handlers.onEvent("speaking", { who: "assistant", on: true }));
     vapi.on("speech-end", () => handlers.onEvent("speaking", { who: "assistant", on: false }));

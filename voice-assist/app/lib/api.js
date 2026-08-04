@@ -2,6 +2,7 @@
 // read a streaming body, so we use expo/fetch (WinterCG, streaming-capable).
 import { fetch as expoFetch } from "expo/fetch";
 import { BACKEND } from "./config";
+import { getIdToken } from "./auth";
 
 // Hermes may lack TextDecoder; decode UTF-8 ourselves if needed. We only ever
 // decode complete SSE lines, so multi-byte chars never split across calls.
@@ -23,17 +24,51 @@ function utf8(bytes) {
 }
 
 function httpError(status) {
-  const e = new Error(status === 401 ? "bad pin" : "backend error " + status);
+  const e = new Error(status === 401 ? "signed out" : "backend error " + status);
   e.status = status;
   return e;
 }
 
+/**
+ * A signed-in GET against the app's data routes. 401 means the session is
+ * genuinely gone (the token is refreshed underneath us before it expires), so
+ * callers should send the user back to the sign-in screen rather than retry.
+ */
+async function apiGet(path) {
+  const token = await getIdToken();
+  const res = await fetch(BACKEND + path, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw httpError(401);
+  let j = null;
+  try { j = await res.json(); } catch {}
+  if (!res.ok || !j?.ok) throw new Error(j?.error || `backend error ${res.status}`);
+  return j;
+}
+
+/** Recent jobs when q is empty, fuzzy search when it isn't. */
+export async function fetchJobs(q) {
+  const j = await apiGet(`/api/jobs${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+  return j.matches || [];
+}
+
+/** Everything the job card shows: status, description, contacts, billing, notes. */
+export function fetchJob(jobNumber) {
+  return apiGet(`/api/job/${encodeURIComponent(jobNumber)}`);
+}
+
+/** One day's bookings, Sydney time. Omit date for today. */
+export function fetchDiary(date) {
+  return apiGet(`/api/diary${date ? `?date=${encodeURIComponent(date)}` : ""}`);
+}
+
 // One conversation turn. Resolves { reply } after the stream ends.
 // onDelta(text) per text fragment; onAudio(seq, b64mp3) per Polly chunk.
-export async function chatTurn({ messages, pin, onDelta, onAudio }) {
+export async function chatTurn({ messages, onDelta, onAudio }) {
+  const token = await getIdToken();
   const res = await expoFetch(BACKEND + "/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-app-pin": pin },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ messages }),
   });
   if (res.status === 401) throw httpError(401);
@@ -75,9 +110,10 @@ export async function chatTurn({ messages, pin, onDelta, onAudio }) {
 
 // Expo Go speech path: send a 16-bit PCM WAV (base64) to /stt, get text back.
 export async function sttTranscribe({ wavB64, pin }) {
+  // Legacy Expo Go path — still PIN-authed; it predates the sign-in screen.
   const res = await fetch(BACKEND + "/stt", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-app-pin": pin },
+    headers: { "Content-Type": "application/json", "x-app-pin": pin || "" },
     body: JSON.stringify({ wav: wavB64 }),
   });
   if (res.status === 401) throw httpError(401);
