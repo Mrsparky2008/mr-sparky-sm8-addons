@@ -119,9 +119,11 @@ export default function App() {
     return () => { if (VAPI_MODE) VV.stop(); Thinking.release(); };
   }, []);
 
-  // Thinking bed + on-screen pulse follow the phase, wherever it's set from.
+  // Thinking cue follows the phase. In Vapi mode the cue is VISUAL ONLY: a
+  // local audio player steals the iOS audio session from the WebRTC call,
+  // which killed both the mic and Charlie's voice (v1.1).
   useEffect(() => {
-    if (phase === "thinking") Thinking.start(); else Thinking.stop();
+    if (!VAPI_MODE) { if (phase === "thinking") Thinking.start(); else Thinking.stop(); }
     if (phase === "thinking") {
       const loop = Animated.loop(Animated.sequence([
         Animated.timing(think, { toValue: 1, duration: 620, useNativeDriver: true }),
@@ -135,6 +137,7 @@ export default function App() {
   // ---------- Vapi session ----------
   const vapiLiveRef = useRef(false);
   const partialRef = useRef({ user: "", ai: "" });
+  const aiTailRef = useRef({ text: "", at: 0 }); // last assistant line, for gluing/deduping
 
   function onVapiEvent(kind, payload) {
     if (kind === "status") {
@@ -157,8 +160,31 @@ export default function App() {
         if (final) { if (text.trim()) addMsg("me", text.trim()); setLiveText(""); }
         else setLiveText(text);
       } else {
-        if (final) { if (text.trim()) addMsg("ai", text.trim()); setStreamAi(""); }
-        else setStreamAi(text);
+        if (!final) { setStreamAi(text); return; }
+        const t = text.trim();
+        setStreamAi("");
+        if (!t) return;
+        const now = Date.now();
+        const prev = aiTailRef.current;
+        // Vapi reports the assistant's speech sentence by sentence, and repeats
+        // a line if the audio restarts — glue the run together, drop the echoes.
+        if (prev.at && now - prev.at < 6000) {
+          if (prev.text.includes(t)) return;                       // already said
+          setLog((l) => {
+            const copy = [...l];
+            for (let i = copy.length - 1; i >= 0; i--) {
+              if (copy[i].cls === "ai") {
+                copy[i] = { ...copy[i], text: `${copy[i].text} ${t}`.trim() };
+                break;
+              }
+            }
+            return copy;
+          });
+          aiTailRef.current = { text: `${prev.text} ${t}`.trim(), at: now };
+          return;
+        }
+        addMsg("ai", t);
+        aiTailRef.current = { text: t, at: now };
       }
       return;
     }
