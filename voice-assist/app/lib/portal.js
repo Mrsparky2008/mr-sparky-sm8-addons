@@ -106,7 +106,7 @@ export const claims = (name) => get(`/api/claims${qs({ name })}`);
  * Every claim awaiting a decision, across everyone — the admin inbox.
  *
  * Needs the `all=1` parameter added to the portal's existing GET /api/claims
- * (see docs/portal-claims-all.patch in this repo). Until that is deployed this
+ * (see docs/portal-app-support.patch in this repo). Until that is deployed this
  * throws rather than quietly showing one person's claims and calling it the
  * inbox. Same route and method, so no new API Gateway route is involved.
  */

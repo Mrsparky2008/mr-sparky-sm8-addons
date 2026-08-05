@@ -1,0 +1,198 @@
+diff --git a/api/index.mjs b/api/index.mjs
+index 5d32681..3cb1bce 100644
+--- a/api/index.mjs
++++ b/api/index.mjs
+@@ -17,7 +17,7 @@ import * as sm8 from '../lib/servicem8.mjs';
+ import * as sheets from '../lib/sheets.mjs';
+ import { loadSettings, gstDivisor, contractorFor, contractorById, canIssueRcti } from '../lib/settings.mjs';
+ import { shellHtml } from './shell.mjs';
+-import { buildClaim, claimedJobNumbers, canTransition, paymentState, reviewState, CLAIM_STATUS } from '../lib/claims.mjs';
++import { buildClaim, claimedJobNumbers, claimableNow, canTransition, paymentState, reviewState, CLAIM_STATUS } from '../lib/claims.mjs';
+ import { pendingFor } from '../lib/adjustments.mjs';
+ import { policyFor } from '../lib/retention.mjs';
+ import { ladderFor, assessLadder } from '../lib/ladder.mjs';
+@@ -255,6 +255,16 @@ async function statementFor(name, personId = null) {
+     } : null,
+     retention: { balance: retentionBalance, policy: policyFor(settings, contractor.id) },
+     claimedJobNumbers: [...already],
++    // What is ready to claim, and what it comes to — worked out beside the
++    // rules rather than by whoever is rendering it. The browser has its own
++    // copy of this and they once disagreed by tens of thousands of dollars;
++    // the native app is a second client, so the answer is served, not derived.
++    claimable: claimableNow({
++      jobs: statement.jobs,
++      helperEarnings: statement.helperEarnings,
++      claimed: [...already],
++      gstDivisor: GST,
++    }),
+     declaration: settings.claimDeclaration,
+     profile: {
+       name: contractor.name,
+@@ -458,7 +468,32 @@ export async function handler(event) {
+     }
+ 
+     if (path === '/api/claims' && method === 'GET') {
+-      const target = who.isAdmin && event?.queryStringParameters?.name ? event.queryStringParameters.name : who.person.name;
++      const q = event?.queryStringParameters || {};
++
++      // Every claim awaiting a decision, across everyone — the phone's approval
++      // inbox. Without this an admin has to know whose claim they are looking
++      // for before they can look for it, which is the wrong way round when the
++      // question is "is there anything to approve".
++      //
++      // Deliberately a parameter on this route rather than a route of its own:
++      // a new route in this API needs the gateway route AND a Lambda invoke
++      // permission added by hand, and template.yaml is already out of date.
++      if (who.isAdmin && (q.all === '1' || q.all === 'true' || q.name === '*')) {
++        const people = settings.people.filter((p) => (settings.commissionRules[p.id] || []).length > 0);
++        const perPerson = await Promise.all(people.map(async (p) => {
++          const rows = await store.listClaims(p.id);
++          // The claim rows carry a contractorId but nothing a human reads, and
++          // an inbox that cannot say whose claim it is would be useless.
++          return rows.map((c) => ({ ...c, contractorId: p.id, contractorName: p.name }));
++        }));
++        let all = perPerson.flat();
++        if (q.status) all = all.filter((c) => c.status === q.status);
++        // Longest wait first: the point of the list is what needs attention.
++        all.sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));
++        return json(200, { claims: all });
++      }
++
++      const target = who.isAdmin && q.name ? q.name : who.person.name;
+       const contractor = contractorFor(settings, target);
+       if (!contractor) return json(404, { error: 'No such contractor' });
+       return json(200, { claims: await store.listClaims(contractor.id) });
+diff --git a/lib/claims.mjs b/lib/claims.mjs
+index 389282e..0f638a5 100644
+--- a/lib/claims.mjs
++++ b/lib/claims.mjs
+@@ -168,6 +168,41 @@ export function buildClaim({
+   };
+ }
+ 
++/**
++ * What can be claimed right now, and what it comes to.
++ *
++ * This used to be worked out in the browser, and the tile it fed once disagreed
++ * with the list underneath it by tens of thousands of dollars, because the two
++ * applied "already claimed" differently. Any client that works this out for
++ * itself can drift the same way — and the native app is a second client. So it
++ * is worked out here, once, beside the rules it depends on, and both faces are
++ * handed the same answer.
++ *
++ * The selection and the total have to come out of the same pass. That was the bug.
++ */
++export function claimableNow({
++  jobs = [], helperEarnings = [], claimed = [], gstDivisor = 1.1,
++} = {}) {
++  const spokenFor = new Set(claimed);
++  const okJobs = jobs.filter((j) => j.outcome === 'OK' && !spokenFor.has(j.jobNumber));
++  const help = helperEarnings.filter((l) => !spokenFor.has(`H${l.jobNumber}`));
++
++  const jobsIncGst = round2(okJobs.reduce((a, j) => a + j.payableIncGst, 0));
++  const helpingIncGst = round2(help.reduce((a, l) => a + l.amountIncGst, 0));
++  const totalIncGst = round2(jobsIncGst + helpingIncGst);
++
++  return {
++    jobNumbers: okJobs.map((j) => j.jobNumber),
++    helperJobNumbers: help.map((l) => l.jobNumber),
++    jobCount: okJobs.length,
++    jobsIncGst,
++    helpingIncGst,
++    totalIncGst,
++    totalExGst: round2(totalIncGst / gstDivisor),
++    gstAmount: round2(totalIncGst - totalIncGst / gstDivisor),
++  };
++}
++
+ /** Job numbers already spoken for, so they can't be claimed twice. */
+ export function claimedJobNumbers(claims = []) {
+   const out = new Set();
+diff --git a/test/claimable.test.mjs b/test/claimable.test.mjs
+new file mode 100644
+index 0000000..65276fb
+--- /dev/null
++++ b/test/claimable.test.mjs
+@@ -0,0 +1,82 @@
++/**
++ * What can be claimed right now.
++ *
++ * These exist because the browser used to answer this question for itself and
++ * got a different answer to the list it was sitting above. The native app is a
++ * second client asking the same question, so the answer has to come from one
++ * place and the selection and the total have to agree by construction.
++ *
++ * Run: node --test test/claimable.test.mjs
++ */
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { claimableNow } from '../lib/claims.mjs';
++
++const job = (jobNumber, payableIncGst, outcome = 'OK') => ({ jobNumber, payableIncGst, outcome });
++
++test('sums only the jobs it also lists', () => {
++  const c = claimableNow({ jobs: [job('101', 100), job('102', 250.5)] });
++  assert.deepEqual(c.jobNumbers, ['101', '102']);
++  assert.equal(c.jobCount, 2);
++  assert.equal(c.jobsIncGst, 350.5);
++  assert.equal(c.totalIncGst, 350.5);
++});
++
++test('a job already on a claim is neither listed nor counted', () => {
++  const c = claimableNow({
++    jobs: [job('101', 100), job('102', 250)],
++    claimed: ['102'],
++  });
++  assert.deepEqual(c.jobNumbers, ['101']);
++  assert.equal(c.totalIncGst, 100);
++});
++
++test('a job that cannot be paid yet is neither listed nor counted', () => {
++  const c = claimableNow({
++    jobs: [job('101', 100), job('102', 250, 'AWAITING_FORM')],
++  });
++  assert.deepEqual(c.jobNumbers, ['101']);
++  assert.equal(c.totalIncGst, 100);
++});
++
++test('helping-hand lines are claimed separately from the job of the same number', () => {
++  // A contractor can help on a job that is not theirs, so 'H101' and '101' are
++  // different things and claiming one must not hide the other.
++  const c = claimableNow({
++    jobs: [job('101', 100)],
++    helperEarnings: [{ jobNumber: '101', amountIncGst: 60 }],
++  });
++  assert.deepEqual(c.jobNumbers, ['101']);
++  assert.deepEqual(c.helperJobNumbers, ['101']);
++  assert.equal(c.helpingIncGst, 60);
++  assert.equal(c.totalIncGst, 160);
++
++  const helped = claimableNow({
++    jobs: [job('101', 100)],
++    helperEarnings: [{ jobNumber: '101', amountIncGst: 60 }],
++    claimed: ['H101'],
++  });
++  assert.deepEqual(helped.jobNumbers, ['101']);
++  assert.deepEqual(helped.helperJobNumbers, []);
++  assert.equal(helped.totalIncGst, 100);
++});
++
++test('GST is split out of the total, not added to it', () => {
++  const c = claimableNow({ jobs: [job('101', 1100)] });
++  assert.equal(c.totalIncGst, 1100);
++  assert.equal(c.totalExGst, 1000);
++  assert.equal(c.gstAmount, 100);
++});
++
++test('nothing to claim is zero, not a crash', () => {
++  const c = claimableNow();
++  assert.deepEqual(c.jobNumbers, []);
++  assert.equal(c.jobCount, 0);
++  assert.equal(c.totalIncGst, 0);
++  assert.equal(c.gstAmount, 0);
++});
++
++test('rounds once at the total rather than accumulating cent drift', () => {
++  const c = claimableNow({ jobs: [job('1', 0.105), job('2', 0.105)] });
++  assert.equal(c.jobsIncGst, 0.21);
++});

@@ -1,25 +1,45 @@
 // AI Assist — the Mr Sparky app.
 //
-// Sign in once with the same account as the subcontractor portal, then: pick a
-// job, talk to Charlie about it, watch a quote build on screen, and commit it
-// deliberately. Six screens, per voice-assist/DESIGN.md.
+// Four questions, one tab each:
+//   Work      what am I doing   — jobs, today's diary, a job card
+//   Charlie   talk to it        — voice, and the quote he builds on screen
+//   Pay       what am I owed    — the subcontractor portal, natively
+//   Business  how's it going    — admin only: the claims waiting on a decision
 //
-// The router is a plain stack in state. React Navigation would bring a native
-// dependency and a lot of ceremony for six screens that only ever push and pop.
+// Role-shaped: a subcontractor never learns the fourth tab exists. The portal
+// already knows who is an admin, so the app asks it rather than deciding.
+//
+// Navigation is a stack per tab, held in state. React Navigation would bring a
+// native dependency and a lot of ceremony for a shape this small — and tabs
+// give us something the old single stack had to fake: screens that stay
+// mounted. Charlie's cleanup hangs up the call, so he must never be unmounted
+// while a call is live; that used to need a hidden absolutely-positioned
+// overlay, and now it is just what a tab bar does.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as Linking from "expo-linking";
 import ErrorBoundary from "./components/ErrorBoundary";
+import TabBar from "./components/TabBar";
+import { Banner, Segment } from "./components/ui";
 import SignIn from "./screens/SignIn";
 import Jobs from "./screens/Jobs";
 import JobCard from "./screens/JobCard";
 import CharlieLive from "./screens/CharlieLive";
 import QuoteWorkshop from "./screens/QuoteWorkshop";
 import Diary from "./screens/Diary";
+import Earnings from "./screens/pay/Earnings";
+import ClaimDetail from "./screens/pay/ClaimDetail";
+import SubmitClaim from "./screens/pay/SubmitClaim";
+import ClaimsInbox from "./screens/admin/ClaimsInbox";
+import ApproveClaim from "./screens/admin/ApproveClaim";
 import { signOut } from "./lib/auth";
+import * as portal from "./lib/portal";
 import * as VV from "./lib/vapiVoice";
-import { C, suburb } from "./lib/theme";
+import { IS_DEV_APP } from "./lib/config";
+import { C, S, suburb } from "./lib/theme";
+
+const ROOTS = { work: { name: "work" }, pay: { name: "earnings" }, admin: { name: "inbox" } };
 
 export default function App() {
   return (
@@ -32,28 +52,53 @@ export default function App() {
 function Shell() {
   const [email, setEmail] = useState(null);           // null = not signed in
   const emailRef = useRef(null);                      // readable from listeners
-  const [stack, setStack] = useState([{ name: "jobs" }]);
+  const [who, setWho] = useState(null);               // the portal's view of you
+  const [tab, setTab] = useState("work");
+  const [stacks, setStacks] = useState(ROOTS);
+  const [workView, setWorkView] = useState("jobs");   // jobs | today
+  const [charlieJob, setCharlieJob] = useState(null);
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
   const [committing, setCommitting] = useState(false);
+  const [waiting, setWaiting] = useState(0);          // claims needing a decision
 
+  const stack = Array.isArray(stacks[tab]) ? stacks[tab] : [stacks[tab]];
   const top = stack[stack.length - 1];
-  const push = useCallback((screen) => setStack((s) => [...s, screen]), []);
-  const pop = useCallback(() => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s)), []);
+
+  const push = useCallback((screen) => {
+    setStacks((s) => {
+      const cur = Array.isArray(s[tab]) ? s[tab] : [s[tab]];
+      return { ...s, [tab]: [...cur, screen] };
+    });
+  }, [tab]);
+
+  const pop = useCallback(() => {
+    setStacks((s) => {
+      const cur = Array.isArray(s[tab]) ? s[tab] : [s[tab]];
+      return { ...s, [tab]: cur.length > 1 ? cur.slice(0, -1) : cur };
+    });
+  }, [tab]);
+
+  const resetTab = useCallback((which) => {
+    setStacks((s) => ({ ...s, [which]: [ROOTS[which]] }));
+  }, []);
 
   // A job anywhere in the app is the same shape: number, address, suburb.
   const asJob = (j) =>
     j && { job_number: j.job_number, address: j.address || "", suburb: suburb(j.address) };
 
+  // Talking about a job is a tab change, not a push — Charlie is a place you go
+  // back to, and the call has to survive going somewhere else and returning.
   const openCharlie = useCallback((job) => {
     setDraft(null);
-    push({ name: "charlie", job: asJob(job) });
-  }, [push]);
+    setCharlieJob(asJob(job));
+    setTab("charlie");
+  }, []);
 
   // Charlie surfaces a draft as a tool call; it gets its own screen so nobody
   // mistakes talk for something that has been saved.
   const onDraft = useCallback((lines) => {
     setDraft(lines);
-    setStack((s) => (s[s.length - 1].name === "quote" ? s : [...s, { name: "quote" }]));
+    setTab("charlie");
   }, []);
 
   // Committing is Charlie's job, not the app's: saying the approval out loud
@@ -62,8 +107,8 @@ function Shell() {
   const lockIn = useCallback(() => {
     setCommitting(true);
     VV.say("Lock it in — add those lines to the job.");
-    setTimeout(() => { setCommitting(false); pop(); }, 900);
-  }, [pop]);
+    setTimeout(() => { setCommitting(false); setDraft(null); }, 900);
+  }, []);
 
   // Deep link from the ServiceM8 job card: mrsparky-aiassist://job/167483.
   // The add-on is the doorway, this is the room — it opens the job card for
@@ -76,11 +121,11 @@ function Shell() {
     if (!number) return;
     // Arrived before sign-in finished — hold it and replay once we're in.
     if (!emailRef.current) { pendingJob.current = number; return; }
-    setStack((s) => {
-      const already = s[s.length - 1];
-      if (already?.name === "job" && already.job?.job_number === number) return s;
-      return [{ name: "jobs" }, { name: "job", job: { job_number: number, address: "" } }];
-    });
+    setTab("work");
+    setStacks((s) => ({
+      ...s,
+      work: [ROOTS.work, { name: "job", job: { job_number: number, address: "" } }],
+    }));
   }, []);
 
   useEffect(() => {
@@ -91,21 +136,35 @@ function Shell() {
 
   // A cold launch from the job card lands here before Face ID has finished,
   // so the job waits and is replayed the moment we're signed in.
-  const handleSignedIn = useCallback((who) => {
-    emailRef.current = who;
-    setEmail(who);
+  const handleSignedIn = useCallback((signedInAs) => {
+    emailRef.current = signedInAs;
+    setEmail(signedInAs);
+
+    // Who the portal thinks you are decides whether the Business tab exists.
+    // A failure here is not a failed sign-in — the app's own screens work
+    // without the portal — so it is swallowed and the Pay tab explains itself.
+    portal.me().then(setWho).catch(() => setWho(null));
+
     const held = pendingJob.current;
     if (held) {
       pendingJob.current = null;
-      setStack([{ name: "jobs" }, { name: "job", job: { job_number: held, address: "" } }]);
+      setTab("work");
+      setStacks((s) => ({
+        ...s,
+        work: [ROOTS.work, { name: "job", job: { job_number: held, address: "" } }],
+      }));
     }
   }, []);
 
   async function handleSignOut() {
     await VV.stop().catch(() => {});
     await signOut();
-    setStack([{ name: "jobs" }]);
+    setStacks(ROOTS);
+    setTab("work");
     setDraft(null);
+    setCharlieJob(null);
+    setWho(null);
+    setWaiting(0);
     emailRef.current = null;
     setEmail(null);
   }
@@ -119,58 +178,131 @@ function Shell() {
     );
   }
 
-  const charlie = [...stack].reverse().find((f) => f.name === "charlie");
+  const tabs = ["work", "charlie", "pay", ...(who?.isAdmin ? ["admin"] : [])];
 
   return (
     <SafeAreaView style={s.root}>
       <StatusBar style="light" />
+
+      {/* Two identical dark apps live on this phone during testing. The one
+          that can approve a real claim should never be a guess. */}
+      {IS_DEV_APP ? (
+        <View style={s.devStripe}>
+          <Banner tone="warn">Test build — everything you do here is real</Banner>
+        </View>
+      ) : null}
+
       <View style={{ flex: 1 }}>
-        {top.name === "jobs" && (
-          <Jobs
-            email={email}
-            onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
-            onTalk={openCharlie}
-            onDiary={() => push({ name: "diary" })}
-            onSignOut={handleSignOut}
+        {/* ---- Work ------------------------------------------------------ */}
+        <View style={[s.fill, tab !== "work" && s.hidden]} pointerEvents={tab === "work" ? "auto" : "none"}>
+          {top?.name === "work" || tab !== "work" ? (
+            <View style={{ flex: 1 }}>
+              <View style={s.segment}>
+                <Segment
+                  options={[{ key: "jobs", label: "Jobs" }, { key: "today", label: "Today" }]}
+                  value={workView}
+                  onChange={setWorkView}
+                />
+              </View>
+              {workView === "jobs" ? (
+                <Jobs
+                  email={email}
+                  onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
+                  onTalk={openCharlie}
+                  onDiary={() => setWorkView("today")}
+                  onSignOut={handleSignOut}
+                />
+              ) : (
+                <Diary onTalk={openCharlie} />
+              )}
+            </View>
+          ) : null}
+
+          {top?.name === "job" ? (
+            <View style={s.fill}>
+              <JobCard
+                jobNumber={top.job.job_number}
+                onBack={pop}
+                onTalk={openCharlie}
+                onDiary={() => { pop(); setWorkView("today"); }}
+              />
+            </View>
+          ) : null}
+        </View>
+
+        {/* ---- Charlie ---------------------------------------------------
+            Always mounted. Unmounting runs his cleanup, which hangs up the
+            call, so leaving this tab must never destroy him. */}
+        <View style={[s.fill, tab !== "charlie" && s.hidden]} pointerEvents={tab === "charlie" ? "auto" : "none"}>
+          <CharlieLive
+            job={charlieJob}
+            onBack={() => setTab("work")}
+            onDraft={onDraft}
           />
-        )}
+          {draft ? (
+            <View style={s.fill}>
+              <QuoteWorkshop
+                job={charlieJob}
+                lines={draft}
+                committing={committing}
+                onKeepTalking={() => setDraft(null)}
+                onLockIn={lockIn}
+              />
+            </View>
+          ) : null}
+        </View>
 
-        {top.name === "job" && (
-          <JobCard
-            jobNumber={top.job.job_number}
-            onBack={pop}
-            onTalk={openCharlie}
-            onDiary={() => push({ name: "diary" })}
-          />
-        )}
-
-        {top.name === "diary" && <Diary onBack={pop} onTalk={openCharlie} />}
-
-        {/* Charlie stays MOUNTED while the quote screen is up: unmounting him
-            runs his cleanup, which hangs up the call — so "Keep talking" would
-            come back to a dead line. Hidden, not destroyed. */}
-        {charlie && (
-          <View style={[s.fill, top.name !== "charlie" && s.hidden]} pointerEvents={top.name === "charlie" ? "auto" : "none"}>
-            <CharlieLive
-              job={charlie.job}
-              onBack={() => { VV.stop().catch(() => {}); pop(); }}
-              onDraft={onDraft}
+        {/* ---- Pay ------------------------------------------------------- */}
+        <View style={[s.fill, tab !== "pay" && s.hidden]} pointerEvents={tab === "pay" ? "auto" : "none"}>
+          {top?.name === "earnings" || tab !== "pay" ? (
+            <Earnings
+              onOpenClaim={(claim) => push({ name: "claim", claim })}
+              onMakeClaim={(data) => push({ name: "submit", data })}
+              onSignOut={handleSignOut}
             />
-          </View>
-        )}
+          ) : null}
+          {top?.name === "claim" ? (
+            <View style={s.fill}>
+              <ClaimDetail claim={top.claim} onBack={pop} onViewRcti={() => {}} />
+            </View>
+          ) : null}
+          {top?.name === "submit" ? (
+            <View style={s.fill}>
+              <SubmitClaim
+                data={top.data}
+                onBack={pop}
+                onSubmitted={(claim) => {
+                  resetTab("pay");
+                  if (claim) push({ name: "claim", claim });
+                }}
+              />
+            </View>
+          ) : null}
+        </View>
 
-        {top.name === "quote" && (
-          <View style={s.fill}>
-            <QuoteWorkshop
-              job={charlie?.job}
-              lines={draft || []}
-              committing={committing}
-              onKeepTalking={pop}
-              onLockIn={lockIn}
-            />
+        {/* ---- Business (admin only) -------------------------------------- */}
+        {who?.isAdmin ? (
+          <View style={[s.fill, tab !== "admin" && s.hidden]} pointerEvents={tab === "admin" ? "auto" : "none"}>
+            {top?.name === "inbox" || tab !== "admin" ? (
+              <ClaimsInbox
+                onOpenClaim={(claim) => push({ name: "approve", claim })}
+                onCountChange={setWaiting}
+              />
+            ) : null}
+            {top?.name === "approve" ? (
+              <View style={s.fill}>
+                <ApproveClaim
+                  claim={top.claim}
+                  onBack={pop}
+                  onDone={() => resetTab("admin")}
+                />
+              </View>
+            ) : null}
           </View>
-        )}
+        ) : null}
       </View>
+
+      <TabBar tabs={tabs} value={tab} onChange={setTab} badges={{ admin: waiting }} />
     </SafeAreaView>
   );
 }
@@ -179,4 +311,6 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   fill: { ...StyleSheet.absoluteFillObject, backgroundColor: C.bg },
   hidden: { opacity: 0 },
+  devStripe: { paddingHorizontal: S.screen, paddingBottom: 8 },
+  segment: { paddingHorizontal: S.screen, paddingBottom: S.gap },
 });
