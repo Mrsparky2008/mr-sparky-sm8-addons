@@ -1,0 +1,38 @@
+diff --git a/api/index.mjs b/api/index.mjs
+index 5d32681..fb5a3e2 100644
+--- a/api/index.mjs
++++ b/api/index.mjs
+@@ -458,7 +458,32 @@ export async function handler(event) {
+     }
+ 
+     if (path === '/api/claims' && method === 'GET') {
+-      const target = who.isAdmin && event?.queryStringParameters?.name ? event.queryStringParameters.name : who.person.name;
++      const q = event?.queryStringParameters || {};
++
++      // Every claim awaiting a decision, across everyone — the phone's approval
++      // inbox. Without this an admin has to know whose claim they are looking
++      // for before they can look for it, which is the wrong way round when the
++      // question is "is there anything to approve".
++      //
++      // Deliberately a parameter on this route rather than a route of its own:
++      // a new route in this API needs the gateway route AND a Lambda invoke
++      // permission added by hand, and template.yaml is already out of date.
++      if (who.isAdmin && (q.all === '1' || q.all === 'true' || q.name === '*')) {
++        const people = settings.people.filter((p) => (settings.commissionRules[p.id] || []).length > 0);
++        const perPerson = await Promise.all(people.map(async (p) => {
++          const rows = await store.listClaims(p.id);
++          // The claim rows carry a contractorId but nothing a human reads, and
++          // an inbox that cannot say whose claim it is would be useless.
++          return rows.map((c) => ({ ...c, contractorId: p.id, contractorName: p.name }));
++        }));
++        let all = perPerson.flat();
++        if (q.status) all = all.filter((c) => c.status === q.status);
++        // Longest wait first: the point of the list is what needs attention.
++        all.sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));
++        return json(200, { claims: all });
++      }
++
++      const target = who.isAdmin && q.name ? q.name : who.person.name;
+       const contractor = contractorFor(settings, target);
+       if (!contractor) return json(404, { error: 'No such contractor' });
+       return json(200, { claims: await store.listClaims(contractor.id) });
