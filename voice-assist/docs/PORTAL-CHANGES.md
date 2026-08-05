@@ -62,15 +62,41 @@ deploying it.
 (a job already on a claim must leave both the list and the total together), and
 that a helping-hand line and the job of the same number are claimed separately.
 
-## Still needed from Steven — two environment variables
+## 3. ONE CONSOLE CHANGE — the app's client must be an accepted audience
 
-Both are on the `mr-sparky-portal-api` Lambda, so one look gets both:
+**Both unknowns are now answered** (2026-08-05, read off the portal's sign-in
+redirect):
 
-1. **`COGNITO_CLIENT_ID`** — is it `5pvilebmogbvcf1edja0uatcrj` (the client the
-   app signs in with)? The portal API is protected by an API Gateway JWT
-   authoriser, which validates the token's audience. If the IDs differ, the
-   app's token is rejected at the gateway and **nothing on the Pay side works** —
-   the fix is to add the app's client to the authoriser's audience list.
-2. **`PORTAL_URL`** — the API Gateway base URL. It is not in the repo. Goes into
-   `voice-assist/app/lib/config.js` as `PORTAL`; until it is set, `portal.js`
-   refuses to call rather than firing requests at a placeholder.
+| | |
+|---|---|
+| Portal URL | `https://portal.mrsparky.com.au` — set in `app/lib/config.js` |
+| Cognito pool | `us-east-1_xOJ0DPHK6` — **the same pool the app uses** |
+| Portal client | `3nkghs3rv6uk58ms62afqviu3d` (hosted UI, code + PKCE) |
+| App client | `5pvilebmogbvcf1edja0uatcrj` (native, USER_AUTH) |
+
+Same pool, **different clients** — so this change is required before the Pay or
+Business tabs can load anything:
+
+> **API Gateway → the portal's HTTP API → Authorization → the JWT authorizer →
+> Audience → add `5pvilebmogbvcf1edja0uatcrj`**, keeping `3nkghs3rv6uk58ms62afqviu3d`.
+
+Without it every portal call from the app returns 401 at the gateway, before the
+handler runs — which the app reports as "Your session has ended", because from
+the phone's point of view that is indistinguishable from an expired token.
+
+**Why not just point the app at the portal's client instead:** the app's own
+backend hard-checks the audience (`voice-assist/backend/auth.mjs:65`), so that
+would break the Work and Charlie tabs and need a second Lambda deploy. It would
+also mean either enabling password auth on the browser client, which weakens it,
+or putting the app back through the hosted-UI redirect that going native
+avoided. Two clients on one pool is the right shape; the audience list exists so
+one API can trust several.
+
+**Identity is unaffected.** `caller()` in `api/index.mjs` matches people on
+`email` or `cognitoSub`, both pool-level — the same person resolves the same way
+whichever client minted the token.
+
+**If `/api/me` returns `notSetUp` after the audience is fixed:** the ID token's
+`email` claim is not matching any `people[]` entry in
+`settings/portal-settings.json`. That is a settings gap, not an auth problem, and
+signing in again will never fix it.

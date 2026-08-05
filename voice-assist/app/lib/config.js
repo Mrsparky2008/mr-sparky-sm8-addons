@@ -4,16 +4,19 @@ import Constants from "expo-constants";
 
 export const BACKEND = "https://ty7yjtyvwm5jhuk7hu2tztpxaq0htqpm.lambda-url.ap-southeast-2.on.aws";
 
-// The subcontractor portal. Its own repo's CLAUDE.md says "no custom domain
-// yet" and gives only the API Gateway URL, but that line is out of date —
-// api/shell.mjs already handles "the custom domain and the original API Gateway
-// URL both work", and portal.mrsparky.com.au resolves into AWS us-east-1, which
-// is where the portal Lambda runs. (mrsparky.com.au itself is not on AWS at all.)
+// The subcontractor portal. Confirmed 2026-08-05 off its own sign-in redirect
+// (redirect_uri=https://portal.mrsparky.com.au/). The portal repo's CLAUDE.md
+// still says "no custom domain yet" and gives only an API Gateway URL — that
+// line is out of date; api/shell.mjs already handles both origins.
 //
-// Inferred, not confirmed: this sandbox's network policy would not let the page
-// be fetched to check. If the Pay tab cannot reach anything, this is the first
-// line to doubt. portal.js refuses to call at all while it is empty, rather than
-// firing requests at a placeholder and reporting it as a network error.
+// The portal signs in through the SAME Cognito pool as this app
+// (us-east-1_xOJ0DPHK6) but through a DIFFERENT client: the portal is a browser
+// client using code + PKCE (3nkghs3rv6uk58ms62afqviu3d), this app is a native
+// one using USER_AUTH (5pvilebmogbvcf1edja0uatcrj). Its API sits behind an API
+// Gateway JWT authoriser, which validates the token's audience — so this app's
+// client has to be listed there or every call 401s before the handler runs.
+// See ../../docs/PORTAL-CHANGES.md. That is the first thing to check if the Pay
+// tab says the session has ended the moment it opens.
 export const PORTAL = "https://portal.mrsparky.com.au";
 
 // Read from the resolved app config rather than typed here. This used to be a
