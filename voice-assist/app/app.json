@@ -55,7 +55,15 @@
         }
       ],
       "expo-asset",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "AI Assist uses the camera to photograph receipts and job photos.",
+          "photosPermission": "AI Assist can attach photos from your library to receipts and job cards."
+        }
+      ],
+      "expo-notifications"
     ],
     "runtimeVersion": {
       "policy": "appVersion"
