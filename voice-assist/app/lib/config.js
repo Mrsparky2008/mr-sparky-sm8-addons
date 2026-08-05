@@ -4,11 +4,17 @@ import Constants from "expo-constants";
 
 export const BACKEND = "https://ty7yjtyvwm5jhuk7hu2tztpxaq0htqpm.lambda-url.ap-southeast-2.on.aws";
 
-// The subcontractor portal's API Gateway base URL — the value of PORTAL_URL on
-// the mr-sparky-portal-api Lambda. No custom domain yet, so it has to be set
-// here by hand; portal.js refuses to call anything until it is, rather than
-// firing requests at a placeholder and reporting a network error.
-export const PORTAL = "";
+// The subcontractor portal. Its own repo's CLAUDE.md says "no custom domain
+// yet" and gives only the API Gateway URL, but that line is out of date —
+// api/shell.mjs already handles "the custom domain and the original API Gateway
+// URL both work", and portal.mrsparky.com.au resolves into AWS us-east-1, which
+// is where the portal Lambda runs. (mrsparky.com.au itself is not on AWS at all.)
+//
+// Inferred, not confirmed: this sandbox's network policy would not let the page
+// be fetched to check. If the Pay tab cannot reach anything, this is the first
+// line to doubt. portal.js refuses to call at all while it is empty, rather than
+// firing requests at a placeholder and reporting it as a network error.
+export const PORTAL = "https://portal.mrsparky.com.au";
 
 // Read from the resolved app config rather than typed here. This used to be a
 // hand-written string and it drifted — it still said v2.0 while app.json had
