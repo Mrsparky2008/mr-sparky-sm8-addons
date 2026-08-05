@@ -1,5 +1,23 @@
 # Changes the app needs in the portal repo
 
+## Where this stands (2026-08-06, end of the overnight session)
+
+- ✅ Gateway audience widened — the app's tokens are accepted NOW (section 3)
+- ✅ Portal URL confirmed and wired into the app (`portal.mrsparky.com.au`)
+- ⏳ The patch below — apply + deploy from the PC (sections 1–2)
+- ⏳ The dev build — from the PC, OR from a cloud session after two environment
+  changes: add `expo.dev`, `api.expo.dev`, `*.expo.dev` and
+  `storage.googleapis.com` to the environment's network allowlist, and set a
+  fresh Expo robot token as the `EXPO_TOKEN` environment variable. (The first
+  attempt died at this sandbox's network proxy — Expo is unreachable here, and
+  the token minted for it has been revoked.)
+- ⏳ One-time on the PC either way: upload `AuthKey_R59FG54N39.p8` at
+  expo.dev → project → Credentials, so EAS can mint the ad-hoc provisioning
+  profile for the NEW bundle id `au.com.mrsparky.aiassist.dev`. August's free
+  iOS builds are spent — expect the $19 Starter month or the Sept 1 reset.
+- Not built, by choice: the entitlement gate. It needs a decision on where the
+  paid-seat flag lives in `people[]` first.
+
 The subcontractor portal (github.com/Mrsparky2008/mr-sparky-portal) is a
 separate repo and a separate deploy. This session can edit and test it but
 **cannot deploy it** — the AWS credentials live on Steven's PC and there is no
@@ -62,7 +80,14 @@ deploying it.
 (a job already on a claim must leave both the list and the total together), and
 that a helping-hand line and the job of the same number are claimed separately.
 
-## 3. ONE CONSOLE CHANGE — the app's client must be an accepted audience
+## 3. ~~ONE CONSOLE CHANGE~~ — DONE, live since 2026-08-06 ~12:08am
+
+Steven made this change from his phone: authorizer `cognito-portal` (id
+`fymw6d`) on `mr-sparky-portal-api (qqrq18zxxk)` now lists BOTH audiences —
+verified by screenshot of the saved authorizer. The gateway accepts the app's
+tokens as of that moment. Nothing below remains to be done; the section is kept
+because it explains WHY there are two audiences, which someone will eventually
+wonder.
 
 **Both unknowns are now answered** (2026-08-05, read off the portal's sign-in
 redirect):
