@@ -31,6 +31,8 @@ import Diary from "./screens/Diary";
 import Earnings from "./screens/pay/Earnings";
 import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
+import AddReceipt from "./screens/pay/AddReceipt";
+import RctiView from "./screens/pay/RctiView";
 import ClaimsInbox from "./screens/admin/ClaimsInbox";
 import ApproveClaim from "./screens/admin/ApproveClaim";
 import { signOut } from "./lib/auth";
@@ -258,12 +260,31 @@ function Shell() {
             <Earnings
               onOpenClaim={(claim) => push({ name: "claim", claim })}
               onMakeClaim={(data) => push({ name: "submit", data })}
+              onAddReceipt={(data) => push({ name: "receipt", data })}
               onSignOut={handleSignOut}
             />
           ) : null}
           {top?.name === "claim" ? (
             <View style={s.fill}>
-              <ClaimDetail claim={top.claim} onBack={pop} onViewRcti={() => {}} />
+              <ClaimDetail
+                claim={top.claim}
+                onBack={pop}
+                onViewRcti={(claim) => push({ name: "rcti", claim })}
+              />
+            </View>
+          ) : null}
+          {top?.name === "rcti" ? (
+            <View style={s.fill}>
+              <RctiView claim={top.claim} onBack={pop} />
+            </View>
+          ) : null}
+          {top?.name === "receipt" ? (
+            <View style={s.fill}>
+              <AddReceipt
+                jobNumbers={(top.data?.statement?.jobs || []).map((j) => j.jobNumber)}
+                onBack={pop}
+                onSaved={() => resetTab("pay")}
+              />
             </View>
           ) : null}
           {top?.name === "submit" ? (

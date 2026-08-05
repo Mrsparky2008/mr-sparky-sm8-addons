@@ -27,7 +27,7 @@ const CLAIM_LABEL = {
   rejected: "rejected",
 };
 
-export default function Earnings({ onOpenClaim, onMakeClaim, onSignOut }) {
+export default function Earnings({ onOpenClaim, onMakeClaim, onAddReceipt, onSignOut }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(true);
@@ -94,6 +94,15 @@ export default function Earnings({ onOpenClaim, onMakeClaim, onSignOut }) {
             label="Make a claim"
             onPress={() => onMakeClaim(data)}
             sub="You choose which jobs, and confirm before anything is sent."
+          />
+        ) : null}
+
+        {onAddReceipt && (st.jobs || []).length ? (
+          <Cta
+            label="📷 Add a receipt"
+            tone="ghost"
+            onPress={() => onAddReceipt(data)}
+            sub="Photograph it on the job — a receipt with no photo is not reimbursed."
           />
         ) : null}
 
