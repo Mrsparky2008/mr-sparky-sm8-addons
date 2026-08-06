@@ -806,6 +806,90 @@ export async function attachFileToJob({ job_uuid, name, fileType, bytes, content
   return { ok: true, attachment_uuid: uuid };
 }
 
+/**
+ * Read a photographed supplier docket.
+ *
+ * Steven's spec (2026-08-06): "AI can read the receipt, fill in all the
+ * details. If it doesn't have a job number, ask for it. If it has the wrong
+ * job number, flag it."
+ *
+ * So this READS and it does not decide. It returns only what is legibly on the
+ * paper, leaves anything it can't read out entirely rather than guessing, and
+ * says which words a job number came from so the app can show its working. The
+ * phone puts the values in editable fields and the human presses save — the
+ * model never files anything by itself.
+ *
+ * Forced tool call rather than free prose: the shape comes back schema-clean,
+ * so a chatty model can't turn "$182.60" into a sentence the app has to parse.
+ */
+const RECEIPT_TOOL = {
+  name: "receipt",
+  description: "Record what is legibly printed on this supplier receipt.",
+  input_schema: {
+    type: "object",
+    properties: {
+      supplier: { type: "string", description: "Trading name of the supplier, as printed. e.g. Middy's, Lawrence & Hanson, Bunnings." },
+      amountIncGst: { type: "number", description: "The TOTAL amount payable including GST — the final total, not a subtotal, not the GST line." },
+      date: { type: "string", description: "Date of the receipt as YYYY-MM-DD. Australian dockets are DAY first: 04/08/2026 is 4 August 2026." },
+      invoiceNumber: { type: "string", description: "Invoice, docket or tax invoice number as printed." },
+      jobNumber: { type: "string", description: "A job/order/site reference ONLY if the docket explicitly labels one (Job, Order, PO, Ref, Site). Never infer it from an invoice or account number." },
+      jobNumberLabel: { type: "string", description: "The exact printed words the job number was taken from, e.g. 'Order No: 4821'." },
+      unreadable: { type: "boolean", description: "True if the photo is too blurred, cropped or dark to read the totals." },
+    },
+    required: [],
+  },
+};
+
+export async function readReceipt({ imageB64, contentType = "image/jpeg" }) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": CLAUDE_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 1024,
+      tools: [RECEIPT_TOOL],
+      tool_choice: { type: "tool", name: "receipt" },
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: contentType, data: imageB64 } },
+          {
+            type: "text",
+            text: [
+              "This is a photo of a supplier receipt for an Australian electrical contractor.",
+              "Record only what you can actually READ on the paper.",
+              "Omit any field you cannot read — an omitted field is correct, a guessed one is a false record someone signs off on.",
+              "The amount is the final total INCLUDING GST.",
+            ].join(" "),
+          },
+        ],
+      }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const body = await res.json();
+  const call = (body.content || []).find((b) => b.type === "tool_use" && b.name === "receipt");
+  const out = call?.input || {};
+
+  // Tidy, never invent. Anything that doesn't survive these checks is dropped
+  // so the field arrives empty and the human fills it in.
+  const amount = Number(out.amountIncGst);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date || "")) ? out.date : null;
+  return {
+    supplier: String(out.supplier || "").trim().slice(0, 80) || null,
+    amountIncGst: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : null,
+    date,
+    invoiceNumber: String(out.invoiceNumber || "").trim().slice(0, 40) || null,
+    jobNumber: (String(out.jobNumber || "").match(/\d{3,7}/) || [null])[0],
+    jobNumberLabel: String(out.jobNumberLabel || "").trim().slice(0, 60) || null,
+    unreadable: out.unreadable === true,
+  };
+}
+
 export async function buildDossier(uuid) {
   const [j, contacts, notes, acts, mats, staff] = await Promise.all([
     sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),

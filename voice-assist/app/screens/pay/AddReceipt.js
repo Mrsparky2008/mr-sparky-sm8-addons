@@ -5,17 +5,31 @@
 // a convenience here, it is the whole transaction. A browser file picker with
 // gloves on, in a switchboard room, is the thing this replaces.
 //
-// The image never passes through the Lambda: the portal hands back a short-lived
-// presigned URL and the phone puts the file straight into a private bucket.
+// The photo does two journeys. It goes to Claude to be READ — supplier, total,
+// date, invoice number land in the fields already filled in — and it goes
+// straight into the portal's private bucket by presigned URL, never through
+// the Lambda.
+//
+// Two rules the reading half obeys, both Steven's (2026-08-06):
+//   · It fills in, it does not file. Every value is editable and nothing is
+//     saved until a human presses the button.
+//   · The job comes from where you opened the screen, not from the paper. If
+//     the docket quotes a different job number it is FLAGGED, with what
+//     ServiceM8 says that job is, and the choice is yours. If nothing anchors
+//     the receipt to a job, it asks — a receipt on the wrong job is worse than
+//     a receipt typed in by hand.
 import { useRef, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable,
+  ScrollView, StyleSheet, Text, TextInput, View,
+} from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import KeyboardToggle from "../../components/KeyboardToggle";
 import { C, R, S, T, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
-import { postReceiptCopy } from "../../lib/api";
+import { postReceiptCopy, readReceipt } from "../../lib/api";
 
 // The phone is in the same timezone as the job. Building the date from the
 // device clock avoids toISOString(), which is UTC and would date a receipt
@@ -29,7 +43,11 @@ function todayLocal() {
 const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic" };
 
 export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack, onSaved }) {
-  const [jobNumber, setJobNumber] = useState(initial || jobNumbers[0] || "");
+  const anchored = initial ? String(initial) : "";
+  const chips = jobNumbers.map(String);
+  const [jobNumber, setJobNumber] = useState(
+    anchored || (chips.length === 1 ? chips[0] : ""),
+  );
   const [photo, setPhoto] = useState(null);      // { uri, mimeType }
   const [supplier, setSupplier] = useState("");
   const [amount, setAmount] = useState("");
@@ -38,6 +56,17 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  // The reading half.
+  const [reading, setReading] = useState(false);
+  const [readError, setReadError] = useState("");
+  const [read, setRead] = useState(null);        // what came back, for the badges
+  const [docket, setDocket] = useState(null);    // job number printed on the paper
+  const [ackDocket, setAckDocket] = useState(false);
+  // Fields the human has touched are never overwritten by a re-read.
+  const touched = useRef({});
+  const mark = (k) => { touched.current[k] = true; };
+
   // Whichever field was last in use — the up arrow returns you to it.
   const lastField = useRef(null);
 
@@ -60,7 +89,44 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
       : await ImagePicker.launchCameraAsync(opts);
     if (res.canceled) return;
     const asset = res.assets?.[0];
-    if (asset?.uri) setPhoto({ uri: asset.uri, mimeType: asset.mimeType || "image/jpeg" });
+    if (!asset?.uri) return;
+    const shot = { uri: asset.uri, mimeType: asset.mimeType || "image/jpeg" };
+    setPhoto(shot);
+    scan(shot);
+  }
+
+  // Read the docket. Never blocks the form: if this fails, or the photo is
+  // unreadable, the fields are simply empty and get typed in as before.
+  async function scan(shot) {
+    setReading(true);
+    setReadError("");
+    setRead(null);
+    setDocket(null);
+    setAckDocket(false);
+    try {
+      const imageB64 = await FileSystem.readAsStringAsync(shot.uri, { encoding: "base64" });
+      const r = await readReceipt({ imageB64, contentType: shot.mimeType });
+      const got = r.receipt || {};
+      setRead(got);
+      setDocket(r.docket || null);
+
+      if (got.supplier && !touched.current.supplier) setSupplier(got.supplier);
+      if (got.amountIncGst && !touched.current.amount) setAmount(String(got.amountIncGst.toFixed(2)));
+      if (got.date && !touched.current.date) setDate(got.date);
+      if (got.invoiceNumber && !touched.current.invoiceNumber) setInvoiceNumber(got.invoiceNumber);
+
+      // With no job chosen yet, a job number the paper quotes AND ServiceM8
+      // recognises is a fair suggestion — shown as a choice, not applied
+      // silently, because the flag below is the whole point of reading it.
+      if (!jobNumber && r.docket?.known) setJobNumber(r.docket.jobNumber);
+
+      if (r.unreadable) setReadError("That photo's too blurred to read — retake it, or type the details in.");
+      else if (!got.supplier && !got.amountIncGst) setReadError("Couldn't pick anything off that one — type it in.");
+    } catch (err) {
+      setReadError(err?.message === "signed out" ? "Signed out." : "Couldn't read the photo — type the details in.");
+    } finally {
+      setReading(false);
+    }
   }
 
   async function save() {
@@ -85,15 +151,21 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         throw new Error(`The photo did not upload (${up.status}).`);
       }
 
+      // If the paper named a different job and it's being filed here anyway,
+      // that goes on the record too — so nobody has to reconstruct it later.
+      const trail = mismatch ? `Docket quotes job #${docket.jobNumber}.` : "";
+      const noteOut = [note.trim(), trail].filter(Boolean).join(" ");
+
       await portal.saveReceipt({
         jobNumber,
         imageKey,
-        // Typed in, not worked out. The portal rounds and validates it.
+        // Typed in or read off the paper — either way a human confirmed it.
+        // The portal rounds and validates it.
         amountIncGst: Number(amount),
         supplier: supplier.trim(),
         invoiceNumber: invoiceNumber.trim() || undefined,
         date,
-        note: note.trim() || undefined,
+        note: noteOut || undefined,
       });
 
       // Record copy into ServiceM8's own job diary — Steven's paper trail.
@@ -115,7 +187,9 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
     }
   }
 
-  const ready = photo && supplier.trim() && amount.trim() && date && jobNumber;
+  const mismatch = !!(docket && jobNumber && docket.jobNumber !== jobNumber);
+  const needsJob = !jobNumber;
+  const ready = photo && supplier.trim() && amount.trim() && date && jobNumber && !reading;
 
   return (
     <View style={{ flex: 1 }}>
@@ -127,49 +201,122 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         <View>
           <SectionLabel>Photo</SectionLabel>
           {photo ? (
-            <Pressable onPress={() => take(false)}>
-              <Image source={{ uri: photo.uri }} style={s.preview} resizeMode="cover" />
-              <Text style={s.note}>Tap to retake.</Text>
-            </Pressable>
+            <>
+              <Pressable onPress={() => take(false)} disabled={reading}>
+                <Image source={{ uri: photo.uri }} style={s.preview} resizeMode="cover" />
+              </Pressable>
+              {reading ? (
+                <View style={s.readingRow}>
+                  <ActivityIndicator color={C.brand} size="small" />
+                  <Text style={s.readingText}>Reading the docket…</Text>
+                </View>
+              ) : (
+                <View style={s.readingRow}>
+                  <Text style={s.note}>Tap the photo to retake.</Text>
+                  <Pressable onPress={() => scan(photo)} hitSlop={8}>
+                    <Text style={s.link}>Read again</Text>
+                  </Pressable>
+                </View>
+              )}
+              {readError ? <Text style={s.warn}>{readError}</Text> : null}
+            </>
           ) : (
             <View style={{ gap: 8 }}>
               <Cta label="📷 Photograph the receipt" onPress={() => take(false)} />
               <Cta label="Choose from photos" tone="ghost" onPress={() => take(true)} />
               <Text style={s.note}>
-                A photo is required — a receipt without one is not reimbursed.
+                A photo is required — a receipt without one is not reimbursed. It's read
+                for you the moment it's taken; you check it before it's filed.
               </Text>
             </View>
           )}
         </View>
 
-        {jobNumbers.length > 1 ? (
-          <View>
-            <SectionLabel>Job</SectionLabel>
+        {/* ---- The job ----------------------------------------------------
+            Flagged, asked for, or simply shown — never assumed off the paper. */}
+        {mismatch && !ackDocket ? (
+          <Card style={{ borderColor: C.active }}>
+            <Text style={s.flagTitle}>This docket names a different job</Text>
+            <Text style={[T.small, { marginTop: 4 }]}>
+              {docket.label ? `The paper says “${docket.label}”` : `The paper says job #${docket.jobNumber}`}
+              {docket.known
+                ? ` — #${docket.jobNumber}, ${[docket.address, docket.status].filter(Boolean).join(" · ")}.`
+                : ` — and there's no job #${docket.jobNumber} in ServiceM8.`}
+              {` You're filing it to #${jobNumber}.`}
+            </Text>
+            <View style={s.flagRow}>
+              {docket.known ? (
+                <Pressable onPress={() => setJobNumber(docket.jobNumber)} style={[s.flagBtn, s.flagBtnOn]}>
+                  <Text style={s.flagBtnOnText}>File to #{docket.jobNumber}</Text>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={() => setAckDocket(true)} style={s.flagBtn}>
+                <Text style={s.flagBtnText}>Keep #{jobNumber}</Text>
+              </Pressable>
+            </View>
+          </Card>
+        ) : null}
+
+        <View>
+          <SectionLabel>Job{needsJob && photo ? " — which one?" : ""}</SectionLabel>
+          {chips.length > 1 ? (
             <View style={s.chips}>
-              {jobNumbers.map((n) => (
-                <Pressable
-                  key={n}
-                  onPress={() => setJobNumber(n)}
-                  style={[s.chip, n === jobNumber && s.chipOn]}
-                >
+              {chips.map((n) => (
+                <Pressable key={n} onPress={() => setJobNumber(n)} style={[s.chip, n === jobNumber && s.chipOn]}>
                   <Text style={[s.chipText, mono, n === jobNumber && { color: C.ink }]}>#{n}</Text>
                 </Pressable>
               ))}
             </View>
-          </View>
-        ) : null}
-
-        <View>
-          <SectionLabel>Supplier</SectionLabel>
-          <Field onUse={(r) => (lastField.current = r.current)} value={supplier} onChangeText={setSupplier} placeholder="Middy's, Lawrence & Hanson…" />
+          ) : anchored || chips.length === 1 ? (
+            <View style={s.jobRow}>
+              <Text style={[s.jobNumber, mono]}>#{jobNumber || anchored}</Text>
+              {jobNumber === anchored ? <Text style={T.small}>opened from this job</Text> : null}
+              {anchored && jobNumber !== anchored ? (
+                <Pressable onPress={() => setJobNumber(anchored)} hitSlop={8}>
+                  <Text style={s.link}>back to #{anchored}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : (
+            <Field
+              onUse={(r) => (lastField.current = r.current)}
+              value={jobNumber}
+              onChangeText={setJobNumber}
+              placeholder="Job number"
+              keyboardType="number-pad"
+              mono
+            />
+          )}
+          {needsJob && photo ? (
+            <Text style={s.warn}>
+              {docket?.jobNumber
+                ? `The docket says #${docket.jobNumber}, which isn't a job in ServiceM8 — pick the right one.`
+                : "Nothing on the docket says which job this is. Choose it before saving."}
+            </Text>
+          ) : null}
+          {mismatch && ackDocket ? (
+            <Text style={s.note}>
+              Filed to #{jobNumber}; the docket's #{docket.jobNumber} goes on the record with it.
+            </Text>
+          ) : null}
         </View>
 
         <View>
-          <SectionLabel>Amount inc GST</SectionLabel>
+          <SectionLabel>Supplier{read?.supplier ? " · read" : ""}</SectionLabel>
+          <Field
+            onUse={(r) => (lastField.current = r.current)}
+            value={supplier}
+            onChangeText={(v) => { mark("supplier"); setSupplier(v); }}
+            placeholder="Middy's, Lawrence & Hanson…"
+          />
+        </View>
+
+        <View>
+          <SectionLabel>Amount inc GST{read?.amountIncGst ? " · read" : ""}</SectionLabel>
           <Field
             onUse={(r) => (lastField.current = r.current)}
             value={amount}
-            onChangeText={setAmount}
+            onChangeText={(v) => { mark("amount"); setAmount(v); }}
             placeholder="0.00"
             keyboardType="decimal-pad"
             mono
@@ -177,13 +324,24 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         </View>
 
         <View>
-          <SectionLabel>Date</SectionLabel>
-          <Field onUse={(r) => (lastField.current = r.current)} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" mono />
+          <SectionLabel>Date{read?.date ? " · read" : ""}</SectionLabel>
+          <Field
+            onUse={(r) => (lastField.current = r.current)}
+            value={date}
+            onChangeText={(v) => { mark("date"); setDate(v); }}
+            placeholder="YYYY-MM-DD"
+            mono
+          />
         </View>
 
         <View>
-          <SectionLabel>Invoice number (optional)</SectionLabel>
-          <Field onUse={(r) => (lastField.current = r.current)} value={invoiceNumber} onChangeText={setInvoiceNumber} placeholder="Needed for a credit" />
+          <SectionLabel>Invoice number{read?.invoiceNumber ? " · read" : " (optional)"}</SectionLabel>
+          <Field
+            onUse={(r) => (lastField.current = r.current)}
+            value={invoiceNumber}
+            onChangeText={(v) => { mark("invoiceNumber"); setInvoiceNumber(v); }}
+            placeholder="Needed for a credit"
+          />
         </View>
 
         {error ? (
@@ -207,8 +365,15 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
           tone="earth"
           disabled={busy || !ready}
           onPress={save}
-          sub="Checked against what was declared on Form 001 before it is reimbursed."
+          sub={read
+            ? "Read off the photo — check every line; you're the one signing for it."
+            : "Checked against what was declared on Form 001 before it is reimbursed."}
         />
+        {/* A way out that doesn't need the back arrow: nothing here is saved
+            until the button above is pressed, so this simply drops it. */}
+        <Pressable onPress={() => (busy ? null : onBack?.())} hitSlop={8} style={s.cancelWrap}>
+          <Text style={s.cancel}>Cancel</Text>
+        </Pressable>
       </ScrollView>
       </KeyboardAvoidingView>
       <KeyboardToggle inputRef={lastField} />
@@ -233,6 +398,10 @@ const s = StyleSheet.create({
   body: { padding: S.screen, paddingTop: 0, gap: S.gap, paddingBottom: 40 },
   preview: { width: "100%", height: 220, borderRadius: R.card, backgroundColor: C.panel },
   note: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
+  warn: { color: C.warnChipInk, fontSize: 12, lineHeight: 17, marginTop: 7 },
+  link: { color: C.brand, fontSize: 12.5, fontWeight: "700", marginTop: 7 },
+  readingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  readingText: { color: C.muted, fontSize: 12.5, marginTop: 7, flex: 1 },
   input: {
     minHeight: S.touch, backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
     borderRadius: R.card, paddingHorizontal: 13, color: C.ink, fontSize: 15.5,
@@ -244,4 +413,17 @@ const s = StyleSheet.create({
   },
   chipOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
   chipText: { color: C.muted, fontSize: 13.5, fontWeight: "700" },
+  jobRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  jobNumber: { color: C.ink, fontSize: 16, fontWeight: "800" },
+  flagTitle: { color: C.warnChipInk, fontSize: 14, fontWeight: "800" },
+  flagRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  flagBtn: {
+    borderRadius: R.chip, borderWidth: 1, borderColor: C.line, backgroundColor: C.panel,
+    paddingHorizontal: 14, minHeight: 40, justifyContent: "center",
+  },
+  flagBtnOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  flagBtnText: { color: C.muted, fontSize: 13, fontWeight: "700" },
+  flagBtnOnText: { color: C.ink, fontSize: 13, fontWeight: "800" },
+  cancelWrap: { alignItems: "center", paddingTop: 4 },
+  cancel: { color: C.muted, fontSize: 13.5, fontWeight: "600" },
 });

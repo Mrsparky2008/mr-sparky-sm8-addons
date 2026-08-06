@@ -93,6 +93,15 @@ export const postJobNote = (jobNumber, note) =>
 export const postReceiptCopy = (jobNumber, { imageB64, fileType, caption }) =>
   apiPost(`/api/job/${encodeURIComponent(jobNumber)}/receipt-copy`, { imageB64, fileType, caption });
 
+/**
+ * Read a photographed docket. Returns { receipt, docket, unreadable } — the
+ * fields it could read, and, if the paper quotes a job number, what SM8 says
+ * that job is. Nothing is filed; the fields land in the form for a human to
+ * confirm. Missing values come back null rather than guessed.
+ */
+export const readReceipt = ({ imageB64, contentType }) =>
+  apiPost("/api/receipt/read", { imageB64, contentType });
+
 // One conversation turn. Resolves { reply } after the stream ends.
 // onDelta(text) per text fragment; onAudio(seq, b64mp3) per Polly chunk.
 export async function chatTurn({ messages, onDelta, onAudio }) {

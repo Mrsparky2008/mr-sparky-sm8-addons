@@ -14,7 +14,7 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
-import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob } from "./brain.mjs";
+import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
 
 const polly = new PollyClient({});
@@ -362,6 +362,81 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       });
       if (r?.error) return jsonOut(502, { ok: false, error: r.error });
       return jsonOut(200, { ok: true, attachment_uuid: r.attachment_uuid });
+    }
+
+    // ---- Read a receipt ----------------------------------------------------
+    // The photo goes to Claude, the fields come back, the human confirms them.
+    // Nothing is filed here: this route writes to nothing and returns only what
+    // was legible on the paper, plus — if the docket quotes a job number — what
+    // ServiceM8 says that job actually is, so the app can flag a mismatch with
+    // the job the receipt is being filed against.
+    if (method === "POST" && path === "/api/receipt/read") {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const jsonOut = (status, body) => respond(status, {
+        "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      }, JSON.stringify(body));
+
+      try {
+        await verifyIdToken(bearer(headers));
+      } catch {
+        return jsonOut(401, { ok: false, error: "not signed in" });
+      }
+
+      let payload = {};
+      try {
+        payload = JSON.parse(event.isBase64Encoded
+          ? Buffer.from(event.body || "", "base64").toString("utf8")
+          : event.body || "{}");
+      } catch {
+        return jsonOut(400, { ok: false, error: "bad request body" });
+      }
+
+      const imageB64 = String(payload.imageB64 || "");
+      if (!imageB64) return jsonOut(400, { ok: false, error: "No photo supplied." });
+      // base64 is 4 chars per 3 bytes; the Messages API caps an image at 5MB.
+      if (imageB64.length > 7 * 1024 * 1024) {
+        return jsonOut(413, { ok: false, error: "That photo is too big to read." });
+      }
+      const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+      const contentType = ALLOWED.has(payload.contentType) ? payload.contentType : "image/jpeg";
+
+      let read;
+      try {
+        read = await readReceipt({ imageB64, contentType });
+      } catch (err) {
+        console.error("receipt read failed:", err);
+        return jsonOut(502, { ok: false, error: "Couldn't read that one — type it in." });
+      }
+
+      // A number printed on a docket is a claim, not a fact. Check it against
+      // ServiceM8 before the app shows it, so an OCR misread of an account
+      // number can't masquerade as somebody else's job.
+      let docket = null;
+      if (read.jobNumber) {
+        const index = await jobIndex().catch(() => []);
+        const job = index.find((j) => String(j.number) === read.jobNumber);
+        docket = {
+          jobNumber: read.jobNumber,
+          label: read.jobNumberLabel,
+          known: !!job,
+          address: job?.address || null,
+          contact: job?.contact || null,
+          status: job?.status || null,
+        };
+      }
+
+      return jsonOut(200, {
+        ok: true,
+        receipt: {
+          supplier: read.supplier,
+          amountIncGst: read.amountIncGst,
+          date: read.date,
+          invoiceNumber: read.invoiceNumber,
+        },
+        docket,
+        unreadable: read.unreadable,
+      });
     }
 
     // ---- Native app data routes -------------------------------------------
