@@ -23,7 +23,7 @@ function when(stamp) {
   return `${label} · ${h12}:${m[5]}${h >= 12 ? "pm" : "am"}`;
 }
 
-export default function JobDiary({ jobNumber, bookings = [], notes = [], onTalk, onBack }) {
+export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddReceipt, onTalk, onBack }) {
   const ordered = [...bookings].sort((a, b) => String(b.start || "").localeCompare(String(a.start || "")));
   const noteList = (notes || []).filter(Boolean).slice().reverse();
 
@@ -31,6 +31,17 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onTalk,
     <View style={s.screen}>
       <Header title="Job diary" meta={`#${jobNumber}`} onBack={onBack} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={s.list}>
+        {/* Add receipt is live today — the capture flow already exists and
+            files to the portal (with an SM8 record copy once the backend
+            lands). Note and photo join it on the same row then. */}
+        {onAddReceipt ? (
+          <View style={s.section}>
+            <Pressable onPress={onAddReceipt} style={s.addReceipt}>
+              <Icon name="camera" size={18} color="#fff" />
+              <Text style={s.addReceiptText}>Add receipt</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {ordered.length ? (
           <View style={s.section}>
             <SectionLabel>Bookings</SectionLabel>
@@ -103,6 +114,11 @@ const s = StyleSheet.create({
   entryTitle: { color: C.ink, fontSize: 14, fontWeight: "700" },
   entrySub: { ...T.small, marginTop: 2 },
   note: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
+  addReceipt: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    minHeight: 46, borderRadius: R.button, backgroundColor: C.brand,
+  },
+  addReceiptText: { color: "#fff", fontSize: 14.5, fontWeight: "800" },
   dock: {
     paddingHorizontal: S.screen, paddingTop: 12, paddingBottom: 10,
     borderTopColor: C.line, borderTopWidth: 1,
