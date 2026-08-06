@@ -46,10 +46,16 @@ async function apiGet(path) {
   return j;
 }
 
-/** Recent jobs when q is empty, fuzzy search when it isn't. */
+/**
+ * Recent jobs when q is empty, fuzzy search when it isn't. With no query the
+ * backend sends the newest of EACH bucket plus the real totals, so the bucket
+ * headers can say how many there are rather than how many were sent.
+ */
 export async function fetchJobs(q) {
   const j = await apiGet(`/api/jobs${q ? `?q=${encodeURIComponent(q)}` : ""}`);
-  return j.matches || [];
+  const matches = j.matches || [];
+  matches.counts = j.counts || null;
+  return matches;
 }
 
 /** Everything the job card shows: status, description, contacts, billing, notes. */

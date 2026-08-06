@@ -392,14 +392,27 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       if (path === "/api/jobs") {
         const query = String(q.q || "").trim();
         if (!query) {
-          // No search yet: the most recent jobs, which is what "recents" means
-          // on a phone that has just been opened. Job numbers climb over time.
+          // The app buckets these under ServiceM8's own names, so send the
+          // most recent of EACH bucket rather than the most recent overall.
+          // Taking the top 12 by number returned almost nothing but Quotes —
+          // new enquiries arrive as quotes, so they own the high numbers, and
+          // Work Order and Completed were left empty below a long scroll.
           const index = await jobIndex();
-          const recent = [...index]
-            .sort((a, b) => Number(b.number) - Number(a.number))
-            .slice(0, 12)
-            .map((j) => ({ job_uuid: j.uuid, job_number: j.number, status: j.status, address: j.address, contact: j.contact || undefined, work: j.description ? j.description.slice(0, 90) : undefined }));
-          return jsonOut(200, { ok: true, matches: recent });
+          const BUCKETS = ["Quote", "Work Order", "Completed"];
+          const PER_BUCKET = 8;
+          const newestFirst = [...index].sort((a, b) => Number(b.number) - Number(a.number));
+          const counts = {};
+          const picked = [];
+          for (const j of newestFirst) {
+            const bucket = BUCKETS.find((b) => b === j.status);
+            if (!bucket) continue;
+            counts[bucket] = (counts[bucket] || 0) + 1;
+            if (counts[bucket] <= PER_BUCKET) picked.push(j);
+          }
+          const recent = picked.map((j) => ({ job_uuid: j.uuid, job_number: j.number, status: j.status, address: j.address, contact: j.contact || undefined, work: j.description ? j.description.slice(0, 90) : undefined }));
+          // Full totals so the bucket headers can say how many there really
+          // are — the phone counts what it was sent, which is not the truth.
+          return jsonOut(200, { ok: true, matches: recent, counts });
         }
         const result = await executeTool("search_jobs", { query });
         return jsonOut(200, { ok: true, ...result });

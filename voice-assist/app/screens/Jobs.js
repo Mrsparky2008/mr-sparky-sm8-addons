@@ -54,9 +54,10 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
   }, [q]);
 
   const searching = !!q.trim();
+  const counts = jobs.counts || null;
   const grouped = searching
     ? null
-    : BUCKETS.map((b) => ({ ...b, jobs: jobs.filter((j) => j.status === b.key) }))
+    : BUCKETS.map((b) => ({ ...b, jobs: jobs.filter((j) => j.status === b.key), total: counts?.[b.key] }))
         .filter((b) => b.jobs.length);
 
   return (
@@ -102,7 +103,14 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
           <>
             {(grouped || []).map((b) => (
               <View key={b.key}>
-                <Text style={[T.label, { marginBottom: 8, marginTop: 4 }]}>{b.label}</Text>
+                <View style={s.bucketHead}>
+                  <Text style={T.label}>{b.label}</Text>
+                  {b.total ? (
+                    <Text style={[s.bucketCount, mono]}>
+                      {b.total > b.jobs.length ? `${b.jobs.length} of ${b.total}` : b.total}
+                    </Text>
+                  ) : null}
+                </View>
                 {b.jobs.map((j) => (
                   <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} hideStatus />
                 ))}
@@ -171,6 +179,11 @@ const s = StyleSheet.create({
   number: { color: C.ink, fontSize: 15, fontWeight: "800" },
   address: { ...T.body, fontSize: 14 },
   sub: { ...T.small, marginTop: 3 },
+  bucketHead: {
+    flexDirection: "row", alignItems: "baseline", justifyContent: "space-between",
+    marginBottom: 8, marginTop: 4,
+  },
+  bucketCount: { color: C.muted, fontSize: 11 },
   allRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   allTitle: { color: C.ink, fontSize: 15, fontWeight: "700" },
   chev: { color: C.muted, fontSize: 22 },
