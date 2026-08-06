@@ -59,6 +59,11 @@ function Shell() {
   const [stacks, setStacks] = useState(ROOTS);
   const [workView, setWorkView] = useState("jobs");   // jobs | today
   const [charlieJob, setCharlieJob] = useState(null);
+  // Charlie's screen dials the moment it mounts — right when he was a screen
+  // you tapped into, wrong for a tab that exists from launch. Found live: the
+  // app opened and started talking. So he is born on the FIRST visit to his
+  // tab and stays mounted after (leaving mid-call must not hang up the line).
+  const [charlieBorn, setCharlieBorn] = useState(false);
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
   const [committing, setCommitting] = useState(false);
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
@@ -93,6 +98,7 @@ function Shell() {
   const openCharlie = useCallback((job) => {
     setDraft(null);
     setCharlieJob(asJob(job));
+    setCharlieBorn(true);
     setTab("charlie");
   }, []);
 
@@ -165,6 +171,7 @@ function Shell() {
     setTab("work");
     setDraft(null);
     setCharlieJob(null);
+    setCharlieBorn(false);
     setWho(null);
     setWaiting(0);
     emailRef.current = null;
@@ -233,14 +240,18 @@ function Shell() {
         </View>
 
         {/* ---- Charlie ---------------------------------------------------
-            Always mounted. Unmounting runs his cleanup, which hangs up the
-            call, so leaving this tab must never destroy him. */}
+            Mounted on first visit, never unmounted after: mounting dials, and
+            unmounting runs his cleanup, which hangs up the call — so leaving
+            this tab must never destroy him, and launching the app must never
+            create him. Hang up by tapping the orb, or sign out. */}
         <View style={[s.fill, tab !== "charlie" && s.hidden]} pointerEvents={tab === "charlie" ? "auto" : "none"}>
+          {charlieBorn ? (
           <CharlieLive
             job={charlieJob}
             onBack={() => setTab("work")}
             onDraft={onDraft}
           />
+          ) : null}
           {draft ? (
             <View style={s.fill}>
               <QuoteWorkshop
@@ -323,7 +334,12 @@ function Shell() {
         ) : null}
       </View>
 
-      <TabBar tabs={tabs} value={tab} onChange={setTab} badges={{ admin: waiting }} />
+      <TabBar
+        tabs={tabs}
+        value={tab}
+        onChange={(t) => { if (t === "charlie") setCharlieBorn(true); setTab(t); }}
+        badges={{ admin: waiting }}
+      />
     </SafeAreaView>
   );
 }
