@@ -1,22 +1,29 @@
 # Changes the app needs in the portal repo
 
-## Where this stands (2026-08-06, end of the overnight session)
+## Where this stands (2026-08-06, ~11:45am — morning-after update)
 
-- ✅ Gateway audience widened — the app's tokens are accepted NOW (section 3)
+- ✅ Gateway audience widened (section 3) — done from Steven's phone at 12:08am
 - ✅ Portal URL confirmed and wired into the app (`portal.mrsparky.com.au`)
-- ⏳ The patch below — apply + deploy from the PC (sections 1–2)
-- ⏳ The dev build — from the PC, OR from a cloud session after two environment
-  changes: add `expo.dev`, `api.expo.dev`, `*.expo.dev` and
-  `storage.googleapis.com` to the environment's network allowlist, and set a
-  fresh Expo robot token as the `EXPO_TOKEN` environment variable. (The first
-  attempt died at this sandbox's network proxy — Expo is unreachable here, and
-  the token minted for it has been revoked.)
-- ⏳ One-time on the PC either way: upload `AuthKey_R59FG54N39.p8` at
-  expo.dev → project → Credentials, so EAS can mint the ad-hoc provisioning
-  profile for the NEW bundle id `au.com.mrsparky.aiassist.dev`. August's free
-  iOS builds are spent — expect the $19 Starter month or the Sept 1 reset.
+- ✅ **The patch below is DEPLOYED** — applied on the PC by a local Claude Code
+  session, 193/193 tests, smoke-tested live, committed to the portal repo as
+  `9331b78` on master. The rollback zip of the pre-deploy code is in that
+  session's scratchpad (copy it somewhere durable if wanted). Sections 1–2 are
+  kept as the record of what changed and why.
+- ✅ Apple side done: ASC key `WA5RT56XZ7` on EAS, distribution certificate
+  created, Steven's iPhone registered (UDID captured via the register-device
+  page after iOS's one-hour Stolen Device Protection delay).
+- ⏳ The dev build — queued/running from the PC as of this update; install link
+  lands on Steven's iPhone when it finishes. Quota was a non-issue: the account
+  is on the paid Starter plan.
+- Known nit for the NEXT App Store submit (not today): `eas.json`
+  `submit.production` still points at `../AuthKey_R59FG54N39.p8`, which lives
+  only on the PC. Fine as long as submits run there.
 - Not built, by choice: the entitlement gate. It needs a decision on where the
   paid-seat flag lives in `people[]` first.
+- Cleanup once the build is installed: revoke the Expo robot token that
+  appears in the session transcript, delete the spare undownloaded Apple key
+  `9H7U8P3T8N`, and delete `AuthKey_WA5RT56XZ7.p8` from Downloads once it's
+  uploaded to EAS.
 
 The subcontractor portal (github.com/Mrsparky2008/mr-sparky-portal) is a
 separate repo and a separate deploy. This session can edit and test it but
