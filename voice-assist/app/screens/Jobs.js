@@ -55,10 +55,17 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
 
   const searching = !!q.trim();
   const counts = jobs.counts || null;
+  // Three per band. The backend sends eight, but 593 quotes ate the screen
+  // before the other two bands were reachable — and the bands exist to show
+  // the SHAPE of the work at a glance. Search and All jobs are the real doors.
+  const PER_BAND = 3;
   const grouped = searching
     ? null
-    : BUCKETS.map((b) => ({ ...b, jobs: jobs.filter((j) => j.status === b.key), total: counts?.[b.key] }))
-        .filter((b) => b.jobs.length);
+    : BUCKETS.map((b) => ({
+        ...b,
+        jobs: jobs.filter((j) => j.status === b.key).slice(0, PER_BAND),
+        total: counts?.[b.key],
+      })).filter((b) => b.jobs.length);
 
   return (
     <View style={s.screen}>
