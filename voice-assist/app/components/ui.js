@@ -90,7 +90,9 @@ export function Empty({ children }) {
 export function Row({ icon, label, value, onPress, dim, last }) {
   const body = (
     <View style={[s.row, last && { borderBottomWidth: 0 }]}>
-      {!!icon && <Text style={s.rowIcon}>{icon}</Text>}
+      {!!icon && (typeof icon === "string"
+        ? <Text style={s.rowIcon}>{icon}</Text>
+        : <View style={s.rowIconBox}>{icon}</View>)}
       <Text style={[s.rowLabel, dim && { color: C.muted }]}>{label}</Text>
       {!!value && <Text style={[s.rowValue, mono]}>{value}</Text>}
       {!!onPress && <Text style={s.chevron}>›</Text>}
@@ -103,7 +105,7 @@ export function Row({ icon, label, value, onPress, dim, last }) {
 export function Tile({ icon, label, onPress, tone }) {
   return (
     <Pressable onPress={onPress} style={[s.tile, tone === "brand" && { borderColor: C.brand }]}>
-      <Text style={s.tileIcon}>{icon}</Text>
+      {typeof icon === "string" ? <Text style={s.tileIcon}>{icon}</Text> : <View style={s.tileIconBox}>{icon}</View>}
       <Text style={s.tileLabel}>{label}</Text>
     </Pressable>
   );
@@ -196,6 +198,8 @@ const s = StyleSheet.create({
     paddingVertical: 12, borderBottomColor: C.line, borderBottomWidth: 1,
   },
   rowIcon: { fontSize: 16, width: 22, textAlign: "center" },
+  rowIconBox: { width: 22, alignItems: "center" },
+  tileIconBox: { height: 24, justifyContent: "center" },
   rowLabel: { flex: 1, color: C.ink, fontSize: 15 },
   rowValue: { color: C.muted, fontSize: 15 },
   chevron: { color: C.muted, fontSize: 22, lineHeight: 24, marginLeft: 2 },

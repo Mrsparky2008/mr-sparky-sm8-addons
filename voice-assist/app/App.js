@@ -25,7 +25,9 @@ import AccountSheet from "./components/AccountSheet";
 import { Banner, Segment } from "./components/ui";
 import SignIn from "./screens/SignIn";
 import Jobs from "./screens/Jobs";
+import AllJobs from "./screens/AllJobs";
 import JobCard from "./screens/JobCard";
+import JobDiary from "./screens/JobDiary";
 import CharlieLive from "./screens/CharlieLive";
 import QuoteWorkshop from "./screens/QuoteWorkshop";
 import Diary from "./screens/Diary";
@@ -230,12 +232,22 @@ function Shell() {
                   onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
                   onTalk={openCharlie}
                   onDiary={() => setWorkView("today")}
+                  onAllJobs={() => push({ name: "alljobs" })}
                   onSignOut={handleSignOut}
                   onAccount={() => setAccount(true)}
                 />
               ) : (
-                <Diary onTalk={openCharlie} />
+                <Diary
+                  onTalk={openCharlie}
+                  onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
+                />
               )}
+            </View>
+          ) : null}
+
+          {top?.name === "alljobs" ? (
+            <View style={s.fill}>
+              <AllJobs onOpenJob={(j) => push({ name: "job", job: asJob(j) })} onBack={pop} />
             </View>
           ) : null}
 
@@ -245,8 +257,27 @@ function Shell() {
                 jobNumber={top.job.job_number}
                 onBack={pop}
                 onTalk={openCharlie}
-                onDiary={() => { pop(); setWorkView("today"); }}
+                onJobDiary={(payload) => push({ name: "jobdiary", job: top.job, ...payload })}
+                onAddReceipt={(jobNumber) => push({ name: "jobreceipt", jobNumber })}
               />
+            </View>
+          ) : null}
+
+          {top?.name === "jobdiary" ? (
+            <View style={s.fill}>
+              <JobDiary
+                jobNumber={top.job.job_number}
+                bookings={top.bookings}
+                notes={top.notes}
+                onTalk={() => openCharlie(top.job)}
+                onBack={pop}
+              />
+            </View>
+          ) : null}
+
+          {top?.name === "jobreceipt" ? (
+            <View style={s.fill}>
+              <AddReceipt jobNumbers={[top.jobNumber]} jobNumber={top.jobNumber} onBack={pop} onSaved={pop} />
             </View>
           ) : null}
         </View>

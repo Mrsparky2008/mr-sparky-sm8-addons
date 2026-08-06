@@ -1,14 +1,30 @@
-// Screen 2 — Jobs. Search, or pick up where the day left off.
+// Screen 2 — Jobs, bucketed the way ServiceM8 buckets them.
+//
+// Steven's spec (2026-08-06): same names SM8 uses — Quotes, Work Order,
+// Completed — so nothing has to be relearned. The list is for now; the
+// All jobs door is the archive: last 10 plus a search that reaches every
+// job ever. Searching from this screen still works and shows a flat list.
+//
+// Skin note: buckets group the recents the backend already serves. Full
+// per-bucket counts across all 1,600+ jobs arrive with the next backend
+// deploy, so no counts are shown yet — a small number here would be a lie.
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet,
   Text, TextInput, View,
 } from "react-native";
 import { Card, Empty, Header, StatusChip, Tile, TileGrid } from "../components/ui";
+import Icon from "../components/icons";
 import { C, R, S, T, mono, oneLine, suburb } from "../lib/theme";
 import { fetchJobs } from "../lib/api";
 
-export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, onAccount, email }) {
+const BUCKETS = [
+  { key: "Quote", label: "Quotes" },
+  { key: "Work Order", label: "Work Order" },
+  { key: "Completed", label: "Completed" },
+];
+
+export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut, onAccount, email }) {
   const [q, setQ] = useState("");
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +53,12 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, onAccount,
     return () => clearTimeout(t);
   }, [q]);
 
+  const searching = !!q.trim();
+  const grouped = searching
+    ? null
+    : BUCKETS.map((b) => ({ ...b, jobs: jobs.filter((j) => j.status === b.key) }))
+        .filter((b) => b.jobs.length);
+
   return (
     <View style={s.screen}>
       <Header title="Jobs" meta={email ? email.split("@")[0] : undefined} onMeta={onAccount} />
@@ -46,7 +68,7 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, onAccount,
           style={s.search}
           value={q}
           onChangeText={setQ}
-          placeholder="Job number or address…"
+          placeholder="Job number, name, suburb…"
           placeholderTextColor={C.muted}
           selectionColor={C.brand}
           autoCorrect={false}
@@ -63,16 +85,43 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, onAccount,
           <RefreshControl refreshing={loading && jobs.length > 0} onRefresh={() => load(q.trim())} tintColor={C.muted} />
         }
       >
-        <Text style={[T.label, { marginBottom: 10 }]}>{q.trim() ? "Matches" : "Recent"}</Text>
-
         {loading && jobs.length === 0 ? (
           <ActivityIndicator color={C.brand} style={{ marginTop: 30 }} />
         ) : error ? (
           <Empty>{error}</Empty>
-        ) : jobs.length === 0 ? (
-          <Empty>{q.trim() ? `Nothing matching “${q.trim()}”.` : "No jobs yet."}</Empty>
+        ) : searching ? (
+          <>
+            <Text style={[T.label, { marginBottom: 10 }]}>Matches</Text>
+            {jobs.length === 0 ? (
+              <Empty>Nothing matching “{q.trim()}”.</Empty>
+            ) : (
+              jobs.map((j) => <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} />)
+            )}
+          </>
         ) : (
-          jobs.map((j) => <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} />)
+          <>
+            {(grouped || []).map((b) => (
+              <View key={b.key}>
+                <Text style={[T.label, { marginBottom: 8, marginTop: 4 }]}>{b.label}</Text>
+                {b.jobs.map((j) => (
+                  <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} hideStatus />
+                ))}
+              </View>
+            ))}
+            {jobs.length === 0 ? <Empty>No recent jobs.</Empty> : null}
+
+            <Pressable onPress={onAllJobs}>
+              <Card style={{ marginTop: 4 }}>
+                <View style={s.allRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.allTitle}>All jobs</Text>
+                    <Text style={T.small}>the archive — search finds anything, ever</Text>
+                  </View>
+                  <Text style={s.chev}>›</Text>
+                </View>
+              </Card>
+            </Pressable>
+          </>
         )}
       </ScrollView>
 
@@ -80,8 +129,8 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, onAccount,
           hidden behind two grey words. */}
       <View style={s.dock}>
         <TileGrid>
-          <Tile icon="🎙" label="Talk to Charlie" tone="brand" onPress={() => onTalk(null)} />
-          <Tile icon="📖" label="My day" onPress={onDiary} />
+          <Tile icon={<Icon name="mic" size={22} color={C.ink} />} label="Talk to Charlie" tone="brand" onPress={() => onTalk(null)} />
+          <Tile icon={<Icon name="board" size={22} color={C.ink} />} label="My day" onPress={onDiary} />
         </TileGrid>
         <Pressable onPress={onSignOut} hitSlop={8} style={s.signOutWrap}>
           <Text style={s.link}>Sign out</Text>
@@ -91,13 +140,13 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, onAccount,
   );
 }
 
-function JobRow({ job, onPress }) {
+function JobRow({ job, onPress, hideStatus }) {
   return (
     <Pressable onPress={onPress}>
       <Card style={{ marginBottom: 10 }}>
         <View style={s.rowTop}>
           <Text style={[s.number, mono]}>#{job.job_number}</Text>
-          <StatusChip status={job.status} />
+          {hideStatus ? null : <StatusChip status={job.status} />}
         </View>
         <Text style={s.address} numberOfLines={1}>{oneLine(job.address) || suburb(job.address) || "—"}</Text>
         {!!(job.contact || job.work) && (
@@ -122,6 +171,9 @@ const s = StyleSheet.create({
   number: { color: C.ink, fontSize: 15, fontWeight: "800" },
   address: { ...T.body, fontSize: 14 },
   sub: { ...T.small, marginTop: 3 },
+  allRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  allTitle: { color: C.ink, fontSize: 15, fontWeight: "700" },
+  chev: { color: C.muted, fontSize: 22 },
   dock: {
     paddingHorizontal: S.screen, paddingTop: 12, paddingBottom: 8,
     borderTopColor: C.line, borderTopWidth: 1, backgroundColor: C.bg,
