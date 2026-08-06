@@ -104,7 +104,12 @@ export default function SubmitClaim({ data, onBack, onSubmitted }) {
           <View>
             <SectionLabel>Declaration</SectionLabel>
             <Card>
-              <Text style={[T.small, { color: C.ink }]}>{data.declaration}</Text>
+              {/* The portal sends the declaration as {text, version, _note} —
+                  the text is the part a human signs. Rendering the object
+                  itself is a crash, and it did crash, on this exact screen. */}
+              <Text style={[T.small, { color: C.ink }]}>
+                {typeof data.declaration === "string" ? data.declaration : data.declaration.text || ""}
+              </Text>
             </Card>
             <Pressable onPress={() => setAccepted((v) => !v)} style={s.accept}>
               <View style={[s.box, accepted && s.boxOn]}>
