@@ -39,6 +39,18 @@ export default function SubmitClaim({ data, onBack, onSubmitted }) {
     });
   }
 
+  // With 44 claimable jobs on screen the day this shipped, per-row ticking is
+  // for excluding the odd job, not for building the selection.
+  function toggleAll() {
+    if (everything) {
+      setChosen(new Set());
+      setHelping(false);
+    } else {
+      setChosen(new Set(all));
+      setHelping(helperCount > 0);
+    }
+  }
+
   async function submit() {
     setBusy(true);
     setError(null);
@@ -78,7 +90,12 @@ export default function SubmitClaim({ data, onBack, onSubmitted }) {
         </Card>
 
         <View>
-          <SectionLabel>Jobs</SectionLabel>
+          <View style={s.jobsHead}>
+            <SectionLabel>Jobs</SectionLabel>
+            <Pressable onPress={toggleAll} hitSlop={10}>
+              <Text style={s.selectAll}>{everything ? "Deselect all" : "Select all"}</Text>
+            </Pressable>
+          </View>
           <Card>
             {all.map((n) => (
               <Tick
@@ -151,6 +168,8 @@ function Tick({ on, onPress, label, value }) {
 const s = StyleSheet.create({
   body: { padding: S.screen, paddingTop: 0, gap: S.gap },
   hero: { color: C.ink, fontSize: 30, fontWeight: "800", letterSpacing: -0.6, marginVertical: 3 },
+  jobsHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
+  selectAll: { color: C.infoChipInk, fontSize: 12.5, fontWeight: "800" },
   tick: {
     flexDirection: "row", alignItems: "center", gap: 11, minHeight: S.touch,
     paddingVertical: 10, borderBottomColor: C.line, borderBottomWidth: 1,
