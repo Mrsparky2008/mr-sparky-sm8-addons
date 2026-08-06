@@ -1,5 +1,52 @@
 # Changes the app needs in the portal repo
 
+## 5. The suppliers list — `portal-suppliers.patch`
+
+Steven, 2026-08-06: *"a section in settings to add common suppliers to select
+from ... if not in list select other and open a field to type the supplier
+name. It will serve as dial purposes later."*
+
+The receipt form on the phone gets a row of chips instead of a free-text box,
+so the same wholesaler is spelled one way and spend actually groups. It is a
+shortcut, never a gate: **Other** and a typed name always work.
+
+**What's in it**
+
+- `lib/suppliers.mjs` — the list and the matcher, with `DEFAULT_SUPPLIERS` as
+  the seed. `matchSupplier` is deliberately conservative: a whole name or alias
+  appearing in the text, never a fuzzy near-miss. A confidently wrong match
+  would file one wholesaler's spend under another's name and nobody would spot
+  it. 7 new tests.
+- `settings/portal-settings.json` — a `suppliers` array. **Aliases are what the
+  docket prints**: the paper says MIDDENDORP ELECTRIC CO PTY LTD, the trade
+  says Middy's. That is what lets a photographed receipt land on the right chip.
+- `lib/settings-store.mjs` — `suppliers` added to `EDITABLE`, so the office can
+  maintain it without a deploy.
+- `api/index.mjs` — `/api/me` serves the list (the cheap route the app calls on
+  every launch), and `/api/settings` serves the **effective** list to the admin
+  pane.
+- `api/shell.mjs` — a Suppliers card and section under Settings: name, phone,
+  add, remove. Aliases are not editable there and ride through a save
+  untouched — they are a reading concern, not an office one.
+
+**The DynamoDB trap this sidesteps:** stored settings win over the bundled
+file, so a new key added to the JSON never appears live on an existing
+install. `suppliersFor()` falls back to the seed when settings carry no list,
+which is exactly the `DEFAULT_*` pattern the repo already uses — so the chips
+work the moment it deploys, with no need to clear the settings item, and the
+first save from the pane persists the list properly.
+
+**Verified: 200/200 tests pass** (193 existing, 7 new), including
+`test/shell-script.test.mjs`, which is the one that matters for `api/shell.mjs`
+— it parses the emitted browser script and checks every `data-*` hook has a
+listener and every CSS class is styled.
+
+    git apply /path/to/voice-assist/docs/portal-suppliers.patch
+    node --test "test/*.test.mjs"
+
+Until it lands the phone simply shows no chips and the supplier is typed, as
+it is today.
+
 ## 4. URGENT — receipts could never be filed from the field
 
 `portal-receipts-any-job.patch`. Found by Steven trying to lodge a real L&H

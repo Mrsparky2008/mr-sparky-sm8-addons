@@ -13,12 +13,15 @@
 // Two rules the reading half obeys, both Steven's (2026-08-06):
 //   · It fills in, it does not file. Every value is editable and nothing is
 //     saved until a human presses the button.
+//   · The supplier lands on the office's spelling. The list of wholesalers
+//     lives in portal settings and comes down with /api/me; the chips are a
+//     shortcut and never a gate, so Other and a typed name always work.
 //   · The job comes from where you opened the screen, not from the paper. If
 //     the docket quotes a different job number it is FLAGGED, with what
 //     ServiceM8 says that job is, and the choice is yours. If nothing anchors
 //     the receipt to a job, it asks — a receipt on the wrong job is worse than
 //     a receipt typed in by hand.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -29,6 +32,7 @@ import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import KeyboardToggle from "../../components/KeyboardToggle";
 import { C, R, S, T, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
+import { matchSupplier } from "../../lib/suppliers";
 import { postReceiptCopy, readReceipt } from "../../lib/api";
 
 // The phone is in the same timezone as the job. Building the date from the
@@ -66,6 +70,21 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   // Fields the human has touched are never overwritten by a re-read.
   const touched = useRef({});
   const mark = (k) => { touched.current[k] = true; };
+
+  // The suppliers the office keeps in portal settings, as chips. Best-effort:
+  // if the call fails there are no chips and the field is typed, exactly as
+  // before — the list is a shortcut, never a gate.
+  const [suppliers, setSuppliers] = useState([]);
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [readAs, setReadAs] = useState("");   // what the paper said, when we tidied it
+  const supplierRef = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    portal.me()
+      .then((r) => { if (alive) setSuppliers(r?.suppliers || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // Whichever field was last in use — the up arrow returns you to it.
   const lastField = useRef(null);
@@ -110,7 +129,17 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
       setRead(got);
       setDocket(r.docket || null);
 
-      if (got.supplier && !touched.current.supplier) setSupplier(got.supplier);
+      // The paper prints the legal name; the list holds the one the trade
+      // uses. Landing on the list's spelling is the whole reason the list
+      // exists — spend only groups if the same wholesaler is written the same
+      // way — and what the docket actually said is shown underneath, so the
+      // tidy-up is never silent.
+      if (got.supplier && !touched.current.supplier) {
+        const hit = matchSupplier(suppliers, got.supplier);
+        setSupplier(hit ? hit.name : got.supplier);
+        setOtherOpen(!hit);
+        setReadAs(hit && hit.name !== got.supplier ? got.supplier : "");
+      }
       if (got.amountIncGst && !touched.current.amount) setAmount(String(got.amountIncGst.toFixed(2)));
       if (got.date && !touched.current.date) setDate(got.date);
       if (got.invoiceNumber && !touched.current.invoiceNumber) setInvoiceNumber(got.invoiceNumber);
@@ -187,6 +216,9 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
     }
   }
 
+  // "Other" is either chosen, or implied by a name that isn't on the list.
+  const knownSupplier = suppliers.some((x) => x.name === supplier);
+  const showSupplierField = !suppliers.length || otherOpen || (!!supplier && !knownSupplier);
   const mismatch = !!(docket && jobNumber && docket.jobNumber !== jobNumber);
   const needsJob = !jobNumber;
   const ready = photo && supplier.trim() && amount.trim() && date && jobNumber && !reading;
@@ -303,12 +335,47 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
 
         <View>
           <SectionLabel>Supplier{read?.supplier ? " · read" : ""}</SectionLabel>
-          <Field
-            onUse={(r) => (lastField.current = r.current)}
-            value={supplier}
-            onChangeText={(v) => { mark("supplier"); setSupplier(v); }}
-            placeholder="Middy's, Lawrence & Hanson…"
-          />
+          {suppliers.length ? (
+            <View style={[s.chips, { marginBottom: showSupplierField ? 9 : 0 }]}>
+              {suppliers.map((sup) => (
+                <Pressable
+                  key={sup.id}
+                  onPress={() => {
+                    mark("supplier");
+                    setSupplier(sup.name);
+                    setOtherOpen(false);
+                    setReadAs("");
+                  }}
+                  style={[s.chip, sup.name === supplier && !otherOpen && s.chipOn]}
+                >
+                  <Text style={[s.chipText, sup.name === supplier && !otherOpen && { color: C.ink }]}>
+                    {sup.name}
+                  </Text>
+                </Pressable>
+              ))}
+              <Pressable
+                onPress={() => {
+                  mark("supplier");
+                  setOtherOpen(true);
+                  if (knownSupplier) setSupplier("");
+                  setTimeout(() => supplierRef.current?.focus(), 60);
+                }}
+                style={[s.chip, otherOpen && s.chipOn]}
+              >
+                <Text style={[s.chipText, otherOpen && { color: C.ink }]}>Other…</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {showSupplierField ? (
+            <Field
+              inputRef={supplierRef}
+              onUse={(r) => (lastField.current = r.current)}
+              value={supplier}
+              onChangeText={(v) => { mark("supplier"); setSupplier(v); setReadAs(""); }}
+              placeholder="Who it was bought from"
+            />
+          ) : null}
+          {readAs ? <Text style={s.note}>The docket says “{readAs}”.</Text> : null}
         </View>
 
         <View>
@@ -381,12 +448,15 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   );
 }
 
-function Field({ mono: isMono, fieldRef, onUse, ...props }) {
+function Field({ mono: isMono, inputRef, onUse, ...props }) {
   const own = useRef(null);
   return (
     <TextInput
       {...props}
-      ref={own}
+      ref={(node) => {
+        own.current = node;
+        if (inputRef) inputRef.current = node;
+      }}
       onFocus={() => { if (onUse) onUse(own); }}
       placeholderTextColor={C.muted}
       style={[s.input, isMono && { fontVariant: ["tabular-nums"] }]}
