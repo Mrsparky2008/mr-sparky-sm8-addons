@@ -10,6 +10,7 @@ import {
   ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Card, Empty, Header, StatusChip } from "../components/ui";
+import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono, oneLine } from "../lib/theme";
 import { fetchJobs } from "../lib/api";
 
@@ -19,6 +20,7 @@ export default function AllJobs({ onOpenJob, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const seq = useRef(0);
+  const searchRef = useRef(null);
 
   async function load(query) {
     const mine = ++seq.current;
@@ -44,6 +46,7 @@ export default function AllJobs({ onOpenJob, onBack }) {
       <Header title="All jobs" onBack={onBack} />
       <View style={s.searchWrap}>
         <TextInput
+          ref={searchRef}
           style={s.search}
           value={q}
           onChangeText={setQ}
@@ -90,6 +93,8 @@ export default function AllJobs({ onOpenJob, onBack }) {
           ))
         )}
       </ScrollView>
+
+      <KeyboardToggle inputRef={searchRef} />
     </View>
   );
 }

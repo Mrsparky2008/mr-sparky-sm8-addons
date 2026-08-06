@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { Card, Empty, Header, StatusChip, Tile, TileGrid } from "../components/ui";
 import Icon from "../components/icons";
+import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono, oneLine, statusChip, suburb } from "../lib/theme";
 import { fetchJobs } from "../lib/api";
 
@@ -30,6 +31,7 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const seq = useRef(0);
+  const searchRef = useRef(null);
 
   async function load(query) {
     const mine = ++seq.current;
@@ -73,6 +75,7 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
 
       <View style={s.searchWrap}>
         <TextInput
+          ref={searchRef}
           style={s.search}
           value={q}
           onChangeText={setQ}
@@ -150,6 +153,8 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
           <Text style={s.link}>Sign out</Text>
         </Pressable>
       </View>
+
+      <KeyboardToggle inputRef={searchRef} />
     </View>
   );
 }

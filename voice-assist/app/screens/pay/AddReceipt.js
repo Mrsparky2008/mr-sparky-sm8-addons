@@ -7,11 +7,12 @@
 //
 // The image never passes through the Lambda: the portal hands back a short-lived
 // presigned URL and the phone puts the file straight into a private bucket.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { Card, Cta, Header, SectionLabel } from "../../components/ui";
+import KeyboardToggle from "../../components/KeyboardToggle";
 import { C, R, S, T, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
 import { postReceiptCopy } from "../../lib/api";
@@ -37,6 +38,8 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // Whichever field was last in use — the up arrow returns you to it.
+  const lastField = useRef(null);
 
   async function take(fromLibrary) {
     setError(null);
@@ -158,12 +161,13 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
 
         <View>
           <SectionLabel>Supplier</SectionLabel>
-          <Field value={supplier} onChangeText={setSupplier} placeholder="Middy's, Lawrence & Hanson…" />
+          <Field onUse={(r) => (lastField.current = r.current)} value={supplier} onChangeText={setSupplier} placeholder="Middy's, Lawrence & Hanson…" />
         </View>
 
         <View>
           <SectionLabel>Amount inc GST</SectionLabel>
           <Field
+            onUse={(r) => (lastField.current = r.current)}
             value={amount}
             onChangeText={setAmount}
             placeholder="0.00"
@@ -174,12 +178,12 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
 
         <View>
           <SectionLabel>Date</SectionLabel>
-          <Field value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" mono />
+          <Field onUse={(r) => (lastField.current = r.current)} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" mono />
         </View>
 
         <View>
           <SectionLabel>Invoice number (optional)</SectionLabel>
-          <Field value={invoiceNumber} onChangeText={setInvoiceNumber} placeholder="Needed for a credit" />
+          <Field onUse={(r) => (lastField.current = r.current)} value={invoiceNumber} onChangeText={setInvoiceNumber} placeholder="Needed for a credit" />
         </View>
 
         {error ? (
@@ -207,14 +211,18 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         />
       </ScrollView>
       </KeyboardAvoidingView>
+      <KeyboardToggle inputRef={lastField} />
     </View>
   );
 }
 
-function Field({ mono: isMono, ...props }) {
+function Field({ mono: isMono, fieldRef, onUse, ...props }) {
+  const own = useRef(null);
   return (
     <TextInput
       {...props}
+      ref={own}
+      onFocus={() => { if (onUse) onUse(own); }}
       placeholderTextColor={C.muted}
       style={[s.input, isMono && { fontVariant: ["tabular-nums"] }]}
     />

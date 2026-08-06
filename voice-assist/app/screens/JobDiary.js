@@ -6,10 +6,11 @@
 // than showing sample entries that could be mistaken for the job's truth, or
 // buttons that do nothing. House rule: never a dead control, never fake data
 // on a screen that touches real work.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../components/ui";
 import Icon from "../components/icons";
+import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono, oneLine } from "../lib/theme";
 import { postJobNote } from "../lib/api";
 
@@ -32,6 +33,7 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddRe
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [noteError, setNoteError] = useState("");
+  const noteRef = useRef(null);
   const noteList = [...added, ...(notes || []).filter(Boolean).slice().reverse()];
 
   async function saveNote() {
@@ -73,6 +75,7 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddRe
         {writing ? (
           <View style={s.section}>
             <TextInput
+              ref={noteRef}
               value={draft}
               onChangeText={setDraft}
               placeholder="Goes straight onto the ServiceM8 job card…"
@@ -147,6 +150,8 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddRe
       <View style={s.dock}>
         <Cta label="🎙  Talk about this job" onPress={onTalk} />
       </View>
+
+      {writing ? <KeyboardToggle inputRef={noteRef} /> : null}
     </View>
   );
 }
