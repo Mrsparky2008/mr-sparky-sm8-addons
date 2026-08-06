@@ -86,6 +86,21 @@ Steven approved the mockups and the icon language same day. New law:
   ladder + claims-blocked enforcement). Until the backend exists the tile
   opens an honest "being set up" screen — never a dead control.
 
+## BUILT — the Business hub, 2026-08-06 (same artifact, screen 3)
+
+The admin tab gets the same hub grammar. Headline = what needs YOU (count to
+approve + oldest date — the dollar total waits until the portal serves a sum;
+the phone never adds). Buckets mirror the life of a claim: **To approve**
+(badged) → **To pay** → **Settled**, with **Rejected** as its own pile because
+every entry carries its reason. **The crew** = the web portal's "viewing as",
+phone-sized: pick a person, see their Money as they see it. Compliance tile is
+deliberately absent until the documents module exists.
+
+- Screens → `screens/admin/{BusinessHub,BucketList,CrewList,CrewMember}.js`;
+  ClaimsInbox.js retired into the To-approve bucket.
+- Actionable buckets open ApproveClaim; record buckets open ClaimDetail
+  read-only, RCTI included (admin passes the contractor name through).
+
 ## Tokens
 ```
 bg           #0F1B24 → use #0f1b2d (matches scaffold)   app background

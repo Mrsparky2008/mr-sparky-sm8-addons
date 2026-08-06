@@ -61,6 +61,30 @@ const SHAPES = {
     <Path key="b" d="M8.5 7l1.5-2.5h4L15.5 7" />,
     <Circle key="c" cx="12" cy="13" r="3.2" />,
   ],
+  approve: [
+    <Circle key="a" cx="12" cy="12" r="8.5" />,
+    <Path key="b" d="M8.5 12.2l2.4 2.4 4.6-5" />,
+  ],
+  topay: [
+    <Rect key="a" x="3.5" y="6" width="17" height="12" rx="2.5" />,
+    <Path key="b" d="M3.5 10h17" />,
+    <Path key="c" d="M7 14.5h4" />,
+  ],
+  reject: [
+    <Circle key="a" cx="12" cy="12" r="8.5" />,
+    <Path key="b" d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6" />,
+  ],
+  archive: [
+    <Rect key="a" x="4" y="4.5" width="16" height="5" rx="1.5" />,
+    <Path key="b" d="M5.5 9.5v8a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-8" />,
+    <Path key="c" d="M10 13h4" />,
+  ],
+  people: [
+    <Circle key="a" cx="9" cy="9" r="2.8" />,
+    <Path key="b" d="M3.8 18.5c.6-3 9.8-3 10.4 0" />,
+    <Circle key="c" cx="17" cy="9.5" r="2.2" />,
+    <Path key="d" d="M15.5 14.6c2.5-.4 4.6.9 5 3.9" />,
+  ],
 };
 
 export default function Icon({ name, size = 22, color = C.ink, strokeWidth = 1.7 }) {

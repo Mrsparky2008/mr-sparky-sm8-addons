@@ -112,6 +112,9 @@ export const claims = (name) => get(`/api/claims${qs({ name })}`);
  */
 export const claimsAwaiting = () => get(`/api/claims${qs({ all: 1, status: "submitted" })}`);
 
+/** Every claim across everyone, all statuses — the Business hub's raw feed. */
+export const allClaims = () => get(`/api/claims${qs({ all: 1 })}`);
+
 /** The people an admin can look at. */
 export const contractors = () => get("/api/contractors");
 

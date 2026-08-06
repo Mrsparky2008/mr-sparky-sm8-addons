@@ -40,7 +40,10 @@ import Retention from "./screens/pay/Retention";
 import MyRate from "./screens/pay/MyRate";
 import MyDetails from "./screens/pay/MyDetails";
 import DocumentsSoon from "./screens/pay/DocumentsSoon";
-import ClaimsInbox from "./screens/admin/ClaimsInbox";
+import BusinessHub from "./screens/admin/BusinessHub";
+import BucketList from "./screens/admin/BucketList";
+import CrewList from "./screens/admin/CrewList";
+import CrewMember from "./screens/admin/CrewMember";
 import ApproveClaim from "./screens/admin/ApproveClaim";
 import { signOut } from "./lib/auth";
 import * as portal from "./lib/portal";
@@ -48,7 +51,7 @@ import * as VV from "./lib/vapiVoice";
 import { IS_DEV_APP } from "./lib/config";
 import { C, S, suburb } from "./lib/theme";
 
-const ROOTS = { work: { name: "work" }, pay: { name: "money" }, admin: { name: "inbox" } };
+const ROOTS = { work: { name: "work" }, pay: { name: "money" }, admin: { name: "bizhub" } };
 
 export default function App() {
   return (
@@ -347,14 +350,60 @@ function Shell() {
           ) : null}
         </View>
 
-        {/* ---- Business (admin only) -------------------------------------- */}
+        {/* ---- Business (admin only) --------------------------------------
+            Hub → buckets. Actionable buckets open the decision screen;
+            record buckets open the frozen claim read-only. */}
         {who?.isAdmin ? (
           <View style={[s.fill, tab !== "admin" && s.hidden]} pointerEvents={tab === "admin" ? "auto" : "none"}>
-            {top?.name === "inbox" || tab !== "admin" ? (
-              <ClaimsInbox
-                onOpenClaim={(claim) => push({ name: "approve", claim })}
+            {top?.name === "bizhub" || tab !== "admin" ? (
+              <BusinessHub
+                onOpen={(name, params) => push({ name, ...params })}
+                onAccount={() => setAccount(true)}
                 onCountChange={setWaiting}
               />
+            ) : null}
+            {top?.name === "bucket" ? (
+              <View style={s.fill}>
+                <BucketList
+                  title={top.title}
+                  claims={top.claims}
+                  act={top.act}
+                  onOpenClaim={(claim, act) => push(act ? { name: "approve", claim } : { name: "bizclaim", claim })}
+                  onBack={pop}
+                />
+              </View>
+            ) : null}
+            {top?.name === "crewlist" ? (
+              <View style={s.fill}>
+                <CrewList
+                  people={top.people}
+                  onOpenPerson={(person) => push({ name: "crew", person })}
+                  onBack={pop}
+                />
+              </View>
+            ) : null}
+            {top?.name === "crew" ? (
+              <View style={s.fill}>
+                <CrewMember
+                  person={top.person}
+                  onOpenClaim={(claim) => push({ name: "bizclaim", claim })}
+                  onBack={pop}
+                />
+              </View>
+            ) : null}
+            {top?.name === "bizclaim" ? (
+              <View style={s.fill}>
+                <ClaimDetail
+                  claim={top.claim}
+                  onBack={pop}
+                  onViewRcti={(claim) => push({ name: "bizrcti", claim })}
+                />
+              </View>
+            ) : null}
+            {top?.name === "bizrcti" ? (
+              <View style={s.fill}>
+                <RctiView claim={top.claim} name={top.claim?.contractorName} onBack={pop} />
+              </View>
             ) : null}
             {top?.name === "approve" ? (
               <View style={s.fill}>
