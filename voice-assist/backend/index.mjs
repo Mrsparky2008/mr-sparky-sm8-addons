@@ -305,11 +305,18 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         "Access-Control-Allow-Origin": "*",
       }, JSON.stringify(body));
 
+      let who;
       try {
-        await verifyIdToken(bearer(headers));
+        who = await verifyIdToken(bearer(headers));
       } catch {
         return jsonOut(401, { ok: false, error: "not signed in" });
       }
+
+      // Everything the backend writes rides the one SM8 API key, so SM8
+      // attributes it all to the bot account. The stamp puts the real author
+      // on the record — from the VERIFIED token, not from anything the app
+      // sends, so it can't be forged by a client.
+      const stamp = `Mr Sparky App (${who.name || who.email.split("@")[0]})`;
 
       const m = /^\/api\/job\/(\d+)\/(note|receipt-copy)$/.exec(path);
       if (!m) return jsonOut(404, { ok: false, error: "no such route" });
@@ -330,7 +337,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       if (m[2] === "note") {
         const note = String(payload.note || "").trim();
         if (!note) return jsonOut(400, { ok: false, error: "The note is empty." });
-        const r = await executeTool("add_note", { job_uuid: job.uuid, note });
+        const r = await executeTool("add_note", { job_uuid: job.uuid, note: `${stamp}: ${note}` });
         if (r?.error) return jsonOut(502, { ok: false, error: r.error });
         return jsonOut(200, { ok: true });
       }
@@ -343,7 +350,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       if (bytes.length > 5 * 1024 * 1024) return jsonOut(413, { ok: false, error: "Photo too large." });
       const r = await attachFileToJob({
         job_uuid: job.uuid,
-        name: String(payload.caption || "Receipt").slice(0, 120),
+        name: `${String(payload.caption || "Receipt")} — ${stamp}`.slice(0, 120),
         fileType: payload.fileType === ".png" ? ".png" : ".jpg",
         contentType: payload.fileType === ".png" ? "image/png" : "image/jpeg",
         bytes,
