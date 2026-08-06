@@ -58,9 +58,11 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
     overdue ? `${overdue} payment${overdue === 1 ? "" : "s"} overdue` : null,
   ].filter(Boolean);
 
+  // The portal serves these as whole percentages already (43.6, 40) — the
+  // first cut multiplied by 100 and told Steven he was on 5000%.
   const rate = ladder?.rungs?.find((r) => r.current);
   const rateSub = conversion?.measurable && rate
-    ? `${Math.round((conversion.conversion || 0) * 100)}% conv · on ${Math.round(rate.rate * 100)}%`
+    ? `${Math.round(conversion.conversion || 0)}% conv · on ${Math.round(rate.rate)}%`
     : "history builds this";
 
   return (

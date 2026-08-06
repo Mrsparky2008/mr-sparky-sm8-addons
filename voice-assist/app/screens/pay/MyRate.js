@@ -27,7 +27,7 @@ export default function MyRate({ data, onBack }) {
             <SectionLabel>Your window</SectionLabel>
             <View style={s.statRow}>
               <View style={s.stat}>
-                <Text style={[s.statFig, mono]}>{Math.round((conv.conversion || 0) * 100)}%</Text>
+                <Text style={[s.statFig, mono]}>{Math.round(conv.conversion || 0)}%</Text>
                 <Text style={s.statLab}>conversion</Text>
               </View>
               <View style={s.stat}>
@@ -51,10 +51,10 @@ export default function MyRate({ data, onBack }) {
               {ladder.rungs.map((r) => (
                 <View key={r.index} style={[s.rung, r.current && s.rungOn]}>
                   <Text style={[s.rungRate, mono, r.current && { color: C.ink }]}>
-                    {Math.round((r.rate || 0) * 100)}%
+                    {Math.round(r.rate || 0)}%
                   </Text>
                   <Text style={[s.rungReq, r.current && { color: C.muted }]}>
-                    {r.minConversion != null ? `${Math.round(r.minConversion * 100)}% conversion` : ""}
+                    {r.minConversion != null ? `${Math.round(r.minConversion)}% conversion` : ""}
                     {r.minClaims ? ` · ${r.minClaims}+ leads` : ""}
                   </Text>
                   {r.current ? <Text style={s.youBadge}>YOU</Text> : null}
