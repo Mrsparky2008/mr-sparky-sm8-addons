@@ -62,7 +62,7 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
   // first cut multiplied by 100 and told Steven he was on 5000%.
   const rate = ladder?.rungs?.find((r) => r.current);
   const rateSub = conversion?.measurable && rate
-    ? `${Math.round(conversion.conversion || 0)}% conv · on ${Math.round(rate.rate)}%`
+    ? `${conversion.conversion ?? 0}% conv · on ${rate.rate}%`
     : "history builds this";
 
   return (
