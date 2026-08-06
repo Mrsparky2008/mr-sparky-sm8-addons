@@ -11,7 +11,7 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native
 import { Card, Cta, Empty, Header, Row, SectionLabel } from "../../components/ui";
 import { C, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
-import { PayError } from "../pay/Earnings";
+import { PayError } from "../pay/shared";
 
 export default function ClaimsInbox({ onOpenClaim, onCountChange }) {
   const [claims, setClaims] = useState(null);

@@ -2,24 +2,24 @@
 //
 //   Work      what am I doing
 //   Charlie   talk to it
-//   Pay       what am I owed
+//   Money     what am I owed
 //   Business  how is the business  (admin only)
 //
 // Role-shaped: a subcontractor sees three tabs and never learns the fourth
-// exists. That is the whole of "one app, role-shaped" — the portal already
-// knows who is an admin, so the app asks it rather than deciding for itself.
+// exists. The portal already knows who is an admin, so the app asks it.
 //
-// A tab bar also fixes something the old stack was working around: Charlie has
-// to stay mounted or his cleanup hangs up the call, which used to need a hidden
-// absolutely-positioned overlay. Tabs keep their screens alive by nature.
+// Icons are white line-work (components/icons.js). The Mr Sparky yellow has
+// exactly one job on this bar: marking where you are. Making it wallpaper
+// would put branding above meaning, and orange already means "attention".
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import Icon from "./icons";
 import { C, R, S, mono } from "../lib/theme";
 
 export const TABS = {
-  work: { icon: "🔧", label: "Work" },
-  charlie: { icon: "🎙", label: "Charlie" },
-  pay: { icon: "💰", label: "Pay" },
-  admin: { icon: "📋", label: "Business" },
+  work: { icon: "wrench", label: "Work" },
+  charlie: { icon: "mic", label: "Charlie" },
+  pay: { icon: "dollar", label: "Money" },
+  admin: { icon: "board", label: "Business" },
 };
 
 export default function TabBar({ tabs, value, onChange, badges = {} }) {
@@ -38,8 +38,8 @@ export default function TabBar({ tabs, value, onChange, badges = {} }) {
             accessibilityState={{ selected: on }}
             accessibilityLabel={t.label}
           >
-            <View>
-              <Text style={[s.icon, !on && s.iconOff]}>{t.icon}</Text>
+            <View style={!on && s.iconOff}>
+              <Icon name={t.icon} size={21} color={on ? C.yellow : C.muted} />
               {badge ? (
                 <View style={s.badge}>
                   <Text style={[s.badgeText, mono]}>{badge > 9 ? "9+" : badge}</Text>
@@ -65,11 +65,10 @@ const s = StyleSheet.create({
   tab: {
     flex: 1, minHeight: S.touch, alignItems: "center", justifyContent: "center", gap: 3,
   },
-  icon: { fontSize: 21 },
-  iconOff: { opacity: 0.45 },
+  iconOff: { opacity: 0.65 },
   label: { color: C.muted, fontSize: 10.5, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase" },
   badge: {
-    position: "absolute", top: -4, right: -12, minWidth: 17, height: 17,
+    position: "absolute", top: -4, right: -14, minWidth: 17, height: 17,
     borderRadius: R.chip, paddingHorizontal: 4,
     backgroundColor: C.active, alignItems: "center", justifyContent: "center",
   },

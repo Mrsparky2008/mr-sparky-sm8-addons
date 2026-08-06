@@ -64,6 +64,28 @@ Decisions worth knowing before changing anything:
 - **The test build wears a stripe.** Two identical dark apps will be on the phone
   and the one that can approve a real claim should never be a guess.
 
+## BUILT — the Money hub, 2026-08-06 (approved: "Love it")
+
+Visual reference: https://claude.ai/code/artifact/b1ca15e1-2d16-4e16-a0b1-2ceb2d5e3c28
+Steven approved the mockups and the icon language same day. New law:
+
+- **Icons are white line-work only** — stroke SVGs (`components/icons.js`,
+  react-native-svg), no fills, no colour, no emoji in chrome. Colour stays
+  reserved for meaning (the wiring-code states).
+- **The Mr Sparky yellow has exactly one job: marking the active tab.** Not
+  wallpaper — one yellow mark per screen reads as identity; six would outshout
+  orange = attention and green = real.
+- **Pay tab renamed Money.** Hub layout: headline "Ready to claim" (the only
+  big number) → Make a claim → attention strip (exists only when something
+  needs a human) → six tiles, each carrying one live fact: Claims, Receipts,
+  Statement, Retention, My rate, My documents → My details row.
+- Screens → `screens/pay/{MoneyHub,ClaimsList,Statement,Retention,MyRate,
+  MyDetails,DocumentsSoon}.js`; shared furniture in `screens/pay/shared.js`.
+  Earnings.js retired — the hub + Statement replaced it.
+- **My documents is designed but portal-blocked** (tables + S3 + warning
+  ladder + claims-blocked enforcement). Until the backend exists the tile
+  opens an honest "being set up" screen — never a dead control.
+
 ## Tokens
 ```
 bg           #0F1B24 → use #0f1b2d (matches scaffold)   app background

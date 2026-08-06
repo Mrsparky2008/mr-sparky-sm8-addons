@@ -13,7 +13,7 @@
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Header, Row, SectionLabel } from "../../components/ui";
 import { C, S, T, mono, money } from "../../lib/theme";
-import { ClaimStatus } from "./Earnings";
+import { ClaimStatus } from "./shared";
 
 export default function ClaimDetail({ claim, onBack, onViewRcti }) {
   if (!claim) return null;

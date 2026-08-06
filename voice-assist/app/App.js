@@ -29,11 +29,17 @@ import JobCard from "./screens/JobCard";
 import CharlieLive from "./screens/CharlieLive";
 import QuoteWorkshop from "./screens/QuoteWorkshop";
 import Diary from "./screens/Diary";
-import Earnings from "./screens/pay/Earnings";
+import MoneyHub from "./screens/pay/MoneyHub";
+import ClaimsList from "./screens/pay/ClaimsList";
 import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
 import AddReceipt from "./screens/pay/AddReceipt";
 import RctiView from "./screens/pay/RctiView";
+import Statement from "./screens/pay/Statement";
+import Retention from "./screens/pay/Retention";
+import MyRate from "./screens/pay/MyRate";
+import MyDetails from "./screens/pay/MyDetails";
+import DocumentsSoon from "./screens/pay/DocumentsSoon";
 import ClaimsInbox from "./screens/admin/ClaimsInbox";
 import ApproveClaim from "./screens/admin/ApproveClaim";
 import { signOut } from "./lib/auth";
@@ -42,7 +48,7 @@ import * as VV from "./lib/vapiVoice";
 import { IS_DEV_APP } from "./lib/config";
 import { C, S, suburb } from "./lib/theme";
 
-const ROOTS = { work: { name: "work" }, pay: { name: "earnings" }, admin: { name: "inbox" } };
+const ROOTS = { work: { name: "work" }, pay: { name: "money" }, admin: { name: "inbox" } };
 
 export default function App() {
   return (
@@ -268,16 +274,41 @@ function Shell() {
           ) : null}
         </View>
 
-        {/* ---- Pay ------------------------------------------------------- */}
+        {/* ---- Money ------------------------------------------------------
+            The hub loads the statement once; every bucket screen renders a
+            slice of that same payload, pushed through the route. */}
         <View style={[s.fill, tab !== "pay" && s.hidden]} pointerEvents={tab === "pay" ? "auto" : "none"}>
-          {top?.name === "earnings" || tab !== "pay" ? (
-            <Earnings
-              onOpenClaim={(claim) => push({ name: "claim", claim })}
+          {top?.name === "money" || tab !== "pay" ? (
+            <MoneyHub
+              onOpen={(name, data) => push({ name, data })}
               onMakeClaim={(data) => push({ name: "submit", data })}
-              onAddReceipt={(data) => push({ name: "receipt", data })}
               onSignOut={handleSignOut}
               onAccount={() => setAccount(true)}
             />
+          ) : null}
+          {top?.name === "claims" ? (
+            <View style={s.fill}>
+              <ClaimsList
+                claims={top.data?.claims || []}
+                onOpenClaim={(claim) => push({ name: "claim", claim })}
+                onBack={pop}
+              />
+            </View>
+          ) : null}
+          {top?.name === "statement" ? (
+            <View style={s.fill}><Statement data={top.data} onBack={pop} /></View>
+          ) : null}
+          {top?.name === "retention" ? (
+            <View style={s.fill}><Retention data={top.data} onBack={pop} /></View>
+          ) : null}
+          {top?.name === "rate" ? (
+            <View style={s.fill}><MyRate data={top.data} onBack={pop} /></View>
+          ) : null}
+          {top?.name === "details" ? (
+            <View style={s.fill}><MyDetails data={top.data} onBack={pop} /></View>
+          ) : null}
+          {top?.name === "docs" ? (
+            <View style={s.fill}><DocumentsSoon onBack={pop} /></View>
           ) : null}
           {top?.name === "claim" ? (
             <View style={s.fill}>
