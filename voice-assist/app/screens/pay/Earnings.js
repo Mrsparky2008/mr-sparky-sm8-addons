@@ -27,7 +27,7 @@ const CLAIM_LABEL = {
   rejected: "rejected",
 };
 
-export default function Earnings({ onOpenClaim, onMakeClaim, onAddReceipt, onSignOut }) {
+export default function Earnings({ onOpenClaim, onMakeClaim, onAddReceipt, onSignOut, onAccount }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(true);
@@ -64,7 +64,7 @@ export default function Earnings({ onOpenClaim, onMakeClaim, onAddReceipt, onSig
 
   return (
     <View style={{ flex: 1 }}>
-      <Header title="Pay" meta={profile?.name} />
+      <Header title="Pay" meta={profile?.name} onMeta={onAccount} />
       <ScrollView
         contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={C.muted} />}

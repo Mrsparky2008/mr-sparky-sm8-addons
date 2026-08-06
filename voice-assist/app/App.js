@@ -21,6 +21,7 @@ import { StatusBar } from "expo-status-bar";
 import * as Linking from "expo-linking";
 import ErrorBoundary from "./components/ErrorBoundary";
 import TabBar from "./components/TabBar";
+import AccountSheet from "./components/AccountSheet";
 import { Banner, Segment } from "./components/ui";
 import SignIn from "./screens/SignIn";
 import Jobs from "./screens/Jobs";
@@ -67,6 +68,7 @@ function Shell() {
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
   const [committing, setCommitting] = useState(false);
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
+  const [account, setAccount] = useState(false);      // the who-am-I / sign-out sheet
 
   const stack = Array.isArray(stacks[tab]) ? stacks[tab] : [stacks[tab]];
   const top = stack[stack.length - 1];
@@ -220,6 +222,7 @@ function Shell() {
                   onTalk={openCharlie}
                   onDiary={() => setWorkView("today")}
                   onSignOut={handleSignOut}
+                  onAccount={() => setAccount(true)}
                 />
               ) : (
                 <Diary onTalk={openCharlie} />
@@ -273,6 +276,7 @@ function Shell() {
               onMakeClaim={(data) => push({ name: "submit", data })}
               onAddReceipt={(data) => push({ name: "receipt", data })}
               onSignOut={handleSignOut}
+              onAccount={() => setAccount(true)}
             />
           ) : null}
           {top?.name === "claim" ? (
@@ -339,6 +343,14 @@ function Shell() {
         value={tab}
         onChange={(t) => { if (t === "charlie") setCharlieBorn(true); setTab(t); }}
         badges={{ admin: waiting }}
+      />
+
+      <AccountSheet
+        visible={account}
+        email={email}
+        who={who}
+        onClose={() => setAccount(false)}
+        onSignOut={() => { setAccount(false); handleSignOut(); }}
       />
     </SafeAreaView>
   );

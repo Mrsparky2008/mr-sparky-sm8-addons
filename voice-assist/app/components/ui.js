@@ -5,7 +5,10 @@ import { C, R, S, T, mono, oneLine, statusChip } from "../lib/theme";
 
 export { Logo } from "./Logo";
 
-export function Header({ title, meta, onBack }) {
+export function Header({ title, meta, onBack, onMeta }) {
+  const metaBody = meta ? (
+    <Text style={[s.meta, mono, onMeta && { color: C.infoChipInk }]}>{meta}{onMeta ? " ›" : ""}</Text>
+  ) : null;
   return (
     <View style={s.header}>
       {onBack ? (
@@ -18,7 +21,9 @@ export function Header({ title, meta, onBack }) {
         </View>
       )}
       <Text style={[T.title, { flex: 1 }]} numberOfLines={1}>{title}</Text>
-      {meta ? <Text style={[s.meta, mono]}>{meta}</Text> : null}
+      {/* Tappable when it names the signed-in person: the account sheet lives
+          behind it, because "who is logged in" belongs where the name is. */}
+      {onMeta ? <Pressable onPress={onMeta} hitSlop={10}>{metaBody}</Pressable> : metaBody}
     </View>
   );
 }

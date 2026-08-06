@@ -8,7 +8,7 @@ import { Card, Empty, Header, StatusChip, Tile, TileGrid } from "../components/u
 import { C, R, S, T, mono, oneLine, suburb } from "../lib/theme";
 import { fetchJobs } from "../lib/api";
 
-export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, email }) {
+export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, onAccount, email }) {
   const [q, setQ] = useState("");
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +39,7 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onSignOut, email }) {
 
   return (
     <View style={s.screen}>
-      <Header title="Jobs" meta={email ? email.split("@")[0] : undefined} />
+      <Header title="Jobs" meta={email ? email.split("@")[0] : undefined} onMeta={onAccount} />
 
       <View style={s.searchWrap}>
         <TextInput
