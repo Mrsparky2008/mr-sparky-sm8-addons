@@ -14,6 +14,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
+import { postReceiptCopy } from "../../lib/api";
 
 // The phone is in the same timezone as the job. Building the date from the
 // device clock avoids toISOString(), which is UTC and would date a receipt
@@ -91,6 +92,19 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         date,
         note: note.trim() || undefined,
       });
+
+      // Record copy into ServiceM8's own job diary — Steven's paper trail.
+      // Best-effort by design: the receipt is already safely in the portal,
+      // so a failure here must never fail the save the user watched succeed.
+      try {
+        const imageB64 = await FileSystem.readAsStringAsync(photo.uri, { encoding: "base64" });
+        await postReceiptCopy(jobNumber, {
+          imageB64,
+          fileType: contentType === "image/png" ? ".png" : ".jpg",
+          caption: `Receipt — ${supplier.trim()} — $${Number(amount).toFixed(2)}`,
+        });
+      } catch { /* the portal copy is the one that matters */ }
+
       onSaved?.();
     } catch (err) {
       setError(err);

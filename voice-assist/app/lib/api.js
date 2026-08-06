@@ -62,6 +62,31 @@ export function fetchDiary(date) {
   return apiGet(`/api/diary${date ? `?date=${encodeURIComponent(date)}` : ""}`);
 }
 
+async function apiPost(path, body) {
+  const token = await getIdToken();
+  const res = await fetch(BACKEND + path, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) throw httpError(401);
+  let j = null;
+  try { j = await res.json(); } catch {}
+  if (!res.ok || !j?.ok) throw new Error(j?.error || `backend error ${res.status}`);
+  return j;
+}
+
+/** Add a note to the job — an SM8 note, on the SM8 job card, immediately. */
+export const postJobNote = (jobNumber, note) =>
+  apiPost(`/api/job/${encodeURIComponent(jobNumber)}/note`, { note });
+
+/**
+ * File a record copy of a receipt photo into SM8's job diary. Best-effort
+ * paper trail — the portal holds the working copy that gets reimbursed.
+ */
+export const postReceiptCopy = (jobNumber, { imageB64, fileType, caption }) =>
+  apiPost(`/api/job/${encodeURIComponent(jobNumber)}/receipt-copy`, { imageB64, fileType, caption });
+
 // One conversation turn. Resolves { reply } after the stream ends.
 // onDelta(text) per text fragment; onAudio(seq, b64mp3) per Polly chunk.
 export async function chatTurn({ messages, onDelta, onAudio }) {

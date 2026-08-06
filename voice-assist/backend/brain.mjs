@@ -773,6 +773,39 @@ export async function executeTool(name, input) {
 
 // Everything about the anchored job, fetched ONCE and carried in the prompt so
 // the assistant answers from what it already knows instead of narrating lookups.
+/**
+ * Attach a file to a job so it shows in ServiceM8's own job diary.
+ *
+ * Two-step per SM8's docs: create the Attachment record (uuid comes back in
+ * x-record-uuid), then POST the bytes as multipart to Attachment/{uuid}.file.
+ * Used for receipt record-copies — the portal keeps the working copy that gets
+ * reimbursed; this is the paper trail on the job card.
+ */
+export async function attachFileToJob({ job_uuid, name, fileType, bytes, contentType }) {
+  const rec = await sm8("POST", "/attachment.json", {
+    related_object: "job",
+    related_object_uuid: job_uuid,
+    attachment_name: String(name || "attachment").slice(0, 120),
+    file_type: fileType || ".jpg",
+    active: true,
+  });
+  if (rec.status < 200 || rec.status >= 300) {
+    return { error: `Attachment record failed: ${rec.status}` };
+  }
+  const uuid = rec.headers.get("x-record-uuid");
+  if (!uuid) return { error: "Attachment record came back without a uuid" };
+
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: contentType || "image/jpeg" }), `upload${fileType || ".jpg"}`);
+  const up = await fetch(`${SM8_BASE}/Attachment/${encodeURIComponent(uuid)}.file`, {
+    method: "POST",
+    headers: { "X-Api-Key": API_KEY, Accept: "application/json" },
+    body: form,
+  });
+  if (!up.ok) return { error: `File upload failed: ${up.status}` };
+  return { ok: true, attachment_uuid: uuid };
+}
+
 export async function buildDossier(uuid) {
   const [j, contacts, notes, acts, mats, staff] = await Promise.all([
     sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),

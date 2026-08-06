@@ -6,10 +6,12 @@
 // than showing sample entries that could be mistaken for the job's truth, or
 // buttons that do nothing. House rule: never a dead control, never fake data
 // on a screen that touches real work.
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../components/ui";
 import Icon from "../components/icons";
 import { C, R, S, T, mono, oneLine } from "../lib/theme";
+import { postJobNote } from "../lib/api";
 
 // "2026-08-04 08:30:00" -> "Mon 4 Aug · 8:30am", Sydney wall-clock, no Date
 // timezone games on the date part.
@@ -25,21 +27,67 @@ function when(stamp) {
 
 export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddReceipt, onTalk, onBack }) {
   const ordered = [...bookings].sort((a, b) => String(b.start || "").localeCompare(String(a.start || "")));
-  const noteList = (notes || []).filter(Boolean).slice().reverse();
+  const [added, setAdded] = useState([]);          // notes written this visit
+  const [writing, setWriting] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [noteError, setNoteError] = useState("");
+  const noteList = [...added, ...(notes || []).filter(Boolean).slice().reverse()];
+
+  async function saveNote() {
+    const note = draft.trim();
+    if (!note) return;
+    setBusy(true);
+    setNoteError("");
+    try {
+      await postJobNote(jobNumber, note);
+      // It is an SM8 note now — show it at the top like the truth it is.
+      setAdded((l) => [note, ...l]);
+      setDraft("");
+      setWriting(false);
+    } catch (err) {
+      setNoteError(err?.message || "The note didn't save.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <View style={s.screen}>
       <Header title="Job diary" meta={`#${jobNumber}`} onBack={onBack} />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.list}>
-        {/* Add receipt is live today — the capture flow already exists and
-            files to the portal (with an SM8 record copy once the backend
-            lands). Note and photo join it on the same row then. */}
-        {onAddReceipt ? (
-          <View style={s.section}>
-            <Pressable onPress={onAddReceipt} style={s.addReceipt}>
-              <Icon name="camera" size={18} color="#fff" />
-              <Text style={s.addReceiptText}>Add receipt</Text>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.list} keyboardShouldPersistTaps="handled">
+        <View style={[s.section, s.addRow]}>
+          <Pressable onPress={() => setWriting((v) => !v)} style={[s.addBtn, { backgroundColor: C.brand }]}>
+            <Icon name="claims" size={17} color="#fff" />
+            <Text style={s.addBtnText}>Add note</Text>
+          </Pressable>
+          {onAddReceipt ? (
+            <Pressable onPress={onAddReceipt} style={[s.addBtn, s.addBtnGhost]}>
+              <Icon name="camera" size={17} color={C.ink} />
+              <Text style={[s.addBtnText, { color: C.ink }]}>Add receipt</Text>
             </Pressable>
+          ) : null}
+        </View>
+
+        {writing ? (
+          <View style={s.section}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Goes straight onto the ServiceM8 job card…"
+              placeholderTextColor={C.muted}
+              multiline
+              autoFocus
+              style={s.noteInput}
+            />
+            {noteError ? <Text style={s.noteError}>{noteError}</Text> : null}
+            <View style={{ height: 8 }} />
+            <Cta
+              label={busy ? "Saving…" : "Save note"}
+              tone="earth"
+              disabled={busy || !draft.trim()}
+              onPress={saveNote}
+            />
           </View>
         ) : null}
         {ordered.length ? (
@@ -86,10 +134,9 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddRe
           <SectionLabel>Coming to this feed</SectionLabel>
           <Card>
             <Text style={T.small}>
-              Photos with thumbnails, Form 001s, receipt record-copies, full note history with
-              who-and-when, and the Add note / Add photo buttons — everything writing straight
-              into ServiceM8, one deploy away. The screen is real today as far as the data
-              underneath it goes; nothing here is sample.
+              Photos with thumbnails, Form 001s and the full note history with who-and-when.
+              Everything above is real — notes save straight onto the ServiceM8 job card, and
+              receipts file to the portal with a record copy landing in SM8's own diary.
             </Text>
           </Card>
         </View>
@@ -114,11 +161,18 @@ const s = StyleSheet.create({
   entryTitle: { color: C.ink, fontSize: 14, fontWeight: "700" },
   entrySub: { ...T.small, marginTop: 2 },
   note: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
-  addReceipt: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    minHeight: 46, borderRadius: R.button, backgroundColor: C.brand,
+  addRow: { flexDirection: "row", gap: 9 },
+  addBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    minHeight: 44, borderRadius: R.button,
   },
-  addReceiptText: { color: "#fff", fontSize: 14.5, fontWeight: "800" },
+  addBtnGhost: { borderWidth: 1, borderColor: C.line },
+  addBtnText: { color: "#fff", fontSize: 13.5, fontWeight: "800" },
+  noteInput: {
+    minHeight: 88, backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
+    borderRadius: R.card, padding: 12, color: C.ink, fontSize: 15, textAlignVertical: "top",
+  },
+  noteError: { color: C.warnChipInk, fontSize: 12.5, marginTop: 7 },
   dock: {
     paddingHorizontal: S.screen, paddingTop: 12, paddingBottom: 10,
     borderTopColor: C.line, borderTopWidth: 1,

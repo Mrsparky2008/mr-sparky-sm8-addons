@@ -14,7 +14,7 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
-import { runTurn, jobIndex, buildDossier, executeTool } from "./brain.mjs";
+import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
 
 const polly = new PollyClient({});
@@ -294,6 +294,64 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       stream.end();
       return;
     }
+    // ---- Native app writes ------------------------------------------------
+    // Two, and deliberately only two — Steven's scope line (2026-08-06): the
+    // app is Charlie's cockpit plus the money loop, not an SM8 replacement.
+    // Both write INTO ServiceM8 itself; the app never keeps its own truth.
+    if (method === "POST" && path.startsWith("/api/job/")) {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const jsonOut = (status, body) => respond(status, {
+        "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      }, JSON.stringify(body));
+
+      try {
+        await verifyIdToken(bearer(headers));
+      } catch {
+        return jsonOut(401, { ok: false, error: "not signed in" });
+      }
+
+      const m = /^\/api\/job\/(\d+)\/(note|receipt-copy)$/.exec(path);
+      if (!m) return jsonOut(404, { ok: false, error: "no such route" });
+
+      const index = await jobIndex();
+      const job = index.find((j) => String(j.number) === m[1]);
+      if (!job) return jsonOut(404, { ok: false, error: "no such job" });
+
+      let payload = {};
+      try {
+        payload = JSON.parse(event.isBase64Encoded
+          ? Buffer.from(event.body || "", "base64").toString("utf8")
+          : event.body || "{}");
+      } catch {
+        return jsonOut(400, { ok: false, error: "bad request body" });
+      }
+
+      if (m[2] === "note") {
+        const note = String(payload.note || "").trim();
+        if (!note) return jsonOut(400, { ok: false, error: "The note is empty." });
+        const r = await executeTool("add_note", { job_uuid: job.uuid, note });
+        if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+        return jsonOut(200, { ok: true });
+      }
+
+      // Receipt record-copy: the portal keeps the working copy that gets
+      // reimbursed; this puts the same photo on the SM8 job card as the
+      // paper trail. Caption becomes the attachment name.
+      const bytes = Buffer.from(String(payload.imageB64 || ""), "base64");
+      if (!bytes.length) return jsonOut(400, { ok: false, error: "No image supplied." });
+      if (bytes.length > 5 * 1024 * 1024) return jsonOut(413, { ok: false, error: "Photo too large." });
+      const r = await attachFileToJob({
+        job_uuid: job.uuid,
+        name: String(payload.caption || "Receipt").slice(0, 120),
+        fileType: payload.fileType === ".png" ? ".png" : ".jpg",
+        contentType: payload.fileType === ".png" ? "image/png" : "image/jpeg",
+        bytes,
+      });
+      if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+      return jsonOut(200, { ok: true, attachment_uuid: r.attachment_uuid });
+    }
+
     // ---- Native app data routes -------------------------------------------
     // The voice loop is Charlie's; these are for the screens around him — the
     // jobs list, the day diary, a job card. Signed in with the SAME Cognito
