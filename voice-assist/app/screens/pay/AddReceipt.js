@@ -185,6 +185,16 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         {error ? (
           <Card style={{ borderColor: C.active }}>
             <Text style={[T.body, { color: C.warnChipInk }]}>{error.message}</Text>
+            {/* The portal's own words are terse and, on this one, misleading:
+                it refuses jobs that are not yet Completed with their Form 001,
+                which is every job you are standing on. Say what it means. */}
+            {/not your job/i.test(error.message || "") ? (
+              <Text style={[T.small, { marginTop: 6 }]}>
+                Job #{jobNumber} isn't on your statement yet — the portal only counts a job once
+                it's Completed with your Form 001. The fix is deployed portal-side; if you're
+                seeing this, that deploy hasn't landed.
+              </Text>
+            ) : null}
           </Card>
         ) : null}
 

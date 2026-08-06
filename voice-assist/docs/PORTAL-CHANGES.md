@@ -1,5 +1,29 @@
 # Changes the app needs in the portal repo
 
+## 4. URGENT — receipts could never be filed from the field
+
+`portal-receipts-any-job.patch`. Found by Steven trying to lodge a real L&H
+docket, twice: **"Not your job, or not found"** on a job he was standing on.
+
+The receipt route required the job to be on the caller's STATEMENT. The
+statement is built from `loadData`, which at `api/index.mjs:85` keeps only
+`status === 'Completed'` jobs, and then attributes them by Form 001. So a
+receipt could only be filed against a job that was already finished AND
+carried the subbie's form — the opposite end of the day from when a docket is
+in your hand at the wholesaler, mid-Work-Order.
+
+The check is now "does this job exist in ServiceM8", using `allJobStatus`
+which `loadData` already indexes across every job at every status.
+
+**Why this is safe:** filing is not payment. The receipt records who lodged
+it, the S3 key is scoped to their contractor id, and reimbursement still runs
+through the commission engine, which pays only on jobs genuinely theirs. A
+receipt against a job that never becomes theirs sits visible to the office and
+unpaid — strictly better than the previous behaviour, which was to refuse
+every receipt anyone tried to take on site.
+
+**Verified:** 193/193 tests still pass. `api/shell.mjs` untouched.
+
 ## Where this stands (2026-08-06, ~11:45am — morning-after update)
 
 - ✅ Gateway audience widened (section 3) — done from Steven's phone at 12:08am
