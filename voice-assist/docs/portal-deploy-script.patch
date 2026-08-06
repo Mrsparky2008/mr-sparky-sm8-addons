@@ -11,10 +11,10 @@ index ec2f0b9..e211e70 100644
 +portal.zip
 diff --git a/scripts/deploy.mjs b/scripts/deploy.mjs
 new file mode 100644
-index 0000000..d8e93de
+index 0000000..3ac031f
 --- /dev/null
 +++ b/scripts/deploy.mjs
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,140 @@
 +/**
 + * Code deploy for the portal Lambda (mr-sparky-portal-api).
 + *
@@ -146,4 +146,12 @@ index 0000000..d8e93de
 +  { stdio: ['ignore', 'ignore', 'inherit'] });
 +execSync(`aws lambda wait function-updated --function-name ${FUNCTION} --region ${REGION}`, { stdio: 'inherit' });
 +console.log('✅ Deployed and active.');
-+console.log('Smoke test:  curl -s https://portal.mrsparky.com.au/api/health');
++// Not a curl: the API Gateway JWT authoriser fronts EVERY route, so an
++// unauthenticated request never reaches the handler and 401 tells you nothing
++// about the code you just shipped. A direct invoke skips the gateway — any
++// handler response at all (401 included) proves the module imported, which is
++// the failure this is actually watching for.
++console.log('Smoke test — proves the new code imports:');
++console.log(`  aws lambda invoke --function-name ${FUNCTION} --region ${REGION} \\`);
++console.log("    --payload '{\"rawPath\":\"/api/health\"}' --cli-binary-format raw-in-base64-out out.json");
++console.log('  FunctionError: null and a JSON body = pass. Then open the portal signed in.');
