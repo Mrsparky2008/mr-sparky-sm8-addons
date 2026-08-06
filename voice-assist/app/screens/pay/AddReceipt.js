@@ -8,7 +8,7 @@
 // The image never passes through the Lambda: the portal hands back a short-lived
 // presigned URL and the phone puts the file straight into a private bucket.
 import { useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { Card, Cta, Header, SectionLabel } from "../../components/ui";
@@ -117,6 +117,9 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   return (
     <View style={{ flex: 1 }}>
       <Header title="Add receipt" onBack={onBack} />
+      {/* The keyboard was covering the lower fields — the screen now gives
+          way so whatever you're typing into stays above it. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <View>
           <SectionLabel>Photo</SectionLabel>
@@ -193,6 +196,7 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
           sub="Checked against what was declared on Form 001 before it is reimbursed."
         />
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

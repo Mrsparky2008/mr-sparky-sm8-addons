@@ -11,7 +11,7 @@
 //   - invoicing a contractor whose company details cannot carry an RCTI is a 409
 //   - only certain moves are allowed at all, so only those are offered
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card, Cta, Empty, Header, Row, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
@@ -108,7 +108,8 @@ export default function ApproveClaim({ claim: summary, onBack, onDone }) {
   return (
     <View style={{ flex: 1 }}>
       <Header title={name || "Claim"} meta={claim.claimId} onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Card>
           <Text style={[s.hero, mono]}>{money(st.payableIncGst)}</Text>
           <Text style={T.small}>
@@ -229,6 +230,7 @@ export default function ApproveClaim({ claim: summary, onBack, onDone }) {
           </Text>
         ) : null}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

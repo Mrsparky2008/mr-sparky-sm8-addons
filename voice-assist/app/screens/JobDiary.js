@@ -7,7 +7,7 @@
 // buttons that do nothing. House rule: never a dead control, never fake data
 // on a screen that touches real work.
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../components/ui";
 import Icon from "../components/icons";
 import { C, R, S, T, mono, oneLine } from "../lib/theme";
@@ -55,6 +55,7 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddRe
   return (
     <View style={s.screen}>
       <Header title="Job diary" meta={`#${jobNumber}`} onBack={onBack} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={s.list} keyboardShouldPersistTaps="handled">
         <View style={[s.section, s.addRow]}>
           <Pressable onPress={() => setWriting((v) => !v)} style={[s.addBtn, { backgroundColor: C.brand }]}>
@@ -141,6 +142,7 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddRe
           </Card>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <View style={s.dock}>
         <Cta label="🎙  Talk about this job" onPress={onTalk} />
