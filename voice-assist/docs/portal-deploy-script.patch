@@ -1,0 +1,149 @@
+diff --git a/.gitignore b/.gitignore
+index ec2f0b9..e211e70 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,3 +10,6 @@ Thumbs.db
+ draft/live-data.json
+ 
+ draft/sample-rcti.html
++
++# deploy bundle, rebuilt by scripts/deploy.mjs
++portal.zip
+diff --git a/scripts/deploy.mjs b/scripts/deploy.mjs
+new file mode 100644
+index 0000000..d8e93de
+--- /dev/null
++++ b/scripts/deploy.mjs
+@@ -0,0 +1,132 @@
++/**
++ * Code deploy for the portal Lambda (mr-sparky-portal-api).
++ *
++ * Written because the deploy was three hand-typed steps and one of them is a
++ * trap: PowerShell's Compress-Archive writes zip entries with BACKSLASHES,
++ * which the Linux Lambda runtime reads as one file with a strange name rather
++ * than a directory. The function then cannot import itself and the portal is
++ * down until someone works out why. This builds the archive itself, with
++ * forward slashes, the same way voice-assist/backend/deploy.mjs does.
++ *
++ * Usage: node scripts/deploy.mjs         test, build, upload, wait
++ *        node scripts/deploy.mjs zip     build portal.zip and stop
++ *        node scripts/deploy.mjs --skip-tests   only when the suite is already green
++ *
++ * Needs AWS credentials. A cloud session does not have them; this runs on the
++ * owner's PC.
++ */
++import { execSync, execFileSync } from 'node:child_process';
++import fs from 'node:fs';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++
++const FUNCTION = 'mr-sparky-portal-api';
++const REGION = 'us-east-1';
++const ZIP = 'portal.zip';
++// What the handler needs, and nothing else. settings/ is included because
++// api/index.mjs falls back to ../settings/portal-settings.json when there is
++// no copy beside the handler.
++const ROOTS = ['api', 'lib', 'settings'];
++const WANTED = new Set(['.mjs', '.json']);
++
++// fileURLToPath, not url.pathname — on Windows the latter hands back
++// "/C:/repo/scripts" and every path after it is wrong.
++const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
++process.chdir(root);
++
++// The suite is the pre-flight. api/shell.mjs holds the whole browser app in a
++// template literal, where a collapsed backslash reaches the browser as a
++// syntax error and the page dies silently — test/shell-script.test.mjs is the
++// only thing that catches it, and it has had to three times.
++if (process.argv[2] !== '--skip-tests' && process.argv[3] !== '--skip-tests') {
++  try {
++    execSync('node --test "test/*.test.mjs"', { stdio: ['ignore', 'ignore', 'inherit'] });
++    console.log('Pre-flight: tests pass.');
++  } catch {
++    console.error('❌ DEPLOY BLOCKED — tests failed. Run: node --test "test/*.test.mjs"');
++    process.exit(1);
++  }
++}
++
++function walk(dir) {
++  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
++    const p = `${dir}/${e.name}`;
++    if (e.isDirectory()) return walk(p);
++    return WANTED.has(path.extname(e.name)) ? [p] : [];
++  });
++}
++// Forward slashes, always — this is the whole point of the file.
++const FILES = ROOTS.flatMap(walk).sort();
++if (!FILES.some((f) => f === 'api/index.mjs')) {
++  console.error('❌ api/index.mjs is not in the bundle — run this from the repo root.');
++  process.exit(1);
++}
++
++function crc32(buf) {
++  let c = ~0;
++  for (let i = 0; i < buf.length; i++) {
++    c ^= buf[i];
++    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
++  }
++  return ~c >>> 0;
++}
++
++const chunks = [], central = [];
++let offset = 0;
++for (const name of FILES) {
++  const data = fs.readFileSync(name);
++  const crc = crc32(data);
++  const nameBuf = Buffer.from(name, 'utf8');
++  const local = Buffer.alloc(30);
++  local.writeUInt32LE(0x04034b50, 0);
++  local.writeUInt16LE(20, 4);
++  local.writeUInt16LE(0, 8);
++  local.writeUInt32LE(crc, 14);
++  local.writeUInt32LE(data.length, 18);
++  local.writeUInt32LE(data.length, 22);
++  local.writeUInt16LE(nameBuf.length, 26);
++  chunks.push(local, nameBuf, data);
++  const cen = Buffer.alloc(46);
++  cen.writeUInt32LE(0x02014b50, 0);
++  cen.writeUInt16LE(20, 4);
++  cen.writeUInt16LE(20, 6);
++  cen.writeUInt32LE(crc, 16);
++  cen.writeUInt32LE(data.length, 20);
++  cen.writeUInt32LE(data.length, 24);
++  cen.writeUInt16LE(nameBuf.length, 28);
++  cen.writeUInt32LE(offset, 42);
++  central.push(cen, nameBuf);
++  offset += local.length + nameBuf.length + data.length;
++}
++const centralBuf = Buffer.concat(central);
++const eocd = Buffer.alloc(22);
++eocd.writeUInt32LE(0x06054b50, 0);
++eocd.writeUInt16LE(FILES.length, 8);
++eocd.writeUInt16LE(FILES.length, 10);
++eocd.writeUInt32LE(centralBuf.length, 12);
++eocd.writeUInt32LE(offset, 16);
++fs.writeFileSync(ZIP, Buffer.concat([...chunks, centralBuf, eocd]));
++console.log(`Built ${ZIP} — ${FILES.length} files, ${(fs.statSync(ZIP).size / 1024).toFixed(0)} KB`);
++
++if (process.argv[2] === 'zip') process.exit(0);
++
++// The bundle keeps its directories, so the function must be configured to
++// enter at api/index.handler. If it is not, this zip would replace working
++// code with something the runtime cannot find, and the portal would be down
++// until someone noticed. Cheaper to ask first.
++const handler = execSync(
++  `aws lambda get-function-configuration --function-name ${FUNCTION} --region ${REGION} --query Handler --output text`,
++  { encoding: 'utf8' },
++).trim();
++if (handler !== 'api/index.handler') {
++  console.error(`❌ DEPLOY BLOCKED — the function's handler is "${handler}", not "api/index.handler".`);
++  console.error('   This bundle keeps api/ lib/ settings/ as directories. Check before uploading.');
++  process.exit(1);
++}
++
++execFileSync('aws', ['lambda', 'update-function-code',
++  '--function-name', FUNCTION, '--region', REGION, '--zip-file', `fileb://${ZIP}`],
++  { stdio: ['ignore', 'ignore', 'inherit'] });
++execSync(`aws lambda wait function-updated --function-name ${FUNCTION} --region ${REGION}`, { stdio: 'inherit' });
++console.log('✅ Deployed and active.');
++console.log('Smoke test:  curl -s https://portal.mrsparky.com.au/api/health');

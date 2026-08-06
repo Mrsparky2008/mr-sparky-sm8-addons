@@ -1,5 +1,31 @@
 # Changes the app needs in the portal repo
 
+## How to deploy this repo — `portal-deploy-script.patch`
+
+Apply once, then every deploy after it is one command.
+
+    git apply <sm8-addons>/voice-assist/docs/portal-deploy-script.patch
+    node scripts/deploy.mjs
+
+It runs the test suite first and refuses to upload if anything fails, builds
+the bundle itself, uploads, and waits for the function to go active.
+
+**Why a script and not three typed commands.** PowerShell's `Compress-Archive`
+writes zip entries with **backslashes**. The Linux Lambda runtime reads those
+as one file with an odd name rather than as directories, so the function can't
+import itself and the portal is down until somebody works out why. The script
+writes the archive itself with forward slashes — the same lesson
+`voice-assist/backend/deploy.mjs` was written for.
+
+It also refuses to upload if the function's configured handler isn't
+`api/index.handler`, because this bundle keeps `api/ lib/ settings/` as real
+directories and a mismatch there would replace working code with something the
+runtime can't find.
+
+Nothing about the deploy changes: same function (`mr-sparky-portal-api`), same
+region (`us-east-1`), same file set the CLAUDE.md always said to zip.
+
+
 ## 5. The suppliers list — `portal-suppliers.patch`
 
 Steven, 2026-08-06: *"a section in settings to add common suppliers to select
