@@ -348,9 +348,14 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       const bytes = Buffer.from(String(payload.imageB64 || ""), "base64");
       if (!bytes.length) return jsonOut(400, { ok: false, error: "No image supplied." });
       if (bytes.length > 5 * 1024 * 1024) return jsonOut(413, { ok: false, error: "Photo too large." });
+      // SM8 caps the attachment name at 120. Trim the CAPTION to fit, never
+      // the stamp — the stamp is the record-keeping half, and a long supplier
+      // name was quietly eating it off the end.
+      const room = Math.max(12, 120 - stamp.length - 3);
+      const caption = String(payload.caption || "Receipt").slice(0, room);
       const r = await attachFileToJob({
         job_uuid: job.uuid,
-        name: `${String(payload.caption || "Receipt")} — ${stamp}`.slice(0, 120),
+        name: `${caption} — ${stamp}`,
         fileType: payload.fileType === ".png" ? ".png" : ".jpg",
         contentType: payload.fileType === ".png" ? "image/png" : "image/jpeg",
         bytes,
