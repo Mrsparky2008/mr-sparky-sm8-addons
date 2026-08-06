@@ -44,8 +44,19 @@ listener and every CSS class is styled.
     git apply /path/to/voice-assist/docs/portal-suppliers.patch
     node --test "test/*.test.mjs"
 
+**Base it is cut from:** the portal tree with sections 1–4 already applied —
+i.e. current master on the PC, not the pre-patch base. The PC session flagged
+that section 4's file had been generated against the old base and hit a
+duplicate-function trap because of it; this one does not repeat that, and
+touches no file section 4 touched except `api/index.mjs`, in two unrelated
+routes.
+
 Until it lands the phone simply shows no chips and the supplier is typed, as
 it is today.
+
+**AGM Electrical Supplies is in the seed** because it is the first real docket
+that went through the reader (2026-08-06, $130.17, IN688575). The seed is a
+starting point, not a survey — the office adds the rest in the pane.
 
 ## 4. URGENT — receipts could never be filed from the field
 
@@ -70,6 +81,16 @@ unpaid — strictly better than the previous behaviour, which was to refuse
 every receipt anyone tried to take on site.
 
 **Verified:** 193/193 tests still pass. `api/shell.mjs` untouched.
+
+**Status (2026-08-06, 8:00pm):** applied and tested on the PC — 193/193, one
+file, 15 insertions. The deploy was authorised there; confirm it landed by
+re-saving a receipt on a live Work Order. Until the Lambda actually carries it,
+the app shows *"Not your job, or not found"* at save even though the docket
+read perfectly, which is exactly what job #167595 did on the first real run.
+
+**Note for anyone regenerating this patch file:** it was cut against the
+pre-patch base, so re-applying it to current master hits a duplicate-function
+trap. Diff against `9331b78` instead.
 
 ## Where this stands (2026-08-06, ~11:45am — morning-after update)
 

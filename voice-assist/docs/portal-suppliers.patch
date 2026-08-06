@@ -180,10 +180,10 @@ index cac49f4..8a050a1 100644
  /**
 diff --git a/lib/suppliers.mjs b/lib/suppliers.mjs
 new file mode 100644
-index 0000000..d4b1d97
+index 0000000..b2016a5
 --- /dev/null
 +++ b/lib/suppliers.mjs
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,97 @@
 +/**
 + * The suppliers list.
 + *
@@ -215,6 +215,7 @@ index 0000000..d4b1d97
 +  { id: 'lh', name: 'Lawrence & Hanson', phone: '', aliases: ['L&H', 'Lawrence and Hanson'] },
 +  { id: 'mmem', name: 'MM Electrical', phone: '', aliases: ['MMEM', 'MM Electrical Merchandising'] },
 +  { id: 'rexel', name: 'Rexel', phone: '', aliases: ['Ideal Electrical', 'Rexel Electrical'] },
++  { id: 'agm', name: 'AGM Electrical Supplies', phone: '', aliases: ['AGM', 'AGM Electrical'] },
 +  { id: 'auslec', name: 'Auslec', phone: '', aliases: [] },
 +  { id: 'cnw', name: 'CNW', phone: '', aliases: ['CNW Electrical'] },
 +  { id: 'haymans', name: 'Haymans', phone: '', aliases: ['Haymans Electrical'] },
@@ -281,10 +282,10 @@ index 0000000..d4b1d97
 +  return best ? best.supplier : null;
 +}
 diff --git a/settings/portal-settings.json b/settings/portal-settings.json
-index 488b84b..9e46a9c 100644
+index 488b84b..4350b22 100644
 --- a/settings/portal-settings.json
 +++ b/settings/portal-settings.json
-@@ -466,6 +466,17 @@
+@@ -466,6 +466,18 @@
      "requirePhoto": true,
      "_photoNote": "No evidence, no payment - but the amount is always recorded and visible, never silently dropped."
    },
@@ -294,6 +295,7 @@ index 488b84b..9e46a9c 100644
 +    { "id": "lh", "name": "Lawrence & Hanson", "phone": "", "aliases": ["L&H", "Lawrence and Hanson"] },
 +    { "id": "mmem", "name": "MM Electrical", "phone": "", "aliases": ["MMEM", "MM Electrical Merchandising"] },
 +    { "id": "rexel", "name": "Rexel", "phone": "", "aliases": ["Ideal Electrical", "Rexel Electrical"] },
++    { "id": "agm", "name": "AGM Electrical Supplies", "phone": "", "aliases": ["AGM", "AGM Electrical"] },
 +    { "id": "auslec", "name": "Auslec", "phone": "", "aliases": [] },
 +    { "id": "cnw", "name": "CNW", "phone": "", "aliases": ["CNW Electrical"] },
 +    { "id": "haymans", "name": "Haymans", "phone": "", "aliases": ["Haymans Electrical"] },
