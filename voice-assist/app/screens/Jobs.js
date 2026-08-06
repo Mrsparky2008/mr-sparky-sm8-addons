@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { Card, Empty, Header, StatusChip, Tile, TileGrid } from "../components/ui";
 import Icon from "../components/icons";
-import { C, R, S, T, mono, oneLine, suburb } from "../lib/theme";
+import { C, R, S, T, mono, oneLine, statusChip, suburb } from "../lib/theme";
 import { fetchJobs } from "../lib/api";
 
 const BUCKETS = [
@@ -103,14 +103,11 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
           <>
             {(grouped || []).map((b) => (
               <View key={b.key}>
-                <View style={s.bucketHead}>
-                  <Text style={T.label}>{b.label}</Text>
-                  {b.total ? (
-                    <Text style={[s.bucketCount, mono]}>
-                      {b.total > b.jobs.length ? `${b.jobs.length} of ${b.total}` : b.total}
-                    </Text>
-                  ) : null}
-                </View>
+                <BucketBand
+                  label={b.label}
+                  status={b.key}
+                  count={b.total && b.total > b.jobs.length ? `${b.jobs.length} of ${b.total}` : b.total}
+                />
                 {b.jobs.map((j) => (
                   <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} hideStatus />
                 ))}
@@ -148,6 +145,24 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
   );
 }
 
+/**
+ * A filled band per section, not a whisper of grey type. Steven, seeing the
+ * first cut: "the text is too small to spot — plot bands might identify
+ * sections better." It borrows the status palette the app already uses for
+ * chips, so the band's colour says which bucket you are in before the word
+ * does — and Completed is green because Completed is real in ServiceM8.
+ */
+function BucketBand({ label, status, count }) {
+  const { bg, ink } = statusChip(status);
+  return (
+    <View style={[s.band, { backgroundColor: bg }]}>
+      <View style={[s.bandEdge, { backgroundColor: ink }]} />
+      <Text style={[s.bandLabel, { color: ink }]}>{label}</Text>
+      {count ? <Text style={[s.bandCount, mono, { color: ink }]}>{count}</Text> : null}
+    </View>
+  );
+}
+
 function JobRow({ job, onPress, hideStatus }) {
   return (
     <Pressable onPress={onPress}>
@@ -179,11 +194,14 @@ const s = StyleSheet.create({
   number: { color: C.ink, fontSize: 15, fontWeight: "800" },
   address: { ...T.body, fontSize: 14 },
   sub: { ...T.small, marginTop: 3 },
-  bucketHead: {
-    flexDirection: "row", alignItems: "baseline", justifyContent: "space-between",
-    marginBottom: 8, marginTop: 4,
+  band: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    borderRadius: R.card, paddingLeft: 13, paddingRight: 14, paddingVertical: 10,
+    marginTop: 6, marginBottom: 10, overflow: "hidden",
   },
-  bucketCount: { color: C.muted, fontSize: 11 },
+  bandEdge: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+  bandLabel: { flex: 1, fontSize: 13, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" },
+  bandCount: { fontSize: 11.5, fontWeight: "700", opacity: 0.9 },
   allRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   allTitle: { color: C.ink, fontSize: 15, fontWeight: "700" },
   chev: { color: C.muted, fontSize: 22 },
