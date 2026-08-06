@@ -56,7 +56,16 @@ export default function AllJobs({ onOpenJob, onBack }) {
           autoFocus
         />
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.list} keyboardShouldPersistTaps="handled">
+      {/* The search field is pinned above, so the fix isn't to squash the
+          layout — it's to let the LIST scroll clear of the keyboard, and to
+          let a downward drag put the keyboard away like every other list. */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={s.list}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
+      >
         <Text style={[T.label, { marginBottom: 10 }]}>{q.trim() ? "Matches" : "Latest"}</Text>
         {loading && jobs.length === 0 ? (
           <ActivityIndicator color={C.brand} style={{ marginTop: 30 }} />

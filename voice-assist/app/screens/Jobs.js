@@ -89,6 +89,8 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
         style={{ flex: 1 }}
         contentContainerStyle={s.list}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
         refreshControl={
           <RefreshControl refreshing={loading && jobs.length > 0} onRefresh={() => load(q.trim())} tintColor={C.muted} />
         }
