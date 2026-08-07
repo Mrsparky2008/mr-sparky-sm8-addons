@@ -194,14 +194,19 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   async function queryRefusal() {
     setQuerying(true);
     try {
+      const otherJob = (String(error?.message || "").match(/#(\d+)/) || [])[1];
       const r = await postJobTask(jobNumber, {
         name: `Receipt query — ${invoiceNumber.trim() || supplier.trim() || "docket"}`,
         details: [
-          `Tried to file a receipt against job #${jobNumber} and it was refused.`,
+          `A receipt was refused on job #${jobNumber}: ${error?.message || "already filed"}`,
           `Supplier: ${supplier.trim() || "(not read)"}${abn ? `, ABN ${abn}` : ""}.`,
           `Invoice: ${invoiceNumber.trim() || "(none on the docket)"}. Amount: $${amount || "?"}.`,
-          `Reason given: ${error?.message || "already filed"}`,
-          "They say that is not right — please check whether it was filed against the wrong job.",
+          "",
+          "They say it belongs on this job.",
+          otherJob
+            ? `To fix: portal > their statement > job #${otherJob} > Receipts > Move, and put it on #${jobNumber}. `
+              + "Voiding is only for a row that should never have existed."
+            : "To fix: find the receipt in the portal under Receipts and Move it onto this job.",
         ].join("\n"),
       });
       setQueried(r?.assignedTo ? `Sent to ${r.assignedTo}. It's on their list for tomorrow.` : "Sent. It's on the job as a task.");
