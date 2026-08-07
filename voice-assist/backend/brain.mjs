@@ -896,6 +896,60 @@ export async function readReceipt({ imageB64, contentType = "image/jpeg" }) {
   };
 }
 
+/**
+ * Put a real task on somebody's list.
+ *
+ * Steven, on being offered a note: "a note on SM8 is actually useless unless
+ * it's addressed to someone... it would just sit there and the office wouldn't
+ * notice it." He is right, and checking the data proved it twice over — the
+ * three notes ever flagged action_required go back to October 2025 and not one
+ * has been completed, and every job queue has an empty subscribed_staff.
+ *
+ * @mentions are not an option either. A note posted from the ServiceM8 app
+ * stores "@marites" as plain characters with no staff uuid anywhere on the
+ * record: the app parses the @ as you type and fires the notification itself.
+ * Written through the API it would LOOK like a mention and notify nobody,
+ * which is worse than saying nothing — it would look handled.
+ *
+ * A task carries assigned_to_staff_uuid, a due date, and task_complete. It
+ * lands on a person and it can be seen to have been dealt with.
+ */
+export async function createTask({ job_uuid, name, details, assigneeName, dueDate }) {
+  const staff = await getStaff().catch(() => []);
+  const wanted = String(assigneeName || process.env.TASK_ASSIGNEE || "Marites").toLowerCase().trim();
+  const hit = staff.find((x) => x.name.toLowerCase().includes(wanted))
+    || staff.find((x) => wanted.includes(x.name.toLowerCase().split(" ")[0]));
+
+  const r = await sm8("POST", "/task.json", {
+    related_object: "job",
+    related_object_uuid: job_uuid,
+    name: String(name || "Task").slice(0, 120),
+    task_details: String(details || "").slice(0, 2000),
+    // Unassigned rather than assigned to the wrong person: a task on nobody's
+    // list is visible on the job; a task on the wrong list is invisible AND
+    // looks handled.
+    assigned_to_staff_uuid: hit?.uuid || "",
+    due_date: dueDate || tomorrowInTz(),
+    active: true,
+  });
+  if (r.status < 200 || r.status >= 300) return { error: `Task failed: ${r.status}` };
+  return { ok: true, task_uuid: r.headers.get("x-record-uuid"), assignedTo: hit?.name || null };
+}
+
+/** Due tomorrow, Sydney — a query raised on site is a next-morning job. */
+function tomorrowInTz() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** Active staff, for "who should look at this". */
+export async function staffList() {
+  return (await getStaff().catch(() => [])).map((s) => ({ uuid: s.uuid, name: s.name }));
+}
+
 export async function buildDossier(uuid) {
   const [j, contacts, notes, acts, mats, staff] = await Promise.all([
     sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),

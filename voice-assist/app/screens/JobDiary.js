@@ -6,13 +6,13 @@
 // than showing sample entries that could be mistaken for the job's truth, or
 // buttons that do nothing. House rule: never a dead control, never fake data
 // on a screen that touches real work.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../components/ui";
 import Icon from "../components/icons";
 import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono, oneLine } from "../lib/theme";
-import { postJobNote } from "../lib/api";
+import { fetchStaff, postJobNote, postJobTask } from "../lib/api";
 
 // "2026-08-04 08:30:00" -> "Mon 4 Aug · 8:30am", Sydney wall-clock, no Date
 // timezone games on the date part.
@@ -42,6 +42,18 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], timeOnS
   const [busy, setBusy] = useState(false);
   const [noteError, setNoteError] = useState("");
   const noteRef = useRef(null);
+  // Who the note is FOR, if anyone. Steven: "a note on SM8 is useless unless
+  // it's addressed to someone... it would just sit there." Picking a name turns
+  // it into a task with an owner, a due date and a tick box. @mentions cannot
+  // do this from the API — ServiceM8 stores "@marites" as plain characters and
+  // fires the notification from its own app as you type.
+  const [staff, setStaff] = useState([]);
+  const [assignee, setAssignee] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetchStaff().then((r) => { if (alive) setStaff(r?.staff || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const noteList = [...added, ...(notes || []).filter(Boolean).slice().reverse()];
 
   async function saveNote() {
@@ -51,8 +63,18 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], timeOnS
     setNoteError("");
     try {
       await postJobNote(jobNumber, note);
+      // Addressed to someone: the note is the record, the task is what gets it
+      // seen. Both, because a task alone would not show in the job's history.
+      if (assignee) {
+        await postJobTask(jobNumber, {
+          name: note.length > 60 ? `${note.slice(0, 57)}…` : note,
+          details: note,
+          assignee: assignee.name,
+        });
+      }
       // It is an SM8 note now — show it at the top like the truth it is.
-      setAdded((l) => [note, ...l]);
+      setAdded((l) => [assignee ? `${note}  → ${assignee.name}` : note, ...l]);
+      setAssignee(null);
       setDraft("");
       setWriting(false);
     } catch (err) {
@@ -94,8 +116,33 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], timeOnS
             />
             {noteError ? <Text style={s.noteError}>{noteError}</Text> : null}
             <View style={{ height: 8 }} />
+            {staff.length ? (
+              <>
+                <Text style={s.assignLabel}>Someone needs to action this?</Text>
+                <View style={s.chips}>
+                  {staff.map((p) => {
+                    const on = assignee?.uuid === p.uuid;
+                    return (
+                      <Pressable
+                        key={p.uuid}
+                        onPress={() => setAssignee(on ? null : p)}
+                        style={[s.chip, on && s.chipOn]}
+                      >
+                        <Text style={[s.chipText, on && { color: C.ink }]}>{p.name.split(" ")[0]}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={s.note}>
+                  {assignee
+                    ? `Goes on ${assignee.name.split(" ")[0]}'s task list, due tomorrow — a note on its own sits there unread.`
+                    : "Left off, it's a record only."}
+                </Text>
+              </>
+            ) : null}
+            <View style={{ height: 8 }} />
             <Cta
-              label={busy ? "Saving…" : "Save note"}
+              label={busy ? "Saving…" : assignee ? `Save note & task for ${assignee.name.split(" ")[0]}` : "Save note"}
               tone="earth"
               disabled={busy || !draft.trim()}
               onPress={saveNote}
@@ -196,6 +243,14 @@ const s = StyleSheet.create({
   entryTitle: { color: C.ink, fontSize: 14, fontWeight: "700" },
   entrySub: { ...T.small, marginTop: 2 },
   note: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
+  assignLabel: { color: C.muted, fontSize: 11.5, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 12, marginBottom: 7 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  chip: {
+    borderRadius: R.chip, borderWidth: 1, borderColor: C.line, backgroundColor: C.panel,
+    paddingHorizontal: 12, minHeight: 34, justifyContent: "center",
+  },
+  chipOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  chipText: { color: C.muted, fontSize: 13, fontWeight: "700" },
   addRow: { flexDirection: "row", gap: 9 },
   addBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,

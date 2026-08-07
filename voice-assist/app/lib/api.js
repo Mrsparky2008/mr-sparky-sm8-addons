@@ -102,6 +102,21 @@ export const postReceiptCopy = (jobNumber, { imageB64, fileType, caption }) =>
 export const readReceipt = ({ imageB64, contentType }) =>
   apiPost("/api/receipt/read", { imageB64, contentType });
 
+/**
+ * Put a real task on somebody's list in ServiceM8.
+ *
+ * A note is not enough and the data says so: the only three notes ever flagged
+ * "action required" in this account go back to October 2025 and none has been
+ * completed. An @mention can't be written through the API either — ServiceM8
+ * stores "@marites" as plain characters, and fires the notification from its
+ * own app as you type. A task has an owner, a due date and a tick box.
+ */
+export const postJobTask = (jobNumber, { name, details, assignee, dueDate }) =>
+  apiPost(`/api/job/${encodeURIComponent(jobNumber)}/task`, { name, details, assignee, dueDate });
+
+/** Who a note or a query can be handed to. */
+export const fetchStaff = () => apiGet("/api/staff");
+
 // One conversation turn. Resolves { reply } after the stream ends.
 // onDelta(text) per text fragment; onAudio(seq, b64mp3) per Polly chunk.
 export async function chatTurn({ messages, onDelta, onAudio }) {

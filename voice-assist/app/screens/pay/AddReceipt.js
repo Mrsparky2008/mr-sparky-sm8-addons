@@ -36,7 +36,7 @@ import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import KeyboardToggle from "../../components/KeyboardToggle";
 import { C, R, S, T, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
-import { postReceiptCopy, readReceipt } from "../../lib/api";
+import { postJobTask, postReceiptCopy, readReceipt } from "../../lib/api";
 
 // The phone is in the same timezone as the job. Building the date from the
 // device clock avoids toISOString(), which is UTC and would date a receipt
@@ -85,6 +85,12 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   // ever set from what was READ: a hand-typed figure is the claim, not the
   // docket, and guessing they are the same would cap an honest split.
   const [docketTotal, setDocketTotal] = useState(null);
+  // Raising a query when the save is refused. Steven: "maybe his apprentice
+  // added it to a job by mistake — call the office if you believe this is an
+  // error." A task, not a note: a note with nobody on it is a note nobody
+  // reads, which the account's own history proves.
+  const [querying, setQuerying] = useState(false);
+  const [queried, setQueried] = useState("");
 
   // Ask the register who holds this ABN. Confirms the reader got it right, and
   // on a docket too poor to read it is the whole point: type eleven digits,
@@ -180,6 +186,29 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
       setReadError(err?.message === "signed out" ? "Signed out." : "Couldn't read the photo — type the details in.");
     } finally {
       setReading(false);
+    }
+  }
+
+  // The save was refused and the person says that is wrong. Hand it to
+  // somebody rather than leaving them stuck at a counter with a docket.
+  async function queryRefusal() {
+    setQuerying(true);
+    try {
+      const r = await postJobTask(jobNumber, {
+        name: `Receipt query — ${invoiceNumber.trim() || supplier.trim() || "docket"}`,
+        details: [
+          `Tried to file a receipt against job #${jobNumber} and it was refused.`,
+          `Supplier: ${supplier.trim() || "(not read)"}${abn ? `, ABN ${abn}` : ""}.`,
+          `Invoice: ${invoiceNumber.trim() || "(none on the docket)"}. Amount: $${amount || "?"}.`,
+          `Reason given: ${error?.message || "already filed"}`,
+          "They say that is not right — please check whether it was filed against the wrong job.",
+        ].join("\n"),
+      });
+      setQueried(r?.assignedTo ? `Sent to ${r.assignedTo}. It's on their list for tomorrow.` : "Sent. It's on the job as a task.");
+    } catch (e) {
+      setQueried(e?.message ? `Couldn't send it — ${e.message}` : "Couldn't send it.");
+    } finally {
+      setQuerying(false);
     }
   }
 
@@ -429,6 +458,19 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         {error ? (
           <Card style={{ borderColor: C.active }}>
             <Text style={[T.body, { color: C.warnChipInk }]}>{error.message}</Text>
+            {/* Most refusals are honest — filed earlier and forgotten, or put on
+                the wrong job by somebody else. Give them somewhere to go. */}
+            {/already on job/i.test(error.message || "") ? (
+              queried ? (
+                <Text style={[T.small, { marginTop: 8 }]}>{queried}</Text>
+              ) : (
+                <Pressable onPress={queryRefusal} disabled={querying} style={s.queryBtn}>
+                  <Text style={s.queryText}>
+                    {querying ? "Sending…" : "That's not right — ask the office to check"}
+                  </Text>
+                </Pressable>
+              )
+            ) : null}
             {/* The portal's own words are terse and, on this one, misleading:
                 it refuses jobs that are not yet Completed with their Form 001,
                 which is every job you are standing on. Say what it means. */}
@@ -509,6 +551,11 @@ const s = StyleSheet.create({
   flagBtnOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
   flagBtnText: { color: C.muted, fontSize: 13, fontWeight: "700" },
   flagBtnOnText: { color: C.ink, fontSize: 13, fontWeight: "800" },
+  queryBtn: {
+    marginTop: 11, minHeight: 42, borderRadius: R.button, borderWidth: 1,
+    borderColor: C.warnChipInk, alignItems: "center", justifyContent: "center", paddingHorizontal: 12,
+  },
+  queryText: { color: C.warnChipInk, fontSize: 13.5, fontWeight: "800", textAlign: "center" },
   cancelWrap: { alignItems: "center", paddingTop: 4 },
   cancel: { color: C.muted, fontSize: 13.5, fontWeight: "600" },
 });

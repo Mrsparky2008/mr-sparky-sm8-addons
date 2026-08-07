@@ -14,7 +14,7 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
-import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt } from "./brain.mjs";
+import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
 
 const polly = new PollyClient({});
@@ -326,7 +326,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       // sends, so it can't be forged by a client.
       const stamp = `Mr Sparky App (${who.name || who.email.split("@")[0]})`;
 
-      const m = /^\/api\/job\/(\d+)\/(note|receipt-copy)$/.exec(path);
+      const m = /^\/api\/job\/(\d+)\/(note|receipt-copy|task)$/.exec(path);
       if (!m) return jsonOut(404, { ok: false, error: "no such route" });
 
       const index = await jobIndex();
@@ -340,6 +340,24 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
           : event.body || "{}");
       } catch {
         return jsonOut(400, { ok: false, error: "bad request body" });
+      }
+
+      // A task, because a note nobody is assigned to is a note nobody reads.
+      // The three notes ever flagged action_required in this account date back
+      // to October 2025 and none has been completed; every job queue has no
+      // subscribed staff. A task has an owner and a tick box.
+      if (m[2] === "task") {
+        const title = String(payload.name || "").trim();
+        if (!title) return jsonOut(400, { ok: false, error: "The task needs a title." });
+        const r = await createTask({
+          job_uuid: job.uuid,
+          name: title,
+          details: `${payload.details ? `${String(payload.details).trim()}\n\n` : ""}Raised by ${stamp}.`,
+          assigneeName: payload.assignee,
+          dueDate: payload.dueDate,
+        });
+        if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+        return jsonOut(200, { ok: true, task_uuid: r.task_uuid, assignedTo: r.assignedTo });
       }
 
       if (m[2] === "note") {
@@ -472,6 +490,9 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       const q = event.queryStringParameters || {};
 
       if (path === "/api/me") return jsonOut(200, { ok: true, ...who });
+
+      // Who a note or a query can be handed to.
+      if (path === "/api/staff") return jsonOut(200, { ok: true, staff: await staffList() });
 
       if (path === "/api/jobs") {
         const query = String(q.q || "").trim();
