@@ -18,7 +18,7 @@ const ORB = 120;
 
 let msgId = 0;
 
-export default function CharlieLive({ job, onBack, onDraft }) {
+export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate }) {
   useKeepAwake();
 
   const [log, setLog] = useState([]);
@@ -178,6 +178,13 @@ export default function CharlieLive({ job, onBack, onDraft }) {
   return (
     <View style={s.screen}>
       <Header title="Charlie" meta={phase === "idle" ? undefined : timer} onBack={onBack} />
+      {/* The way out of a laggy call. A live session has to guess when you
+          have stopped talking; dictation is told. */}
+      {onSwitchToDictate ? (
+        <Pressable onPress={onSwitchToDictate} hitSlop={8} style={s.toDictate}>
+          <Text style={s.toDictateText}>Switch to dictation</Text>
+        </Pressable>
+      ) : null}
 
       {/* No KeyboardAvoidingView — see SignIn: its relayout on focus is what
           blacked the screen out. The transcript scroller takes keyboard insets
@@ -277,6 +284,8 @@ function Ring({ anim }) {
 }
 
 const s = StyleSheet.create({
+  toDictate: { alignSelf: "center", paddingVertical: 4, paddingHorizontal: 10, marginBottom: 2 },
+  toDictateText: { color: C.muted, fontSize: 12.5, fontWeight: "700" },
   screen: { flex: 1, backgroundColor: C.bg },
   chipWrap: { paddingHorizontal: S.screen, paddingBottom: 10 },
   log: { flex: 1, paddingHorizontal: S.screen },

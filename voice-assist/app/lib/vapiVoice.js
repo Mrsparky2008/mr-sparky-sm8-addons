@@ -25,21 +25,6 @@ export async function start({ onEvent, job }) {
   if (!vapi) {
     vapi = new Vapi(VAPI_PUBLIC_KEY);
     vapi.on("call-start", () => {
-      // Opened from a job card or the jobs list: tell the brain which job we
-      // are on so it doesn't open by asking a question we already answered.
-      // Sent as a system line, so it never appears as something the user said.
-      const j = handlers.job;
-      if (j?.job_number) {
-        try {
-          vapi.send({
-            type: "add-message",
-            message: {
-              role: "system",
-              content: `APP_CONTEXT: the user has job ${j.job_number}${j.address ? ` (${j.address})` : ""} open on screen. Anchor to it and get straight to work.`,
-            },
-          });
-        } catch {}
-      }
       handlers.onEvent("status", "live");
       // iOS hands a WebRTC call to the EARPIECE by default, which is why
       // Charlie sounded faint unless the phone was against your ear. The SDK's
@@ -79,7 +64,38 @@ export async function start({ onEvent, job }) {
     vapi.on("error", (e) => handlers.onEvent("error", String(e?.message || e)));
   }
   handlers.onEvent("status", "connecting");
-  await vapi.start(VAPI_ASSISTANT_ID);
+
+  // The job goes in as an OVERRIDE at start, not as a message after call-start.
+  //
+  // Steven: "it's asking me what job I'm working on. Obviously it's that job,
+  // it's started from the job card itself." He was right, and the reason is
+  // ordering: a message sent on call-start arrives after the assistant has
+  // already decided how to open, so it asked a question we had answered before
+  // the call began. An override is in hand before the first word.
+  //
+  // It also takes a whole round trip out of the first reply: without it the
+  // brain has to run find_job before it can say anything, which is a second
+  // Claude call plus a ServiceM8 lookup while you stand there waiting.
+  const j = handlers.job;
+  const overrides = j?.job_number ? {
+    firstMessage: `Job ${j.job_number}${j.address ? `, ${String(j.address).split(",")[0]}` : ""}. What do you need?`,
+    variableValues: {
+      jobNumber: String(j.job_number),
+      jobAddress: j.address || "",
+      jobContact: j.contact || "",
+      jobDescription: j.work || j.description || "",
+    },
+    model: {
+      messages: [{
+        role: "system",
+        content: `APP_CONTEXT: the user has job ${j.job_number} open on screen`
+          + `${j.address ? ` at ${j.address}` : ""}${j.contact ? `, contact ${j.contact}` : ""}.`
+          + " That IS the job — never ask which job they mean. Anchor to it and get straight to work.",
+      }],
+    },
+  } : undefined;
+
+  await vapi.start(VAPI_ASSISTANT_ID, overrides);
 }
 
 /**

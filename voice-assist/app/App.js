@@ -29,6 +29,7 @@ import AllJobs from "./screens/AllJobs";
 import JobCard from "./screens/JobCard";
 import JobDiary from "./screens/JobDiary";
 import CharlieLive from "./screens/CharlieLive";
+import CharlieDictate from "./screens/CharlieDictate";
 import QuoteWorkshop from "./screens/QuoteWorkshop";
 import Diary from "./screens/Diary";
 import MoneyHub from "./screens/pay/MoneyHub";
@@ -76,6 +77,9 @@ function Shell() {
   // app opened and started talking. So he is born on the FIRST visit to his
   // tab and stays mounted after (leaving mid-call must not hang up the line).
   const [charlieBorn, setCharlieBorn] = useState(false);
+  // "dictate" | "voice". Dictation costs nothing to mount; the live session
+  // DIALS the moment it mounts, which is why it stays behind charlieBorn.
+  const [charlieMode, setCharlieMode] = useState("dictate");
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
   const [committing, setCommitting] = useState(false);
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
@@ -289,11 +293,24 @@ function Shell() {
             this tab must never destroy him, and launching the app must never
             create him. Hang up by tapping the orb, or sign out. */}
         <View style={[s.fill, tab !== "charlie" && s.hidden]} pointerEvents={tab === "charlie" ? "auto" : "none"}>
-          {charlieBorn ? (
+          {/* Two ways to talk to him, and they are genuinely different tools.
+              Dictation does not guess when you have stopped speaking, so there
+              is nothing to lag; live voice is for when your hands are full.
+              Dictation is the default because it is the one that answers on
+              the first try. */}
+          {charlieMode === "dictate" ? (
+            <CharlieDictate
+              job={charlieJob}
+              onBack={() => setTab("work")}
+              onDraft={onDraft}
+              onSwitchToVoice={() => { setCharlieMode("voice"); setCharlieBorn(true); }}
+            />
+          ) : charlieBorn ? (
           <CharlieLive
             job={charlieJob}
             onBack={() => setTab("work")}
             onDraft={onDraft}
+            onSwitchToDictate={() => setCharlieMode("dictate")}
           />
           ) : null}
           {draft ? (
