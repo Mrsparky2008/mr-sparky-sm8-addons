@@ -1,11 +1,11 @@
 diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
-index b1bb2c7..5200587 100644
+index b1bb2c7..9454e2d 100644
 --- a/lib/receipt-dupes.mjs
 +++ b/lib/receipt-dupes.mjs
-@@ -92,6 +92,21 @@ export function docketKeys(r) {
-  * wins when there is one, so the same supplier never splits into two rows of
-  * the owner's report over a spelling.
-  */
+@@ -87,6 +87,21 @@ export function docketKeys(r) {
+   return keys;
+ }
+ 
 +/**
 + * ", filed 5 Aug from this app" — the fact that ends most of these on the spot.
 + * Empty when nothing was recorded, rather than inventing a date.
@@ -21,9 +21,9 @@ index b1bb2c7..5200587 100644
 +  return `, filed ${when}${how}`;
 +}
 +
- export function docketKey(r) {
-   return docketKeys(r)[0] || null;
- }
+ /**
+  * The one key a docket is FILED under, for grouping and display. The ABN form
+  * wins when there is one, so the same supplier never splits into two rows of
 @@ -138,17 +153,15 @@ export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICAT
    if (!matches.length) return { verdict: 'ok', key, matches: [], reuse: false };
  

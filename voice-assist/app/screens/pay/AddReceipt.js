@@ -460,7 +460,7 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
             <Text style={[T.body, { color: C.warnChipInk }]}>{error.message}</Text>
             {/* Most refusals are honest — filed earlier and forgotten, or put on
                 the wrong job by somebody else. Give them somewhere to go. */}
-            {/already on job/i.test(error.message || "") ? (
+            {error.status === 409 ? (
               queried ? (
                 <Text style={[T.small, { marginTop: 8 }]}>{queried}</Text>
               ) : (
