@@ -13,9 +13,10 @@
 // Two rules the reading half obeys, both Steven's (2026-08-06):
 //   · It fills in, it does not file. Every value is editable and nothing is
 //     saved until a human presses the button.
-//   · The supplier lands on the office's spelling. The list of wholesalers
-//     lives in portal settings and comes down with /api/me; the chips are a
-//     shortcut and never a gate, so Other and a typed name always work.
+//   · The supplier is a plain field, and lands on the office's spelling when
+//     the reader recognises it. The wholesaler list stays in portal settings
+//     for quoting and dialling later; it is never rendered here, because a
+//     growing wall of chips is real estate this screen cannot spare.
 //   · The job comes from where you opened the screen, not from the paper. If
 //     the docket quotes a different job number it is FLAGGED, with what
 //     ServiceM8 says that job is, and the choice is yours. If nothing anchors
@@ -71,13 +72,14 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   const touched = useRef({});
   const mark = (k) => { touched.current[k] = true; };
 
-  // The suppliers the office keeps in portal settings, as chips. Best-effort:
-  // if the call fails there are no chips and the field is typed, exactly as
-  // before — the list is a shortcut, never a gate.
+  // The wholesaler list the office keeps in portal settings. It is NOT shown —
+  // Steven, on seeing the chips: "that's expensive real estate we don't need,
+  // and as the list grows it's going to become too big." So it does one silent
+  // job: landing a read name on the office's spelling. That is not cosmetic
+  // any more — the duplicate-docket check keys on supplier + invoice number,
+  // and it is only as reliable as the spelling is consistent.
   const [suppliers, setSuppliers] = useState([]);
-  const [otherOpen, setOtherOpen] = useState(false);
   const [readAs, setReadAs] = useState("");   // what the paper said, when we tidied it
-  const supplierRef = useRef(null);
   useEffect(() => {
     let alive = true;
     portal.me()
@@ -216,9 +218,6 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
     }
   }
 
-  // "Other" is either chosen, or implied by a name that isn't on the list.
-  const knownSupplier = suppliers.some((x) => x.name === supplier);
-  const showSupplierField = !suppliers.length || otherOpen || (!!supplier && !knownSupplier);
   const mismatch = !!(docket && jobNumber && docket.jobNumber !== jobNumber);
   const needsJob = !jobNumber;
   const ready = photo && supplier.trim() && amount.trim() && date && jobNumber && !reading;
@@ -335,46 +334,12 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
 
         <View>
           <SectionLabel>Supplier{read?.supplier ? " · read" : ""}</SectionLabel>
-          {suppliers.length ? (
-            <View style={[s.chips, { marginBottom: showSupplierField ? 9 : 0 }]}>
-              {suppliers.map((sup) => (
-                <Pressable
-                  key={sup.id}
-                  onPress={() => {
-                    mark("supplier");
-                    setSupplier(sup.name);
-                    setOtherOpen(false);
-                    setReadAs("");
-                  }}
-                  style={[s.chip, sup.name === supplier && !otherOpen && s.chipOn]}
-                >
-                  <Text style={[s.chipText, sup.name === supplier && !otherOpen && { color: C.ink }]}>
-                    {sup.name}
-                  </Text>
-                </Pressable>
-              ))}
-              <Pressable
-                onPress={() => {
-                  mark("supplier");
-                  setOtherOpen(true);
-                  if (knownSupplier) setSupplier("");
-                  setTimeout(() => supplierRef.current?.focus(), 60);
-                }}
-                style={[s.chip, otherOpen && s.chipOn]}
-              >
-                <Text style={[s.chipText, otherOpen && { color: C.ink }]}>Other…</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          {showSupplierField ? (
-            <Field
-              inputRef={supplierRef}
-              onUse={(r) => (lastField.current = r.current)}
-              value={supplier}
-              onChangeText={(v) => { mark("supplier"); setSupplier(v); setReadAs(""); }}
-              placeholder="Who it was bought from"
-            />
-          ) : null}
+          <Field
+            onUse={(r) => (lastField.current = r.current)}
+            value={supplier}
+            onChangeText={(v) => { mark("supplier"); setSupplier(v); setReadAs(""); }}
+            placeholder="Middy's, Lawrence & Hanson…"
+          />
           {readAs ? <Text style={s.note}>The docket says “{readAs}”.</Text> : null}
         </View>
 
