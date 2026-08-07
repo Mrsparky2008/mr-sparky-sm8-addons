@@ -66,6 +66,13 @@ export default function CharlieLive({ job, onBack, onDraft }) {
     if (kind === "speaking") { setPhase(payload.on ? "speaking" : "listening"); return; }
     if (kind === "draft") { onDraft(payload); return; }
     if (kind === "error") { addMsg("sys", "Voice error — " + payload); return; }
+    // Where the sound is going. On screen because a voice fault you cannot see
+    // is exactly what made "I can't hear it properly" so hard to pin down.
+    if (kind === "audio") {
+      if (payload?.error) addMsg("sys", "Audio route failed — " + payload.error);
+      else addMsg("sys", `Speaker: ${payload.chose}${payload.devices?.length ? ` (of ${payload.devices.join(", ")})` : ""}`);
+      return;
+    }
     if (kind !== "speech") return;
 
     const { who, text, final } = payload;

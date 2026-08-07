@@ -41,6 +41,13 @@ export async function start({ onEvent, job }) {
         } catch {}
       }
       handlers.onEvent("status", "live");
+      // iOS hands a WebRTC call to the EARPIECE by default, which is why
+      // Charlie sounded faint unless the phone was against your ear. The SDK's
+      // own device handling only re-applies whatever is already selected, so
+      // nothing ever asks for the loudspeaker. Ask.
+      routeToSpeaker();
+      // The device list can arrive after the call starts; try once more.
+      setTimeout(routeToSpeaker, 800);
     });
     vapi.on("call-end", () => handlers.onEvent("status", "ended"));
     vapi.on("speech-start", () => handlers.onEvent("speaking", { who: "assistant", on: true }));
@@ -73,6 +80,30 @@ export async function start({ onEvent, job }) {
   }
   handlers.onEvent("status", "connecting");
   await vapi.start(VAPI_ASSISTANT_ID);
+}
+
+/**
+ * Put Charlie on the loudspeaker.
+ *
+ * Deliberately picks from what the SDK reports rather than hardcoding a name:
+ * the identifiers differ between platforms, and a wrong one thrown blind would
+ * fail silently and leave the call on the earpiece with nothing to show for it.
+ * "speakerphone" is the documented React Native fallback when the list is empty.
+ *
+ * Reports what it found either way — a voice fault you cannot see is the thing
+ * that made this hard to diagnose in the first place.
+ */
+function routeToSpeaker() {
+  try {
+    const devices = (vapi?.getAudioDevices?.() || []).filter(Boolean);
+    const named = devices.map((d) => String(d.value ?? d.label ?? d)).filter(Boolean);
+    const loud = named.find((n) => /speaker/i.test(n));
+    const chosen = loud || "speakerphone";
+    vapi.setAudioDevice(chosen);
+    handlers.onEvent("audio", { devices: named, chose: chosen });
+  } catch (e) {
+    handlers.onEvent("audio", { error: String(e?.message || e) });
+  }
 }
 
 export async function stop() {

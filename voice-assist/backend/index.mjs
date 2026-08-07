@@ -127,12 +127,20 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
     if (method === "POST" && path === "/llm/chat/completions") {
       const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
       if (!LLM_TOKEN || headers["authorization"] !== `Bearer ${LLM_TOKEN}`) {
+        // Silent before. If this token ever drifts out of step with the Vapi
+        // credential, every turn 401s and the call simply goes quiet — the
+        // exact symptom, with nothing anywhere saying so.
+        console.warn(`llm bridge: REJECTED — ${LLM_TOKEN ? "token mismatch" : "LLM_TOKEN not set"}`);
         return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ error: "unauthorized" }));
       }
       let body = {};
       try {
         body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : event.body || "{}");
       } catch {}
+      // A successful turn used to log NOTHING, so "Charlie isn't answering" and
+      // "Charlie was never asked" looked identical from CloudWatch. That cost
+      // an evening on a fault that turned out not to be in this Lambda at all.
+      console.log(`llm bridge: turn in — ${(body.messages || []).length} messages, call ${body.call?.id || "(none)"}`);
 
       // Caller gate: this brain can WRITE to ServiceM8, and the phone number is
       // public-facing (Henri's Text-us line). Only allowlisted callers get the
