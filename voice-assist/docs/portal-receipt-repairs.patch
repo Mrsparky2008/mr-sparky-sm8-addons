@@ -1,0 +1,482 @@
+diff --git a/api/index.mjs b/api/index.mjs
+index 8225242..4424ca5 100644
+--- a/api/index.mjs
++++ b/api/index.mjs
+@@ -773,6 +773,66 @@ export async function handler(event) {
+       return json(201, { adjustment });
+     }
+ 
++    // Move a receipt onto the job it actually belongs to.
++    //
++    // The gap Steven found: once a docket is filed against the wrong job, the
++    // duplicate check refuses the right one — and the check has no admin
++    // exemption, so the office could not file it either. The correct job never
++    // got its receipt.
++    //
++    // Moving rather than re-filing is the point. One piece of paper is one
++    // record; it keeps its photo, its amount, who lodged it and when, and it
++    // gains a note of where it came from. Nothing is duplicated because
++    // nothing was ever duplicated — it was only ever in the wrong place.
++    if (path === '/api/receipts/move' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      if (!body.contractorId || !body.fromJobNumber || !body.receiptId || !body.toJobNumber) {
++        return json(400, { error: 'contractorId, fromJobNumber, receiptId and toJobNumber are all required' });
++      }
++      if (String(body.fromJobNumber) === String(body.toJobNumber)) {
++        return json(400, { error: 'That receipt is already on that job' });
++      }
++      // The destination has to be a real job, same rule the save route applies.
++      const loaded = await loadData(settings);
++      if (!loaded.allJobStatus[String(body.toJobNumber)]) {
++        return json(400, { error: `No job ${body.toJobNumber} in ServiceM8` });
++      }
++      try {
++        const moved = await store.moveReceipt(
++          body.contractorId, String(body.fromJobNumber), body.receiptId,
++          String(body.toJobNumber), who.person.name,
++        );
++        return json(200, { receipt: moved });
++      } catch (e) {
++        return json(404, { error: e.message });
++      }
++    }
++
++    // Void a receipt, or bring it back. Never deletes: the row and its photo
++    // stay, marked, so "this should not have existed" is itself on the record.
++    if (path === '/api/receipts/void' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      if (!body.contractorId || !body.jobNumber || !body.receiptId) {
++        return json(400, { error: 'contractorId, jobNumber and receiptId are all required' });
++      }
++      const voiding = body.voided !== false;
++      // A void removes money from a claim. It has to say why, on the record.
++      if (voiding && !String(body.reason || '').trim()) {
++        return json(400, { error: 'Say why it is being voided — it comes off what gets paid' });
++      }
++      try {
++        const updated = await store.setReceiptVoided(
++          body.contractorId, String(body.jobNumber), body.receiptId,
++          voiding, who.person.name, String(body.reason || '').trim() || null,
++        );
++        return json(200, { receipt: updated });
++      } catch (e) {
++        return json(404, { error: `That receipt is no longer there: ${e.message}` });
++      }
++    }
++
+     if (path === '/api/receipts/upload-url' && method === 'POST') {
+       const body = safeJson(event.body, event.isBase64Encoded);
+       const target = who.isAdmin && body.name ? body.name : who.person.name;
+diff --git a/api/shell.mjs b/api/shell.mjs
+index 7bae839..c244b9b 100644
+--- a/api/shell.mjs
++++ b/api/shell.mjs
+@@ -91,6 +91,8 @@ button.row{cursor:pointer}button.row:hover{background:var(--zebra)}
+ .grow{flex:1;min-width:0}.ttl{font-weight:600}
+ .sub{font-size:12px;color:var(--muted)}
+ .amt{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap;text-align:right}
++/* A voided receipt is struck through, not hidden — nothing here is deleted. */
++.amt.dim{opacity:.45;text-decoration:line-through}
+ .chev{color:var(--blue-soft);font-weight:700}
+ .dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin:0 2px}
+ .dot.ok{background:var(--good)}
+@@ -1073,16 +1075,65 @@ function receiptRow(j){
+    +'<span class="chev">&rsaquo;</span></button>';
+ }
+ 
++async function moveReceiptTo(receiptId, fromJob){
++  const to=prompt('Move this receipt to which job number?','');
++  if(!to)return;
++  if(BUSY)return; BUSY=true;
++  try{
++    const r=await fetch('/api/receipts/move',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:(DATA.profile||{}).personId,fromJobNumber:fromJob,
++        receiptId:receiptId,toJobNumber:String(to).replace(/[^0-9]/g,'')})});
++    const out=await r.json();
++    if(!r.ok)throw new Error(out.error||'Could not move it');
++    DATA=null; await load();
++  }catch(e){ alert(e.message) }
++  finally{ BUSY=false }
++}
++
++async function voidReceipt(receiptId, jobNumber, on){
++  const voiding = on==='1';
++  /* A void takes money off what gets paid, so it says why, on the record. */
++  const why = voiding ? prompt('Why is this being voided?','') : '';
++  if(voiding && !why)return;
++  if(BUSY)return; BUSY=true;
++  try{
++    const r=await fetch('/api/receipts/void',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:(DATA.profile||{}).personId,jobNumber:jobNumber,
++        receiptId:receiptId,voided:voiding,reason:why})});
++    const out=await r.json();
++    if(!r.ok)throw new Error(out.error||'Could not do that');
++    DATA=null; await load();
++  }catch(e){ alert(e.message) }
++  finally{ BUSY=false }
++}
++
+ function receiptsPane(n){
+   const r=receiptsFor(n), s=r.summary;
++  /* Admin-only repairs. Steven's question, and it had no answer: "when the app
++     rejects a receipt and it's a legitimate dispute, how will the office
++     override and add it to the job?" They could not — the duplicate check has
++     no admin exemption, so the office hit the same wall the subbie did.
++     MOVE is the fix for the common case (one docket, filed against the wrong
++     job) because it keeps one record for one piece of paper. VOID is for a row
++     that should never have existed; it never deletes. */
+   const rows=r.rows.map(function(x){
+-    const bad = x.disputed?'<span class="pill bad">queried</span>'
++    const bad = x.voided?'<span class="pill grey">voided</span>'
++      : x.disputed?'<span class="pill bad">queried</span>'
+       : (x.unevidenced||!x.imageKey)?'<span class="pill warn">no photo</span>':'';
++    const admin = (ME&&ME.isAdmin&&x.id&&!x.unevidenced)
++      ? '<button class="mini" data-movercpt="'+esc(x.id)+'" data-mjob="'+esc(n)+'">Move</button>'
++        +'<button class="mini" data-voidrcpt="'+esc(x.id)+'" data-vjob="'+esc(n)+'" data-von="'+(x.voided?'0':'1')+'">'
++        +(x.voided?'Restore':'Void')+'</button>'
++      : '';
+     return '<div class="row"><span class="grow"><span class="ttl">'+esc(x.supplier||'Declared on Form 001')+'</span> '+bad
+-     +'<div class="sub">'+[x.invoiceNumber?'inv '+esc(x.invoiceNumber):'',x.date?esc(x.date):'',esc(x.note||'')]
++     +'<div class="sub">'+[x.invoiceNumber?'inv '+esc(x.invoiceNumber):'',x.date?esc(x.date):'',esc(x.note||''),
++        x.movedFrom?'moved from job '+esc(x.movedFrom):'', x.voidedReason?'voided: '+esc(x.voidedReason):'']
+         .filter(Boolean).join(' &middot; ')+'</div></span>'
+      +(x.imageKey?'<button class="mini" data-viewreceipt="'+esc(x.imageKey)+'">Photo</button>':'')
+-     +'<span class="amt'+(x.amountIncGst<0?' neg':'')+'">'+money(x.amountIncGst)+'</span></div>';
++     +admin
++     +'<span class="amt'+(x.amountIncGst<0?' neg':'')+(x.voided?' dim':'')+'">'+money(x.amountIncGst)+'</span></div>';
+   }).join('');
+ 
+   let tot='';
+@@ -1240,6 +1291,10 @@ document.addEventListener('click',function(e){
+   if(sl2){saveSubbieLadder(sl2.getAttribute('data-savesubladder'));return}
+   const rl2=e.target.closest&&e.target.closest('[data-resetladder]');
+   if(rl2){resetLadder(rl2.getAttribute('data-resetladder'));return}
++  const mv=e.target.closest&&e.target.closest('[data-movercpt]');
++  if(mv){moveReceiptTo(mv.getAttribute('data-movercpt'),mv.getAttribute('data-mjob'));return}
++  const vd=e.target.closest&&e.target.closest('[data-voidrcpt]');
++  if(vd){voidReceipt(vd.getAttribute('data-voidrcpt'),vd.getAttribute('data-vjob'),vd.getAttribute('data-von'));return}
+   const qr=e.target.closest&&e.target.closest('[data-query]');
+   if(qr){queryReceipt(qr.getAttribute('data-query'),qr.getAttribute('data-qjob'),qr.getAttribute('data-qid'));return}
+   const aj=e.target.closest&&e.target.closest('[data-adjust]');
+diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
+index b1bb2c7..81b9b7d 100644
+--- a/lib/receipt-dupes.mjs
++++ b/lib/receipt-dupes.mjs
+@@ -76,8 +76,14 @@ export function docketKeys(r) {
+   const date = r?.date ? String(r.date).slice(0, 10) : null;
+ 
+   if (invoice) {
+-    if (abn) keys.push(`A:${abn}|I:${invoice}`);
+-    if (supplier) keys.push(`S:${supplier}|I:${invoice}`);
++    // A CREDIT carries the invoice number of the purchase it reverses — the
++    // supplier prints it deliberately, and validateReceipt already demands one
++    // for a negative amount. Without the sign in the key, a legitimate credit
++    // note collides with the invoice it credits and is refused as a duplicate.
++    // Two credits for the same invoice still match each other, which is right.
++    const kind = amount < 0 ? 'C' : 'I';
++    if (abn) keys.push(`A:${abn}|${kind}:${invoice}`);
++    if (supplier) keys.push(`S:${supplier}|${kind}:${invoice}`);
+   } else if (date && Number.isFinite(amount)) {
+     // No invoice number on the paper: the amount and the day stand in for it.
+     const tail = `D:${date}|A:${round2(amount).toFixed(2)}`;
+@@ -87,6 +93,21 @@ export function docketKeys(r) {
+   return keys;
+ }
+ 
++/**
++ * ", filed 5 Aug from this app" — the fact that ends most of these on the spot.
++ * Empty when nothing was recorded, rather than inventing a date.
++ */
++function filedWhen(row) {
++  const stamp = String(row?.addedAt || '').slice(0, 10);
++  if (!stamp) return '';
++  const d = new Date(`${stamp}T12:00:00`);
++  if (Number.isNaN(d.getTime())) return '';
++  const when = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
++  const how = row.source === 'office' ? ' by the office'
++    : row.source === 'form001' ? ' on the Form 001' : '';
++  return `, filed ${when}${how}`;
++}
++
+ /**
+  * The one key a docket is FILED under, for grouping and display. The ABN form
+  * wins when there is one, so the same supplier never splits into two rows of
+@@ -134,21 +155,23 @@ export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICAT
+   // Not identifiable, so not checkable. It saves, as it always did.
+   if (!key) return { verdict: 'ok', key: null, matches: [], reuse: false };
+ 
+-  const matches = existing.filter((r) => r && r.id !== incoming.id && sameDocket(r, incoming));
++  // A VOIDED receipt is a record that should never have existed — mis-keyed,
++  // test data, somebody else's paper. It stays visible for the audit trail but
++  // it must not stand in the way of the real one, or voiding would be a way of
++  // permanently poisoning a docket rather than correcting it.
++  const matches = existing.filter((r) => r && !r.voided && r.id !== incoming.id && sameDocket(r, incoming));
+   if (!matches.length) return { verdict: 'ok', key, matches: [], reuse: false };
+ 
+   const seen = matches.map((r) => ({
+-    id: r.id, jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0), date: r.date,
++    id: r.id, jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0),
++    date: r.date, addedAt: r.addedAt || null, source: r.source || null,
+   }));
+ 
+   const sameJob = seen.filter((r) => r.jobNumber === String(incoming.jobNumber));
+   if (sameJob.length && policy.blockSameJob) {
+     return {
+       verdict: 'blocked', reason: 'sameJob', key, matches: seen, reuse: true,
+-      message: `This docket is already on job #${incoming.jobNumber}`
+-        + `${matches[0].supplier ? ` — ${matches[0].supplier}` : ''}`
+-        + `${incoming.invoiceNumber ? ` invoice ${incoming.invoiceNumber}` : ''}`
+-        + `, $${sameJob[0].amountIncGst.toFixed(2)}. Filing it twice would claim it twice.`,
++      message: `This docket is already on job #${incoming.jobNumber}${filedWhen(sameJob[0])}.`,
+     };
+   }
+ 
+@@ -163,10 +186,10 @@ export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICAT
+         verdict: 'blocked', reason: 'overDocket', key, matches: seen, reuse: true,
+         docketTotalIncGst: total, remainingIncGst: remaining,
+         message: remaining <= 0
+-          ? `This docket is fully claimed already — $${total.toFixed(2)} across `
++          ? `This docket is fully accounted for — $${total.toFixed(2)} across `
+             + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`
+           : `This docket has $${remaining.toFixed(2)} left on it. `
+-            + `$${claimed.toFixed(2)} of $${total.toFixed(2)} is already claimed on `
++            + `$${claimed.toFixed(2)} of $${total.toFixed(2)} is already recorded against `
+             + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`,
+       };
+     }
+@@ -206,6 +229,7 @@ export function docketFlags(receiptsByContractor = {}, nameOf = (id) => id) {
+   const groups = new Map();    // group id -> rows
+   for (const [contractorId, rows] of Object.entries(receiptsByContractor)) {
+     for (const r of rows || []) {
++      if (r?.voided) continue;
+       const keys = docketKeys(r);
+       if (!keys.length) continue;
+       const found = keys.map((k) => groupOf.get(k)).find(Boolean);
+@@ -281,7 +305,7 @@ export function claimWarnings({ claim, contractorId, receiptsByContractor = {},
+   };
+ 
+   for (const r of mine) {
+-    if (!jobNumbers.has(String(r.jobNumber))) continue;
++    if (r.voided || !jobNumbers.has(String(r.jobNumber))) continue;
+ 
+     if (r.disputed) {
+       add(r.jobNumber, {
+@@ -296,7 +320,7 @@ export function claimWarnings({ claim, contractorId, receiptsByContractor = {},
+     // The same docket anywhere else — their own other jobs, or somebody else's.
+     for (const [otherId, rows] of Object.entries(receiptsByContractor)) {
+       for (const other of rows || []) {
+-        if (other.id === r.id || !sameDocket(other, r)) continue;
++        if (other.voided || other.id === r.id || !sameDocket(other, r)) continue;
+         const elsewhere = otherId !== contractorId;
+         add(r.jobNumber, {
+           kind: 'duplicate',
+diff --git a/lib/receipts.mjs b/lib/receipts.mjs
+index f1713fa..fcfd2d1 100644
+--- a/lib/receipts.mjs
++++ b/lib/receipts.mjs
+@@ -110,8 +110,14 @@ export function unevidencedFromForm({ jobNumber, contractorId, amountIncGst, add
+ export const DEFAULT_TOLERANCE_PERCENT = 3;
+ 
+ export function summarise(receipts = [], { declaredIncGst = null, tolerancePercent = DEFAULT_TOLERANCE_PERCENT } = {}) {
+-  let evidenced = 0, unevidenced = 0, disputed = 0;
++  let evidenced = 0, unevidenced = 0, disputed = 0, voided = 0;
+   for (const r of receipts) {
++    // A VOIDED receipt is a record that should never have existed. It stays on
++    // file with its photo — nothing is ever deleted here — but it counts
++    // towards nothing, which is the difference between voided and disputed: a
++    // dispute is a question about a real expense, a void says the entry itself
++    // was wrong.
++    if (r.voided) { voided += r.amountIncGst; continue; }
+     if (r.disputed) { disputed += r.amountIncGst; continue; }
+     if (r.unevidenced || !r.imageKey) { unevidenced += r.amountIncGst; continue; }
+     evidenced += r.amountIncGst;
+@@ -141,6 +147,7 @@ export function summarise(receipts = [], { declaredIncGst = null, tolerancePerce
+     evidencedIncGst: ev,
+     unevidencedIncGst: round2(unevidenced),
+     disputedIncGst: round2(disputed),
++    voidedIncGst: round2(voided),
+     // Trusting the evidence: the receipt sum is what is reimbursed.
+     reimbursableIncGst: ev,
+     variance,
+diff --git a/lib/store.mjs b/lib/store.mjs
+index 3203033..3c1f9f4 100644
+--- a/lib/store.mjs
++++ b/lib/store.mjs
+@@ -141,6 +141,61 @@ export async function receiptsForJob(contractorId, jobNumber) {
+   return queryPrefix(contractorId, `RCPT#${jobNumber}#`);
+ }
+ 
++/**
++ * Void a receipt, or bring it back. Never deletes — the row stays with its
++ * photo and its history, marked, so "this should not have existed" is itself
++ * on the record. Voided receipts are excluded from reimbursement and from the
++ * duplicate check, so a mis-keyed entry can be corrected rather than blocking
++ * the right one for ever.
++ */
++export async function setReceiptVoided(contractorId, jobNumber, receiptId, voided, by, reason) {
++  const { UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
++  const r = await (await doc()).send(new UpdateCommand({
++    TableName: TABLE,
++    Key: { pk: pk(contractorId), sk: `RCPT#${jobNumber}#${receiptId}` },
++    UpdateExpression: 'SET voided = :v, voidedBy = :b, voidedAt = :t, voidedReason = :r',
++    ExpressionAttributeValues: {
++      ':v': !!voided, ':b': by || null,
++      ':t': new Date().toISOString(), ':r': reason || null,
++    },
++    ConditionExpression: 'attribute_exists(sk)',
++    ReturnValues: 'ALL_NEW',
++  }));
++  return r.Attributes;
++}
++
++/**
++ * Move a receipt to a different job.
++ *
++ * The job number is part of the sort key, so this is a rewrite rather than an
++ * update: written to the new key FIRST, then removed from the old. That order
++ * is deliberate. A failure between the two leaves the receipt on both jobs —
++ * visible, and caught by the duplicate report — whereas delete-first would
++ * lose it along with its photo if the write failed.
++ *
++ * The id never changes, so the S3 photo key still resolves and the audit trail
++ * survives the move.
++ */
++export async function moveReceipt(contractorId, fromJobNumber, receiptId, toJobNumber, by) {
++  const { GetCommand, PutCommand, DeleteCommand } = await import('@aws-sdk/lib-dynamodb');
++  const d = await doc();
++  const from = `RCPT#${fromJobNumber}#${receiptId}`;
++  const got = await d.send(new GetCommand({ TableName: TABLE, Key: { pk: pk(contractorId), sk: from } }));
++  if (!got.Item) throw new Error('That receipt is no longer there');
++
++  const moved = {
++    ...got.Item,
++    sk: `RCPT#${toJobNumber}#${receiptId}`,
++    jobNumber: String(toJobNumber),
++    movedFrom: String(fromJobNumber),
++    movedBy: by || null,
++    movedAt: new Date().toISOString(),
++  };
++  await d.send(new PutCommand({ TableName: TABLE, Item: moved }));
++  await d.send(new DeleteCommand({ TableName: TABLE, Key: { pk: pk(contractorId), sk: from } }));
++  return moved;
++}
++
+ /** Mark a receipt disputed, or clear it. Never deletes — the record stays. */
+ export async function setReceiptDisputed(contractorId, jobNumber, receiptId, disputed, by) {
+   const { UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
+diff --git a/test/receipt-dupes.test.mjs b/test/receipt-dupes.test.mjs
+index f0e2b20..2bded23 100644
+--- a/test/receipt-dupes.test.mjs
++++ b/test/receipt-dupes.test.mjs
+@@ -48,6 +48,8 @@ test('the same docket on the same job is blocked', () => {
+   assert.equal(r.verdict, 'blocked');
+   assert.equal(r.reason, 'sameJob');
+   assert.match(r.message, /already on job #167595/);
++  // The mechanism is never named. Steven: "I wouldn't give them ideas."
++  assert.doesNotMatch(r.message, /claim it twice|twice would/i);
+ });
+ 
+ test('a receipt never blocks against itself — an edit is not a duplicate', () => {
+@@ -85,7 +87,7 @@ test('a fully claimed docket says so rather than quoting nothing left', () => {
+     existing: [first], incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 10 }),
+   });
+   assert.equal(r.reason, 'overDocket');
+-  assert.match(r.message, /fully claimed already/);
++  assert.match(r.message, /fully accounted for/);
+ });
+ 
+ test('cents of rounding do not block a legitimate split', () => {
+@@ -218,6 +220,12 @@ test('the owner report merges a docket seen with and without its ABN', () => {
+ 
+ const claimOf = (...jobs) => ({ id: 'CLM-1', lines: jobs.map((n) => ({ jobNumber: n })) });
+ 
++test('the refusal says WHEN it was filed — usually the whole answer', () => {
++  const first = docket({ addedAt: '2026-08-05T09:14:00Z' });
++  const r = checkDocket({ existing: [first], incoming: docket({ id: 'RCPT-2' }) });
++  assert.match(r.message, /filed 5 Aug/);
++});
++
+ test('a queried receipt flags the job inside the claim', () => {
+   const w = claimWarnings({
+     claim: claimOf('167595', '167610'),
+@@ -275,3 +283,45 @@ test('the worse reason wins when a job has both', () => {
+   assert.equal(w[0].severity, 'duplicate');
+   assert.equal(w[0].reasons.length, 2);
+ });
++
++/* ---------- credits, and records that should never have existed ---------- */
++
++test('a credit note is not a duplicate of the invoice it credits', () => {
++  // Suppliers print the original invoice number on the credit, deliberately —
++  // and validateReceipt demands one precisely when the amount is negative. If
++  // the sign were left out of the key, every legitimate credit would be
++  // refused as a duplicate of the purchase it reverses.
++  const invoice = docket({ amountIncGst: 130.17 });
++  const credit = docket({ id: 'CR', amountIncGst: -130.17 });
++  assert.equal(sameDocket(invoice, credit), false);
++  assert.equal(checkDocket({ existing: [invoice], incoming: credit }).verdict, 'ok');
++});
++
++test('but two credits for the same invoice still match', () => {
++  const a = docket({ id: 'CR1', amountIncGst: -130.17 });
++  const b = docket({ id: 'CR2', amountIncGst: -130.17 });
++  assert.equal(sameDocket(a, b), true);
++});
++
++test('a voided receipt stands in nobody\'s way', () => {
++  // Voiding corrects a record; it must not poison the docket for ever.
++  const wrong = docket({ id: 'A', voided: true });
++  const r = checkDocket({ existing: [wrong], incoming: docket({ id: 'B' }) });
++  assert.equal(r.verdict, 'ok');
++  assert.equal(r.reuse, false);
++});
++
++test('voided receipts drop out of the owner report and the claim warnings', () => {
++  const flags = docketFlags({
++    c1: [docket({ id: 'A' })],
++    c2: [docket({ id: 'B', jobNumber: '167610', voided: true })],
++  });
++  assert.equal(flags.crossContractor.length, 0, 'a voided collision is not a collision');
++
++  const w = claimWarnings({
++    claim: { lines: [{ jobNumber: '167595' }] },
++    contractorId: 'c1',
++    receiptsByContractor: { c1: [docket({ voided: true, disputed: true })] },
++  });
++  assert.deepEqual(w, []);
++});
+diff --git a/test/shell-script.test.mjs b/test/shell-script.test.mjs
+index 54addc9..028c50e 100644
+--- a/test/shell-script.test.mjs
++++ b/test/shell-script.test.mjs
+@@ -53,7 +53,7 @@ test('every handler the click listener dispatches to exists', () => {
+                     'claimActions', 'bulkMove', 'matchJob', 'matchClaim', 'searchSummary',
+                     'businessView', 'loadBusiness', 'bizTile', 'section', 'openSection', 'moneyChart', 'runBulk', 'bulkByStatus', 'bulkBar', 'summaryCard', 'unfinishedView',
+                     'docketsSection', 'suppliersSection', 'saveSuppliers', 'addSupplier', 'removeSupplier', 'readSuppliers',
+-                    'queryReceipt', 'raiseAdjustment']) {
++                    'queryReceipt', 'raiseAdjustment', 'moveReceiptTo', 'voidReceipt']) {
+     assert.ok(defined.has(fn), `${fn}() is referenced but never defined`);
+   }
+ });
+@@ -64,7 +64,7 @@ test('every data-* hook the markup emits has a listener', () => {
+   const COMPANIONS = new Set(['claimid', 'boxed', 'bulkmonth', 'bulkkey',
+     // the docket-flag actions: the hook is data-query / data-adjust, and these
+     // carry the rest of what each one needs
+-    'qjob', 'qid', 'ajob', 'aamt', 'awhy']);
++    'qjob', 'qid', 'ajob', 'aamt', 'awhy', 'mjob', 'vjob', 'von']);
+   const emitted = new Set([...code.matchAll(/data-([a-z]+)=/g)].map((m) => m[1]));
+   const handled = new Set([...code.matchAll(/closest\('\[data-([a-z]+)/g)].map((m) => m[1]));
+   const orphans = [...emitted].filter((a) => !handled.has(a) && !COMPANIONS.has(a));
+@@ -74,7 +74,7 @@ test('every data-* hook the markup emits has a listener', () => {
+ test('every companion attribute is actually read by its hook', () => {
+   // The other half of the pair above — an allowlist that stops being true is
+   // worse than no allowlist.
+-  for (const a of ['claimid', 'qjob', 'qid', 'ajob', 'aamt', 'awhy']) {
++  for (const a of ['claimid', 'qjob', 'qid', 'ajob', 'aamt', 'awhy', 'mjob', 'vjob', 'von']) {
+     assert.ok(code.includes(`getAttribute('data-${a}')`), `data-${a} is emitted but never read`);
+   }
+ });
