@@ -48,10 +48,64 @@ does not open the door: the docket total still catches it, because claiming
 $130.17 twice against a $130.17 docket is over-claiming however it is spelled.
 There is a test that says so.
 
-**Verified: 218/218** (200 existing, 18 new).
+### Also in this patch — the ABN, and acting on a flag
+
+**The ABN is the supplier's identity, not the name.** Steven's improvement on
+the first cut, and he is right: every valid Australian tax invoice carries the
+supplier's ABN, it has no spelling variance, and `lib/abr.mjs` already checks
+it against the real register with a mod-89 checksum. A name has to be
+normalised and hoped over; eleven checksummed digits do not.
+
+- A receipt now carries `abn`, and only if it passes the checksum — eleven
+  digits that fail it are a misread, and a misread identity is worse than none.
+- The docket key is ABN + invoice, falling back to supplier + invoice.
+  `docketKeys()` returns a SET and two receipts match if their sets intersect,
+  because the same paper can be captured once with the ABN legible and once
+  typed by hand without it — a single key would let those two slip past each
+  other, which is the exact hole this file exists to close.
+- **Our own ABN is dropped, never trusted.** An account invoice made out to Mr
+  Sparky prints ours too; without this, every account docket would file under
+  one identity and match each other for ever.
+- The reader is told explicitly to take the *supplier's* ABN, not the
+  customer's.
+- On the phone: a docket too poor to read is fixed by typing the **ABN**, and
+  the register supplies the name. Eleven checksummed digits cannot be fumbled
+  into a plausible-but-wrong supplier the way a name can.
+
+**Acting on a flag** — a flag with nothing to press beside it becomes wallpaper.
+
+- `POST /api/receipts/dispute` — query a receipt or clear it. Admin only, and
+  it never deletes: the row stays, marked, so the subbie sees the question
+  rather than money quietly going missing.
+- `POST /api/adjustments` — raise a correction. This is how a duplicate found
+  *after* a claim was paid is handled: never by editing the claim, whose
+  figures are frozen because the RCTI was built from them, but forward onto the
+  next claim.
+- Both wired to buttons on the docket-flags section.
+
+**A flag follows the money into the claim.** Steven: *"any job that has a
+docket that has a dispute in it, that claim needs to be flagged once it's
+submitted... the job inside that claim could be highlighted red, and when you
+click on the job it gives you the full description."*
+
+`claimWarnings()` derives that per claim — **derived, never frozen on**, so a
+query raised the day *after* submission still shows against it. The claim's
+figures stay frozen; a warning is not a figure. It is attached to the **admin
+route only** (`GET /api/claims?all=1`), because these warnings name other
+contractors and the person being flagged must never learn they were noticed.
+
+On the phone: a count on the Business hub, a red mark in the claim list, and on
+the claim itself the flagged job highlighted with the full explanation when
+tapped.
+
+**Verified: 228/228** (200 existing, 28 new).
 
     git apply <sm8-addons>/voice-assist/docs/portal-dockets.patch
     node scripts/deploy.mjs
+
+**The AI Lambda also needs a redeploy** for the ABN reading:
+
+    cd voice-assist/backend && node deploy.mjs
 
 ## How to deploy this repo — `portal-deploy-script.patch`
 

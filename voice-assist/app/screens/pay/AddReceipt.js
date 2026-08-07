@@ -13,10 +13,13 @@
 // Two rules the reading half obeys, both Steven's (2026-08-06):
 //   · It fills in, it does not file. Every value is editable and nothing is
 //     saved until a human presses the button.
-//   · The supplier is a plain field, and lands on the office's spelling when
-//     the reader recognises it. The wholesaler list stays in portal settings
-//     for quoting and dialling later; it is never rendered here, because a
-//     growing wall of chips is real estate this screen cannot spare.
+//   · The supplier is a plain field showing exactly what is printed. What
+//     IDENTIFIES the supplier is the ABN, not the name — every valid tax
+//     invoice carries one, it has no spelling variance, and the register can
+//     confirm it. Steven's call, and a better one than matching names.
+//     If a docket photographs too badly to read, the ABN is what gets typed
+//     and the register supplies the name: eleven checksummed digits cannot be
+//     fumbled into a plausible-but-wrong supplier the way a name can.
 //   · The job comes from where you opened the screen, not from the paper. If
 //     the docket quotes a different job number it is FLAGGED, with what
 //     ServiceM8 says that job is, and the choice is yours. If nothing anchors
@@ -33,7 +36,6 @@ import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import KeyboardToggle from "../../components/KeyboardToggle";
 import { C, R, S, T, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
-import { matchSupplier } from "../../lib/suppliers";
 import { postReceiptCopy, readReceipt } from "../../lib/api";
 
 // The phone is in the same timezone as the job. Building the date from the
@@ -72,27 +74,46 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   const touched = useRef({});
   const mark = (k) => { touched.current[k] = true; };
 
-  // The wholesaler list the office keeps in portal settings. It is NOT shown —
-  // Steven, on seeing the chips: "that's expensive real estate we don't need,
-  // and as the list grows it's going to become too big." So it does one silent
-  // job: landing a read name on the office's spelling. That is not cosmetic
-  // any more — the duplicate-docket check keys on supplier + invoice number,
-  // and it is only as reliable as the spelling is consistent.
-  const [suppliers, setSuppliers] = useState([]);
-  const [readAs, setReadAs] = useState("");   // what the paper said, when we tidied it
+  // The supplier's ABN — the docket's real identity.
+  const [abn, setAbn] = useState("");
+  const [abnName, setAbnName] = useState("");     // what the register calls them
+  const [abnBusy, setAbnBusy] = useState(false);
+  const [abnError, setAbnError] = useState("");
   // What the PAPER came to, kept apart from what is being claimed against this
   // job. They are the same number until someone splits one docket across two
   // jobs, and that difference is what stops the split claiming it twice. Only
   // ever set from what was READ: a hand-typed figure is the claim, not the
   // docket, and guessing they are the same would cap an honest split.
   const [docketTotal, setDocketTotal] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    portal.me()
-      .then((r) => { if (alive) setSuppliers(r?.suppliers || []); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
+
+  // Ask the register who holds this ABN. Confirms the reader got it right, and
+  // on a docket too poor to read it is the whole point: type eleven digits,
+  // get the business back. Never blocks a save — the register can be slow or
+  // down, and a receipt still has to be filable at a wholesaler's counter.
+  async function lookupAbn(value) {
+    const digits = String(value || "").replace(/[^0-9]/g, "");
+    setAbnName("");
+    setAbnError("");
+    if (digits.length !== 11) return;
+    setAbnBusy(true);
+    try {
+      const r = await portal.abnLookup(digits);
+      const d = r?.details || {};
+      const name = d.name || d.legalName || d.tradingName || "";
+      if (name) {
+        setAbnName(name);
+        // A docket that photographed badly has no readable supplier; the
+        // register supplies one so nobody has to spell it.
+        if (!supplier.trim()) { mark("supplier"); setSupplier(name); }
+      } else {
+        setAbnError("The register didn't recognise that ABN.");
+      }
+    } catch (err) {
+      setAbnError(err?.message || "Couldn't reach the register.");
+    } finally {
+      setAbnBusy(false);
+    }
+  }
 
   // Whichever field was last in use — the up arrow returns you to it.
   const lastField = useRef(null);
@@ -130,6 +151,7 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
     setRead(null);
     setDocket(null);
     setDocketTotal(null);
+    setAbnError("");
     setAckDocket(false);
     try {
       const imageB64 = await FileSystem.readAsStringAsync(shot.uri, { encoding: "base64" });
@@ -139,16 +161,10 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
       setDocketTotal(got.amountIncGst ?? null);
       setDocket(r.docket || null);
 
-      // The paper prints the legal name; the list holds the one the trade
-      // uses. Landing on the list's spelling is the whole reason the list
-      // exists — spend only groups if the same wholesaler is written the same
-      // way — and what the docket actually said is shown underneath, so the
-      // tidy-up is never silent.
-      if (got.supplier && !touched.current.supplier) {
-        const hit = matchSupplier(suppliers, got.supplier);
-        setSupplier(hit ? hit.name : got.supplier);
-        setReadAs(hit && hit.name !== got.supplier ? got.supplier : "");
-      }
+      // Exactly as printed. No tidying, no matching against a list — the ABN
+      // below is what says who this is.
+      if (got.supplier && !touched.current.supplier) setSupplier(got.supplier);
+      if (got.abn && !touched.current.abn) { setAbn(got.abn); setAbnName(""); setAbnError(""); }
       if (got.amountIncGst && !touched.current.amount) setAmount(String(got.amountIncGst.toFixed(2)));
       if (got.date && !touched.current.date) setDate(got.date);
       if (got.invoiceNumber && !touched.current.invoiceNumber) setInvoiceNumber(got.invoiceNumber);
@@ -202,6 +218,7 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         amountIncGst: Number(amount),
         supplier: supplier.trim(),
         invoiceNumber: invoiceNumber.trim() || undefined,
+        abn: abn.replace(/[^0-9]/g, "") || undefined,
         docketTotalIncGst: docketTotal ?? undefined,
         date,
         note: noteOut || undefined,
@@ -348,7 +365,32 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
             onChangeText={(v) => { mark("supplier"); setSupplier(v); setReadAs(""); }}
             placeholder="Middy's, Lawrence & Hanson…"
           />
-          {readAs ? <Text style={s.note}>The docket says “{readAs}”.</Text> : null}
+        </View>
+
+        <View>
+          <SectionLabel>Supplier ABN{read?.abn ? " · read" : ""}</SectionLabel>
+          <Field
+            onUse={(r) => (lastField.current = r.current)}
+            value={abn}
+            onChangeText={(v) => { mark("abn"); setAbn(v); setAbnName(""); setAbnError(""); }}
+            onEndEditing={() => lookupAbn(abn)}
+            placeholder="11 digits, from the top of the docket"
+            keyboardType="number-pad"
+            mono
+          />
+          {abnBusy ? (
+            <Text style={s.note}>Checking the register…</Text>
+          ) : abnName ? (
+            <Text style={s.note}>Register says: {abnName}</Text>
+          ) : abnError ? (
+            <Text style={s.warn}>{abnError}</Text>
+          ) : (
+            <Text style={s.note}>
+              What actually identifies the supplier — the same docket can never be claimed twice
+              under two spellings. If the photo is too poor to read, type this and the register
+              fills in the name.
+            </Text>
+          )}
         </View>
 
         <View>

@@ -832,6 +832,7 @@ const RECEIPT_TOOL = {
       amountIncGst: { type: "number", description: "The TOTAL amount payable including GST — the final total, not a subtotal, not the GST line." },
       date: { type: "string", description: "Date of the receipt as YYYY-MM-DD. Australian dockets are DAY first: 04/08/2026 is 4 August 2026." },
       invoiceNumber: { type: "string", description: "Invoice, docket or tax invoice number as printed." },
+      abn: { type: "string", description: "The SUPPLIER's ABN — 11 digits, usually near their trading name at the top. NOT the customer's ABN: an account invoice made out to the buyer prints theirs too, and taking the wrong one is worse than taking none." },
       jobNumber: { type: "string", description: "A job/order/site reference ONLY if the docket explicitly labels one (Job, Order, PO, Ref, Site). Never infer it from an invoice or account number." },
       jobNumberLabel: { type: "string", description: "The exact printed words the job number was taken from, e.g. 'Order No: 4821'." },
       unreadable: { type: "boolean", description: "True if the photo is too blurred, cropped or dark to read the totals." },
@@ -864,6 +865,8 @@ export async function readReceipt({ imageB64, contentType = "image/jpeg" }) {
               "Record only what you can actually READ on the paper.",
               "Omit any field you cannot read — an omitted field is correct, a guessed one is a false record someone signs off on.",
               "The amount is the final total INCLUDING GST.",
+              "The ABN is the SUPPLIER's — the business issuing the invoice, printed with their name and logo.",
+              "If the docket is an account invoice addressed to a customer, that customer's ABN also appears; do not report that one.",
             ].join(" "),
           },
         ],
@@ -884,6 +887,9 @@ export async function readReceipt({ imageB64, contentType = "image/jpeg" }) {
     amountIncGst: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : null,
     date,
     invoiceNumber: String(out.invoiceNumber || "").trim().slice(0, 40) || null,
+    // Eleven digits or nothing. The portal re-checks the mod-89 checksum and
+    // drops anything that fails it, so a misread never becomes an identity.
+    abn: (String(out.abn || "").replace(/[^0-9]/g, "").match(/^\d{11}$/) || [null])[0],
     jobNumber: (String(out.jobNumber || "").match(/\d{3,7}/) || [null])[0],
     jobNumberLabel: String(out.jobNumberLabel || "").trim().slice(0, 60) || null,
     unreadable: out.unreadable === true,

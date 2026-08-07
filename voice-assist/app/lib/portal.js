@@ -167,5 +167,17 @@ export const receiptUploadUrl = ({ jobNumber, contentType, extension, name }) =>
 /** Record the receipt once its image is in the bucket. */
 export const saveReceipt = (receipt) => post("/api/receipts", receipt);
 
+/**
+ * Look an ABN up on the Australian Business Register, through the portal —
+ * the register GUID stays server-side. Eleven digits returns the business that
+ * holds it; anything else is a name search.
+ *
+ * This is what makes typing an ABN better than typing a supplier name on a
+ * docket that photographed badly: eleven digits with a checksum cannot be
+ * fumbled into a plausible-but-wrong supplier, and the register supplies the
+ * name so nobody has to spell it.
+ */
+export const abnLookup = (q) => get(`/api/abr${qs({ q })}`);
+
 /** A short-lived URL to look at a receipt; the bucket blocks public access. */
 export const receiptViewUrl = (key) => get(`/api/receipts/view${qs({ key })}`);

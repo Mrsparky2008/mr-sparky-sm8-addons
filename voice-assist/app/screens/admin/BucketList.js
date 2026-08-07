@@ -26,7 +26,10 @@ export default function BucketList({ title, claims = [], act, onOpenClaim, onBac
                 style={[s.row, i === ordered.length - 1 && { borderBottomWidth: 0 }]}
               >
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.rowTitle}>{c.contractorName || c.claimId}</Text>
+                  <Text style={s.rowTitle}>
+                    {(c.warnings || []).length ? <Text style={s.flagDot}>● </Text> : null}
+                    {c.contractorName || c.claimId}
+                  </Text>
                   <Text style={s.rowSub} numberOfLines={1}>
                     {c.claimId} · {(c.submittedAt || "").slice(0, 10)}
                     {c.status === "rejected" && c.rejectedReason ? ` — ${c.rejectedReason}` : ""}
@@ -45,6 +48,10 @@ export default function BucketList({ title, claims = [], act, onOpenClaim, onBac
 }
 
 const s = StyleSheet.create({
+  // A docket on this claim is queried, or is on somebody else's job too. Only
+  // a mark — the reason lives on the claim itself, where there is room to say
+  // it properly.
+  flagDot: { color: C.warnChipInk },
   body: { padding: S.screen, paddingTop: 0, gap: S.gap },
   row: {
     flexDirection: "row", alignItems: "center", gap: 9, minHeight: S.touch,

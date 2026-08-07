@@ -11,7 +11,7 @@
 //   - invoicing a contractor whose company details cannot carry an RCTI is a 409
 //   - only certain moves are allowed at all, so only those are offered
 import { useCallback, useEffect, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card, Cta, Empty, Header, Row, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
@@ -39,6 +39,15 @@ export default function ApproveClaim({ claim: summary, onBack, onDone }) {
   const [busy, setBusy] = useState(true);
   const [reason, setReason] = useState("");
   const [rejecting, setRejecting] = useState(false);
+  // Which flagged job is open. Steven: "the job could be highlighted red, and
+  // when you click on the job it gives you the full description."
+  const [openJob, setOpenJob] = useState(null);
+
+  // Warnings ride on the INBOX row, not on the statement the claim is loaded
+  // from. That is deliberate and must stay that way: they can name another
+  // contractor, and the statement route is what the claimant sees of their own
+  // claims. Admin-only data travels only on the admin-only call.
+  const warnings = summary?.warnings || [];
 
   const name = summary?.contractorName;
 
@@ -124,6 +133,45 @@ export default function ApproveClaim({ claim: summary, onBack, onDone }) {
             Waiting {claim.review.daysWaiting} day{claim.review.daysWaiting === 1 ? "" : "s"}.
             {claim.review.dueDate ? ` Office deadline ${claim.review.dueDate}.` : ""}
           </Text>
+        ) : null}
+
+        {warnings.length ? (
+          <View>
+            <SectionLabel>Dockets on this claim need a look</SectionLabel>
+            <View style={{ gap: 8 }}>
+              {warnings.map((w) => {
+                const open = openJob === w.jobNumber;
+                const hard = w.severity === "duplicate";
+                return (
+                  <Pressable key={w.jobNumber} onPress={() => setOpenJob(open ? null : w.jobNumber)}>
+                    <View style={[s.flag, hard ? s.flagHard : s.flagSoft]}>
+                      <View style={s.flagTop}>
+                        <Text style={[s.flagJob, mono]}>#{w.jobNumber}</Text>
+                        <Text style={s.flagWhat}>
+                          {hard ? "same docket used elsewhere" : "receipt queried"}
+                        </Text>
+                        <Text style={s.flagChev}>{open ? "▾" : "▸"}</Text>
+                      </View>
+                      {open ? (
+                        <View style={{ marginTop: 8, gap: 7 }}>
+                          {w.reasons.map((r, i) => (
+                            <View key={i}>
+                              <Text style={s.flagTitle}>{r.title}</Text>
+                              <Text style={T.small}>{r.detail}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={s.note}>
+              Nobody has been told. Approving pays it as it stands — query the receipt or raise an
+              adjustment from the portal if it needs correcting.
+            </Text>
+          </View>
         ) : null}
 
         <View>
@@ -236,6 +284,14 @@ export default function ApproveClaim({ claim: summary, onBack, onDone }) {
 }
 
 const s = StyleSheet.create({
+  flag: { borderRadius: R.card, borderWidth: 1, padding: 12 },
+  flagHard: { borderColor: C.warnChipInk, backgroundColor: C.warnChipBg },
+  flagSoft: { borderColor: C.line, backgroundColor: C.panel },
+  flagTop: { flexDirection: "row", alignItems: "center", gap: 9 },
+  flagJob: { color: C.ink, fontSize: 15, fontWeight: "800" },
+  flagWhat: { flex: 1, color: C.muted, fontSize: 12.5, fontWeight: "600" },
+  flagChev: { color: C.muted, fontSize: 13 },
+  flagTitle: { color: C.ink, fontSize: 13.5, fontWeight: "700", marginBottom: 2 },
   body: { padding: S.screen, paddingTop: 0, gap: S.gap },
   hero: { color: C.ink, fontSize: 30, fontWeight: "800", letterSpacing: -0.6, marginBottom: 3 },
   note: { color: C.muted, fontSize: 11.5, lineHeight: 16 },

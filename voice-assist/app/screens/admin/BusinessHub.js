@@ -57,6 +57,10 @@ export default function BusinessHub({ onOpen, onAccount, onCountChange }) {
     ? [...toApprove].sort((a, b) => String(a.submittedAt || "").localeCompare(String(b.submittedAt || "")))[0]
     : null;
   const activeCrew = people.filter((p) => p.canClaim && p.status !== "Left");
+  // A docket queried, or the same one used on another job or by another
+  // person. Worked out by the portal and served with the claim — the phone
+  // only counts what it was handed.
+  const flagged = claims.filter((c) => (c.warnings || []).length && c.status !== "paid" && c.status !== "rejected");
 
   return (
     <View style={{ flex: 1 }}>
@@ -79,6 +83,15 @@ export default function BusinessHub({ onOpen, onAccount, onCountChange }) {
             <Text style={T.small}>Nothing waiting on a decision. All caught up.</Text>
           )}
         </Card>
+
+        {flagged.length ? (
+          <View style={[s.attn, s.attnBad]}>
+            <View style={[s.attnDot, { backgroundColor: C.warnChipInk }]} />
+            <Text style={[s.attnText, { color: C.warnChipInk }]}>
+              {flagged.length} claim{flagged.length === 1 ? "" : "s"} with a docket flag — open to see why
+            </Text>
+          </View>
+        ) : null}
 
         {toPay.length ? (
           <View style={s.attn}>
@@ -147,6 +160,7 @@ function HubTile({ icon, label, sub, badge, onPress }) {
 const s = StyleSheet.create({
   body: { padding: S.screen, paddingTop: 0, gap: S.gap },
   hero: { color: C.ink, fontSize: 32, fontWeight: "800", letterSpacing: -0.6, marginVertical: 3 },
+  attnBad: { borderWidth: 1, borderColor: C.warnChipInk },
   attn: {
     flexDirection: "row", alignItems: "center", gap: 8,
     backgroundColor: C.warnChipBg, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 8,

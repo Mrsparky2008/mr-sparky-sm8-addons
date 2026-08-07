@@ -1,8 +1,14 @@
 diff --git a/api/index.mjs b/api/index.mjs
-index 2b6b0a4..88299a6 100644
+index 2b6b0a4..8225242 100644
 --- a/api/index.mjs
 +++ b/api/index.mjs
-@@ -24,6 +24,7 @@ import { ladderFor, assessLadder } from '../lib/ladder.mjs';
+@@ -19,11 +19,13 @@ import { loadSettings, gstDivisor, contractorFor, contractorById, canIssueRcti }
+ import { shellHtml } from './shell.mjs';
+ import { buildClaim, claimedJobNumbers, claimableNow, canTransition, paymentState, reviewState, CLAIM_STATUS } from '../lib/claims.mjs';
+ import { pendingFor } from '../lib/adjustments.mjs';
++import * as adjustments from '../lib/adjustments.mjs';
+ import { policyFor } from '../lib/retention.mjs';
+ import { ladderFor, assessLadder } from '../lib/ladder.mjs';
  import * as conv from '../lib/conversion.mjs';
  import * as settingsStore from '../lib/settings-store.mjs';
  import { suppliersFor } from '../lib/suppliers.mjs';
@@ -10,11 +16,47 @@ index 2b6b0a4..88299a6 100644
  import { runReview } from '../lib/review.mjs';
  import * as analytics from '../lib/analytics.mjs';
  import * as receipts from '../lib/receipts.mjs';
-@@ -667,12 +668,31 @@ export async function handler(event) {
+@@ -496,6 +498,29 @@ export async function handler(event) {
+         }));
+         let all = perPerson.flat();
+         if (q.status) all = all.filter((c) => c.status === q.status);
++
++        // A docket that is queried, or that turns up on somebody else's job,
++        // has to follow the money into the claim it ends up in — otherwise the
++        // flag sits in a report while the claim is approved beside it.
++        //
++        // DERIVED here rather than frozen onto the claim when it was
++        // submitted, so a query raised the day AFTER submission still shows.
++        // The claim's FIGURES stay frozen; a warning is not a figure.
++        //
++        // Admin route only. These warnings name other contractors, and the
++        // person being flagged must never learn they were noticed.
++        const receiptsByContractor = {};
++        await Promise.all(people.map(async (p) => {
++          receiptsByContractor[p.id] = await store.listReceipts(p.id).catch(() => []);
++        }));
++        const nameOf = (id) => (settings.people.find((x) => x.id === id) || {}).name || id;
++        all = all.map((c) => ({
++          ...c,
++          warnings: dupes.claimWarnings({
++            claim: c, contractorId: c.contractorId, receiptsByContractor, nameOf,
++          }),
++        }));
++
+         // Longest wait first: the point of the list is what needs attention.
+         all.sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));
+         return json(200, { claims: all });
+@@ -667,16 +692,87 @@ export async function handler(event) {
            amountIncGst: body.amountIncGst, supplier: body.supplier,
            invoiceNumber: body.invoiceNumber, date: body.date,
            imageKey: body.imageKey,
 +          docketTotalIncGst: body.docketTotalIncGst,
++          // An account invoice made out to Mr Sparky carries OUR ABN as well as
++          // the supplier's, and a reader can pick the wrong one. Ours can never
++          // be the supplier's, so it is dropped rather than trusted — otherwise
++          // every account docket would file under one identity and match each
++          // other for ever.
++          abn: abr.abnDigits(body.abn) === abr.abnDigits(settings.business?.abn) ? null : body.abn,
            source: who.isAdmin && body.name ? receipts.SOURCE.OFFICE : receipts.SOURCE.PORTAL,
            addedBy: who.person.id, addedAt: new Date().toISOString(), note: body.note,
          });
@@ -43,7 +85,57 @@ index 2b6b0a4..88299a6 100644
      }
  
      // A short-lived URL to upload the photo straight to a private bucket, so
-@@ -755,6 +775,7 @@ export async function handler(event) {
+     // the image never passes through this function.
++    // Query a receipt, or clear it. Admin only, and it NEVER deletes: the row
++    // stays exactly where it is, marked, so the subbie can see what was asked
++    // about rather than watching money vanish with no explanation.
++    if (path === '/api/receipts/dispute' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      if (!body.contractorId || !body.jobNumber || !body.receiptId) {
++        return json(400, { error: 'contractorId, jobNumber and receiptId are all required' });
++      }
++      try {
++        const updated = await store.setReceiptDisputed(
++          body.contractorId, String(body.jobNumber), body.receiptId,
++          body.disputed !== false, who.person.name,
++        );
++        return json(200, { receipt: updated });
++      } catch (e) {
++        return json(404, { error: `That receipt is no longer there: ${e.message}` });
++      }
++    }
++
++    // Raise an adjustment against a contractor — how a duplicate found AFTER a
++    // claim was paid is corrected. Never by editing the claim: its figures are
++    // frozen because the RCTI was built from them, so corrections go FORWARD
++    // onto the next claim, which is what the adjustment ledger is for.
++    if (path === '/api/adjustments' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      const contractor = contractorById(settings, body.contractorId);
++      if (!contractor) return json(404, { error: 'No such contractor' });
++      let adjustment;
++      try {
++        adjustment = adjustments.raiseAdjustment({
++          contractorId: contractor.id,
++          type: body.type || adjustments.ADJUSTMENT.BACK_CHARGE,
++          amountIncGst: body.amountIncGst,
++          reason: body.reason,
++          jobNumber: body.jobNumber || null,
++          originalClaimId: body.originalClaimId || null,
++          raisedBy: who.person.name,
++          raisedAt: new Date().toISOString(),
++        });
++      } catch (e) { return json(400, { error: e.message }); }
++      await store.saveAdjustment(adjustment);
++      return json(201, { adjustment });
++    }
++
+     if (path === '/api/receipts/upload-url' && method === 'POST') {
+       const body = safeJson(event.body, event.isBase64Encoded);
+       const target = who.isAdmin && body.name ? body.name : who.person.name;
+@@ -755,6 +851,7 @@ export async function handler(event) {
          .map((p) => contractorById(settings, p.id));
  
        const statements = {}, claimsByOwner = {}, conversions = {}, unfinished = {};
@@ -51,7 +143,7 @@ index 2b6b0a4..88299a6 100644
        const claimedNumbers = new Set();
        await Promise.all(contractors.map(async (c) => {
          const cPerson = settings.people.find((p) => p.id === c.id) || {};
-@@ -765,6 +786,7 @@ export async function handler(event) {
+@@ -765,6 +862,7 @@ export async function handler(event) {
                && loaded.claimedOn[job.jobNumber]?.telegramId === cPerson.telegramId));
          statements[c.id] = buildStatement({ contractor: c, jobs: own, allJobs: loaded.jobs, gstDivisor: GST,
            duplicatePolicy: settings.formPolicy?.duplicates || 'last' });
@@ -59,7 +151,7 @@ index 2b6b0a4..88299a6 100644
          const claims = await store.listClaims(c.id).catch(() => []);
          claimsByOwner[c.id] = claims.map((x) => ({
            ...x,
-@@ -788,6 +810,12 @@ export async function handler(event) {
+@@ -788,6 +886,12 @@ export async function handler(event) {
  
        const today = new Date().toISOString().slice(0, 10);
        return json(200, {
@@ -73,10 +165,21 @@ index 2b6b0a4..88299a6 100644
          people: business.people({
            contractors: contractors.map((c) => {
 diff --git a/api/shell.mjs b/api/shell.mjs
-index 6028d0b..e806127 100644
+index 6028d0b..7bae839 100644
 --- a/api/shell.mjs
 +++ b/api/shell.mjs
-@@ -1971,6 +1971,47 @@ function unfinishedView(){
+@@ -1240,6 +1240,10 @@ document.addEventListener('click',function(e){
+   if(sl2){saveSubbieLadder(sl2.getAttribute('data-savesubladder'));return}
+   const rl2=e.target.closest&&e.target.closest('[data-resetladder]');
+   if(rl2){resetLadder(rl2.getAttribute('data-resetladder'));return}
++  const qr=e.target.closest&&e.target.closest('[data-query]');
++  if(qr){queryReceipt(qr.getAttribute('data-query'),qr.getAttribute('data-qjob'),qr.getAttribute('data-qid'));return}
++  const aj=e.target.closest&&e.target.closest('[data-adjust]');
++  if(aj){raiseAdjustment(aj.getAttribute('data-adjust'),aj.getAttribute('data-ajob'),aj.getAttribute('data-aamt'),aj.getAttribute('data-awhy'));return}
+   const rv=e.target.closest&&e.target.closest('[data-review]');
+   if(rv){runReview(rv.getAttribute('data-review')==='apply');return}
+   const sa=e.target.closest&&e.target.closest('[data-selall]');
+@@ -1971,6 +1975,94 @@ function unfinishedView(){
    return h;
  }
  
@@ -86,6 +189,36 @@ index 6028d0b..e806127 100644
 +   a PATTERN is visible. The same docket under two different contractors
 +   cannot be explained by a split, so it leads, and neither of them is ever
 +   told it was noticed. */
++async function queryReceipt(contractorId,jobNumber,receiptId){
++  if(BUSY)return; BUSY=true;
++  try{
++    const r=await fetch('/api/receipts/dispute',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:contractorId,jobNumber:jobNumber,receiptId:receiptId,disputed:true})});
++    const out=await r.json();
++    if(!r.ok)throw new Error(out.error||'Could not query that receipt');
++    BIZ=null; await loadBusiness();
++  }catch(e){ alert(e.message) }
++  finally{ BUSY=false }
++}
++
++async function raiseAdjustment(contractorId,jobNumber,amount,why){
++  const amt=prompt('Adjustment amount (inc GST) to recover from '+contractorId+':',amount);
++  if(amt===null)return;
++  if(BUSY)return; BUSY=true;
++  try{
++    const r=await fetch('/api/adjustments',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:contractorId,jobNumber:jobNumber,
++        amountIncGst:-Math.abs(Number(amt)),reason:why})});
++    const out=await r.json();
++    if(!r.ok)throw new Error(out.error||'Could not raise that adjustment');
++    alert('Raised. It comes off their next claim.');
++    BIZ=null; await loadBusiness();
++  }catch(e){ alert(e.message) }
++  finally{ BUSY=false }
++}
++
 +function docketsSection(){
 +  const D=BIZ.dockets||{};
 +  const cross=D.crossContractor||[], reused=D.reused||[];
@@ -96,13 +229,30 @@ index 6028d0b..e806127 100644
 +   +'<div class="sub">'+esc(String(e.addedAt||e.date||'').slice(0,10))+'</div></span>'
 +   +'<span class="val">'+money(e.amountIncGst)+'</span></div>';
 +
++  /* A flag with nothing to press beside it becomes wallpaper. Query holds the
++     receipt where it is, marked, so the subbie sees the question rather than
++     money quietly going missing. Adjust corrects FORWARD onto the next claim,
++     which is the only honest move once an RCTI has been raised off the old
++     figures. */
++  const acts=(f)=>'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
++   +f.entries.map(function(e){
++     return '<button class="mini" data-query="'+esc(e.contractorId)+'" data-qjob="'+esc(e.jobNumber)
++      +'" data-qid="'+esc(e.id)+'">Query '+esc(e.contractor)+' #'+esc(e.jobNumber)+'</button>';
++   }).join('')
++   +'<button class="mini" data-adjust="'+esc(f.entries[f.entries.length-1].contractorId)+'" '
++   +'data-ajob="'+esc(f.entries[f.entries.length-1].jobNumber)+'" '
++   +'data-aamt="'+String(f.overClaimed&&f.docketTotalIncGst?(f.claimedIncGst-f.docketTotalIncGst).toFixed(2):f.entries[f.entries.length-1].amountIncGst)+'" '
++   +'data-awhy="'+esc((f.supplier||'Docket')+(f.invoiceNumber?' invoice '+f.invoiceNumber:'')+' claimed more than once')+'">'
++   +'Raise adjustment</button></div>';
++
 +  const block=(f)=>'<div class="card" style="margin-bottom:10px">'
 +   +'<div class="row"><span class="grow"><span class="ttl">'+esc(f.supplier||'unnamed supplier')+'</span> '
 +   +(f.invoiceNumber?'<span class="pill grey">'+esc(f.invoiceNumber)+'</span> ':'')
 +   +(f.overClaimed?'<span class="pill bad">over-claimed</span>':'<span class="pill info">adds up</span>')
 +   +'<div class="sub">'+money(f.claimedIncGst)+' claimed'
 +   +(f.docketTotalIncGst?' against a docket of '+money(f.docketTotalIncGst):' &middot; no docket total recorded')
-+   +'</div></span></div>'+f.entries.map(entry).join('')+'</div>';
++   +(f.abn?' &middot; ABN '+esc(f.abn):'')
++   +'</div></span></div>'+f.entries.map(entry).join('')+acts(f)+'</div>';
 +
 +  let h='';
 +  if(cross.length){
@@ -124,7 +274,7 @@ index 6028d0b..e806127 100644
  function businessView(){
    if(!BIZ)return '<div class="card" style="padding:26px;text-align:center;color:var(--muted)">Loading the business&hellip;</div>';
    const P=BIZ.pipeline||{}, M=BIZ.money||{}, F=BIZ.funnel||{}, E=BIZ.exceptions||{};
-@@ -2002,6 +2043,8 @@ function businessView(){
+@@ -2002,6 +2094,8 @@ function businessView(){
     +bizTile('Paid to date',money(v(P.paid)),n(P.paid)+' claims settled','good')
     +'</div>';
  
@@ -135,10 +285,10 @@ index 6028d0b..e806127 100644
      const bits=[];
 diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
 new file mode 100644
-index 0000000..d05f2e1
+index 0000000..b1bb2c7
 --- /dev/null
 +++ b/lib/receipt-dupes.mjs
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,320 @@
 +/**
 + * One docket, one claim.
 + *
@@ -177,6 +327,7 @@ index 0000000..d05f2e1
 + */
 +import { round2 } from './commission.mjs';
 +import { normalise } from './suppliers.mjs';
++import { abnDigits, validAbn } from './abr.mjs';
 +
 +export const DEFAULT_DUPLICATE_POLICY = {
 +  // Same docket, same job. Off only if a job ever legitimately needs the same
@@ -194,19 +345,54 @@ index 0000000..d05f2e1
 +}
 +
 +/**
-+ * What makes this piece of paper this piece of paper. Null when there is not
-+ * enough to identify it — a Form 001 expense with no supplier can't be matched
-+ * against anything, and guessing would be worse than not checking.
++ * What makes this piece of paper this piece of paper.
++ *
++ * Steven's improvement on the first cut: use the ABN. Every valid Australian
++ * tax invoice carries the supplier's, it has no spelling variance at all, and
++ * lib/abr.mjs can check it against the real register. A name has to be
++ * normalised and hoped over; eleven digits with a mod-89 checksum do not.
++ *
++ * Returns a SET of keys, not one, and two receipts are the same docket if
++ * their sets intersect. That matters because the same piece of paper can be
++ * captured two ways — read off a photo with the ABN legible, then typed in by
++ * hand without it — and a single key would let those two slip past each other,
++ * which is precisely the hole this whole file exists to close.
++ */
++export function docketKeys(r) {
++  const keys = [];
++  const invoice = String(r?.invoiceNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
++  const abn = validAbn(r?.abn) ? abnDigits(r.abn) : null;
++  const supplier = normalise(r?.supplier);
++  const amount = Number(r?.amountIncGst);
++  const date = r?.date ? String(r.date).slice(0, 10) : null;
++
++  if (invoice) {
++    if (abn) keys.push(`A:${abn}|I:${invoice}`);
++    if (supplier) keys.push(`S:${supplier}|I:${invoice}`);
++  } else if (date && Number.isFinite(amount)) {
++    // No invoice number on the paper: the amount and the day stand in for it.
++    const tail = `D:${date}|A:${round2(amount).toFixed(2)}`;
++    if (abn) keys.push(`A:${abn}|${tail}`);
++    if (supplier) keys.push(`S:${supplier}|${tail}`);
++  }
++  return keys;
++}
++
++/**
++ * The one key a docket is FILED under, for grouping and display. The ABN form
++ * wins when there is one, so the same supplier never splits into two rows of
++ * the owner's report over a spelling.
 + */
 +export function docketKey(r) {
-+  const supplier = normalise(r?.supplier);
-+  if (!supplier) return null;
-+  const invoice = String(r?.invoiceNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-+  if (invoice) return `S:${supplier}|I:${invoice}`;
-+  // No invoice number on the paper: the amount and the day stand in for it.
-+  const amount = Number(r?.amountIncGst);
-+  if (!r?.date || !Number.isFinite(amount)) return null;
-+  return `S:${supplier}|D:${String(r.date).slice(0, 10)}|A:${round2(amount).toFixed(2)}`;
++  return docketKeys(r)[0] || null;
++}
++
++/** Same piece of paper? True when anything the two are known by agrees. */
++export function sameDocket(a, b) {
++  const ka = docketKeys(a);
++  if (!ka.length) return false;
++  const kb = new Set(docketKeys(b));
++  return ka.some((k) => kb.has(k));
 +}
 +
 +/**
@@ -239,7 +425,7 @@ index 0000000..d05f2e1
 +  // Not identifiable, so not checkable. It saves, as it always did.
 +  if (!key) return { verdict: 'ok', key: null, matches: [], reuse: false };
 +
-+  const matches = existing.filter((r) => r && r.id !== incoming.id && docketKey(r) === key);
++  const matches = existing.filter((r) => r && r.id !== incoming.id && sameDocket(r, incoming));
 +  if (!matches.length) return { verdict: 'ok', key, matches: [], reuse: false };
 +
 +  const seen = matches.map((r) => ({
@@ -304,15 +490,23 @@ index 0000000..d05f2e1
 + * `receiptsByContractor` is { contractorId: [receipt, ...] }.
 + */
 +export function docketFlags(receiptsByContractor = {}, nameOf = (id) => id) {
-+  const byKey = new Map();
++  // Grouped through EVERY key a receipt is known by, so a docket captured once
++  // with its ABN and once without still lands in one group rather than two
++  // half-groups that each look innocent.
++  const groupOf = new Map();   // key -> group id
++  const groups = new Map();    // group id -> rows
 +  for (const [contractorId, rows] of Object.entries(receiptsByContractor)) {
 +    for (const r of rows || []) {
-+      const key = docketKey(r);
-+      if (!key) continue;
-+      if (!byKey.has(key)) byKey.set(key, []);
-+      byKey.get(key).push({ ...r, contractorId });
++      const keys = docketKeys(r);
++      if (!keys.length) continue;
++      const found = keys.map((k) => groupOf.get(k)).find(Boolean);
++      const id = found || keys[0];
++      for (const k of keys) groupOf.set(k, id);
++      if (!groups.has(id)) groups.set(id, []);
++      groups.get(id).push({ ...r, contractorId });
 +    }
 +  }
++  const byKey = groups;
 +
 +  const crossContractor = [], reused = [];
 +  for (const [key, rows] of byKey) {
@@ -320,6 +514,7 @@ index 0000000..d05f2e1
 +    const entry = {
 +      key,
 +      supplier: rows[0].supplier || null,
++      abn: rows.map((r) => r.abn).find(Boolean) || null,
 +      invoiceNumber: rows[0].invoiceNumber || null,
 +      docketTotalIncGst: docketTotalOf(rows),
 +      claimedIncGst: round2(rows.reduce((s, r) => s + (Number(r.amountIncGst) || 0), 0)),
@@ -339,19 +534,102 @@ index 0000000..d05f2e1
 +  const worst = (a, b) => (Number(b.overClaimed) - Number(a.overClaimed)) || (b.claimedIncGst - a.claimedIncGst);
 +  return { crossContractor: crossContractor.sort(worst), reused: reused.sort(worst) };
 +}
++
++/**
++ * Why a submitted claim needs a second look.
++ *
++ * Steven, once the flags existed: "any job that has a docket that has a
++ * dispute in it, that claim needs to be flagged once it's submitted... the job
++ * inside that claim could be highlighted red, and when you click on the job it
++ * gives you the full description."
++ *
++ * DERIVED, never frozen onto the claim. The claim freezes its FIGURES — the
++ * rate, the invoice, the materials — because those are what an RCTI is built
++ * from and they must never move underneath a tax document. A warning is not a
++ * figure. Deriving it means a dispute raised the day AFTER a claim was
++ * submitted still shows up against it, which is exactly when most of them get
++ * raised.
++ *
++ * OWNER-ONLY, and the caller must keep it that way: `otherContractors` names
++ * people the claimant must never learn were involved. Attach this to the admin
++ * routes and nowhere else.
++ */
++export function claimWarnings({ claim, contractorId, receiptsByContractor = {}, nameOf = (id) => id }) {
++  const jobNumbers = new Set((claim?.lines || []).map((l) => String(l.jobNumber)));
++  if (!jobNumbers.size) return [];
++
++  const mine = receiptsByContractor[contractorId] || [];
++  const byJob = new Map();
++  const add = (jobNumber, w) => {
++    const key = String(jobNumber);
++    if (!byJob.has(key)) byJob.set(key, { jobNumber: key, severity: 'note', reasons: [] });
++    const entry = byJob.get(key);
++    entry.reasons.push(w);
++    // Worst wins: a docket under two names outranks a query, which outranks a
++    // split that adds up.
++    const rank = { note: 0, queried: 1, duplicate: 2 };
++    if (rank[w.kind] > rank[entry.severity]) entry.severity = w.kind;
++  };
++
++  for (const r of mine) {
++    if (!jobNumbers.has(String(r.jobNumber))) continue;
++
++    if (r.disputed) {
++      add(r.jobNumber, {
++        kind: 'queried',
++        title: 'Receipt queried by the office',
++        detail: `${r.supplier || 'A receipt'}`
++          + `${r.invoiceNumber ? ` invoice ${r.invoiceNumber}` : ''}`
++          + ` for $${round2(Number(r.amountIncGst) || 0).toFixed(2)} is marked queried and has not been cleared.`,
++      });
++    }
++
++    // The same docket anywhere else — their own other jobs, or somebody else's.
++    for (const [otherId, rows] of Object.entries(receiptsByContractor)) {
++      for (const other of rows || []) {
++        if (other.id === r.id || !sameDocket(other, r)) continue;
++        const elsewhere = otherId !== contractorId;
++        add(r.jobNumber, {
++          kind: 'duplicate',
++          title: elsewhere ? 'This docket is also claimed by someone else' : 'This docket is on another job too',
++          detail: `${r.supplier || 'Docket'}`
++            + `${r.invoiceNumber ? ` invoice ${r.invoiceNumber}` : ''}`
++            + `${r.abn ? ` (ABN ${r.abn})` : ''}`
++            + ` also appears on job #${other.jobNumber}`
++            + `${elsewhere ? ` under ${nameOf(otherId)}` : ''}`
++            + ` for $${round2(Number(other.amountIncGst) || 0).toFixed(2)}.`,
++          otherContractor: elsewhere ? nameOf(otherId) : null,
++          otherJobNumber: String(other.jobNumber),
++        });
++      }
++    }
++  }
++
++  return [...byJob.values()].sort((a, b) =>
++    (b.severity === 'duplicate') - (a.severity === 'duplicate')
++    || String(a.jobNumber).localeCompare(String(b.jobNumber)));
++}
 diff --git a/lib/receipts.mjs b/lib/receipts.mjs
-index ea9c198..6bf3831 100644
+index ea9c198..f1713fa 100644
 --- a/lib/receipts.mjs
 +++ b/lib/receipts.mjs
-@@ -39,6 +39,7 @@ export function validateReceipt({ amountIncGst, supplier, invoiceNumber, date, i
+@@ -14,6 +14,7 @@
+  * exactly why and fix it rather than wondering where their money went.
+  */
+ import { round2 } from './commission.mjs';
++import { abnDigits, validAbn } from './abr.mjs';
+ 
+ export const SOURCE = {
+   FORM_001: 'form001',    // captured at completion, on the job
+@@ -39,6 +40,7 @@ export function validateReceipt({ amountIncGst, supplier, invoiceNumber, date, i
  export function newReceipt({
    id, jobNumber, contractorId, amountIncGst, supplier, invoiceNumber = null,
    date, imageKey = null, source = SOURCE.PORTAL, addedBy = null, addedAt = null, note = null,
-+  docketTotalIncGst = null,
++  docketTotalIncGst = null, abn = null,
  }) {
    const errors = validateReceipt({ amountIncGst, supplier, invoiceNumber, date, imageKey, source });
    if (errors.length) throw new Error(errors.join('; '));
-@@ -47,6 +48,16 @@ export function newReceipt({
+@@ -47,7 +49,22 @@ export function newReceipt({
      jobNumber: String(jobNumber),
      contractorId,
      amountIncGst: round2(Number(amountIncGst)),
@@ -366,8 +644,14 @@ index ea9c198..6bf3831 100644
 +      ? round2(Math.max(Number(docketTotalIncGst), Number(amountIncGst)))
 +      : null,
      supplier, invoiceNumber, date,
++    // The supplier's ABN, and only if it passes the ABR's mod-89 checksum.
++    // Eleven digits that fail it are a misread, and a misread identity is
++    // worse than none: it would file this docket under a supplier who does
++    // not exist and quietly stop matching the real one.
++    abn: validAbn(abn) ? abnDigits(abn) : null,
      imageKey,
      source,
+     addedBy, addedAt: addedAt || null,
 diff --git a/settings/portal-settings.json b/settings/portal-settings.json
 index 4350b22..468588e 100644
 --- a/settings/portal-settings.json
@@ -389,10 +673,10 @@ index 4350b22..468588e 100644
    "suppliers": [
 diff --git a/test/receipt-dupes.test.mjs b/test/receipt-dupes.test.mjs
 new file mode 100644
-index 0000000..9d0a8b7
+index 0000000..f0e2b20
 --- /dev/null
 +++ b/test/receipt-dupes.test.mjs
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,277 @@
 +/**
 + * One docket, one claim.
 + *
@@ -401,7 +685,8 @@ index 0000000..9d0a8b7
 +import { test } from 'node:test';
 +import assert from 'node:assert/strict';
 +import {
-+  DEFAULT_DUPLICATE_POLICY, policyFor, docketKey, docketTotalOf, checkDocket, docketFlags,
++  DEFAULT_DUPLICATE_POLICY, policyFor, docketKey, docketKeys, sameDocket, docketTotalOf,
++  checkDocket, docketFlags, claimWarnings,
 +} from '../lib/receipt-dupes.mjs';
 +
 +const docket = (over = {}) => ({
@@ -566,6 +851,109 @@ index 0000000..9d0a8b7
 +  assert.equal(flags.reused[0].invoiceNumber, 'IN2');
 +  assert.equal(flags.reused[0].overClaimed, true);
 +});
++
++/* ---------- the ABN as identity ---------- */
++
++// A real ABN that passes the mod-89 checksum (Australia Post's, public record).
++const ABN = '28 864 970 579';
++
++test('the ABN identifies the supplier, whatever the name on the paper says', () => {
++  const a = { ...docket({ abn: ABN, supplier: 'AGM ELECTRICAL SUPPLIES PTY LTD' }) };
++  const b = { ...docket({ id: 'B', abn: ABN, supplier: 'A.G.M. Electrical' }) };
++  assert.equal(sameDocket(a, b), true);
++});
++
++test('a docket captured with the ABN and again without still matches', () => {
++  // The hole a single key would leave: read off a photo once, typed by hand
++  // the second time. The supplier key is what bridges them.
++  const read = docket({ abn: ABN });
++  const typed = docket({ id: 'B', abn: null });
++  assert.equal(sameDocket(read, typed), true);
++});
++
++test('a mistyped ABN is ignored rather than trusted', () => {
++  // Fails the checksum, so it is not used as an identity at all.
++  const bad = docket({ abn: '12 345 678 901' });
++  assert.equal(docketKeys(bad).some((k) => k.startsWith('A:')), false);
++  assert.ok(docketKeys(bad).some((k) => k.startsWith('S:')));
++});
++
++test('different suppliers sharing an invoice number are not the same docket', () => {
++  const a = docket({ abn: ABN, invoiceNumber: '1001' });
++  const b = docket({ id: 'B', abn: '53 004 085 616', supplier: 'Other Mob', invoiceNumber: '1001' });
++  assert.equal(sameDocket(a, b), false);
++});
++
++test('the owner report merges a docket seen with and without its ABN', () => {
++  const flags = docketFlags({
++    c1: [docket({ id: 'A', abn: ABN })],
++    c2: [docket({ id: 'B', abn: null, jobNumber: '167610' })],
++  }, (id) => id);
++  assert.equal(flags.crossContractor.length, 1);
++  assert.equal(flags.crossContractor[0].entries.length, 2);
++});
++
++/* ---------- warnings that follow a docket into a claim ---------- */
++
++const claimOf = (...jobs) => ({ id: 'CLM-1', lines: jobs.map((n) => ({ jobNumber: n })) });
++
++test('a queried receipt flags the job inside the claim', () => {
++  const w = claimWarnings({
++    claim: claimOf('167595', '167610'),
++    contractorId: 'c1',
++    receiptsByContractor: { c1: [docket({ disputed: true })] },
++  });
++  assert.equal(w.length, 1);
++  assert.equal(w[0].jobNumber, '167595');
++  assert.equal(w[0].severity, 'queried');
++  assert.match(w[0].reasons[0].detail, /marked queried/);
++});
++
++test('a docket claimed by someone else names them — to the owner only', () => {
++  const w = claimWarnings({
++    claim: claimOf('167595'),
++    contractorId: 'c1',
++    receiptsByContractor: {
++      c1: [docket({ id: 'A' })],
++      c2: [docket({ id: 'B', jobNumber: '900', contractorId: 'c2' })],
++    },
++    nameOf: (id) => ({ c1: 'Charlie', c2: 'Sam' })[id],
++  });
++  assert.equal(w[0].severity, 'duplicate');
++  assert.equal(w[0].reasons[0].otherContractor, 'Sam');
++  assert.match(w[0].reasons[0].detail, /also appears on job #900 under Sam/);
++});
++
++test('a clean claim carries no warnings at all', () => {
++  const w = claimWarnings({
++    claim: claimOf('167595'),
++    contractorId: 'c1',
++    receiptsByContractor: { c1: [docket()] },
++  });
++  assert.deepEqual(w, []);
++});
++
++test('a receipt on a job outside the claim does not flag it', () => {
++  const w = claimWarnings({
++    claim: claimOf('167595'),
++    contractorId: 'c1',
++    receiptsByContractor: { c1: [docket({ jobNumber: '999', disputed: true })] },
++  });
++  assert.deepEqual(w, []);
++});
++
++test('the worse reason wins when a job has both', () => {
++  const w = claimWarnings({
++    claim: claimOf('167595'),
++    contractorId: 'c1',
++    receiptsByContractor: {
++      c1: [docket({ id: 'A', disputed: true })],
++      c2: [docket({ id: 'B', jobNumber: '900' })],
++    },
++  });
++  assert.equal(w[0].severity, 'duplicate');
++  assert.equal(w[0].reasons.length, 2);
++});
 diff --git a/test/settings-coverage.test.mjs b/test/settings-coverage.test.mjs
 index 78a1367..071fe21 100644
 --- a/test/settings-coverage.test.mjs
@@ -595,16 +983,38 @@ index 78a1367..071fe21 100644
    // Steven has an owner login and a subcontractor login. A name lookup would
    // always return the first; by id each gets their own rules.
 diff --git a/test/shell-script.test.mjs b/test/shell-script.test.mjs
-index 99a7a29..896278e 100644
+index 99a7a29..54addc9 100644
 --- a/test/shell-script.test.mjs
 +++ b/test/shell-script.test.mjs
-@@ -51,7 +51,8 @@ test('every handler the click listener dispatches to exists', () => {
+@@ -51,7 +51,9 @@ test('every handler the click listener dispatches to exists', () => {
                      'submitClaim', 'flagDecl', 'openJob', 'showMaterials', 'viewSubbie',
                      'claimRow', 'groupedList', 'groupYM', 'jobSections',
                      'claimActions', 'bulkMove', 'matchJob', 'matchClaim', 'searchSummary',
 -                    'businessView', 'loadBusiness', 'bizTile', 'section', 'openSection', 'moneyChart', 'runBulk', 'bulkByStatus', 'bulkBar', 'summaryCard', 'unfinishedView']) {
 +                    'businessView', 'loadBusiness', 'bizTile', 'section', 'openSection', 'moneyChart', 'runBulk', 'bulkByStatus', 'bulkBar', 'summaryCard', 'unfinishedView',
-+                    'docketsSection', 'suppliersSection', 'saveSuppliers', 'addSupplier', 'removeSupplier', 'readSuppliers']) {
++                    'docketsSection', 'suppliersSection', 'saveSuppliers', 'addSupplier', 'removeSupplier', 'readSuppliers',
++                    'queryReceipt', 'raiseAdjustment']) {
      assert.ok(defined.has(fn), `${fn}() is referenced but never defined`);
+   }
+ });
+@@ -59,7 +61,10 @@ test('every handler the click listener dispatches to exists', () => {
+ test('every data-* hook the markup emits has a listener', () => {
+   // Attributes that carry a value for another hook to read, rather than being
+   // a hook themselves.
+-  const COMPANIONS = new Set(['claimid', 'boxed', 'bulkmonth', 'bulkkey']);
++  const COMPANIONS = new Set(['claimid', 'boxed', 'bulkmonth', 'bulkkey',
++    // the docket-flag actions: the hook is data-query / data-adjust, and these
++    // carry the rest of what each one needs
++    'qjob', 'qid', 'ajob', 'aamt', 'awhy']);
+   const emitted = new Set([...code.matchAll(/data-([a-z]+)=/g)].map((m) => m[1]));
+   const handled = new Set([...code.matchAll(/closest\('\[data-([a-z]+)/g)].map((m) => m[1]));
+   const orphans = [...emitted].filter((a) => !handled.has(a) && !COMPANIONS.has(a));
+@@ -69,7 +74,7 @@ test('every data-* hook the markup emits has a listener', () => {
+ test('every companion attribute is actually read by its hook', () => {
+   // The other half of the pair above — an allowlist that stops being true is
+   // worse than no allowlist.
+-  for (const a of ['claimid']) {
++  for (const a of ['claimid', 'qjob', 'qid', 'ajob', 'aamt', 'awhy']) {
+     assert.ok(code.includes(`getAttribute('data-${a}')`), `data-${a} is emitted but never read`);
    }
  });

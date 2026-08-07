@@ -433,6 +433,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
           amountIncGst: read.amountIncGst,
           date: read.date,
           invoiceNumber: read.invoiceNumber,
+          abn: read.abn,
         },
         docket,
         unreadable: read.unreadable,
