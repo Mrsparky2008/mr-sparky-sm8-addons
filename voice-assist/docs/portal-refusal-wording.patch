@@ -1,0 +1,95 @@
+diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
+index b1bb2c7..5200587 100644
+--- a/lib/receipt-dupes.mjs
++++ b/lib/receipt-dupes.mjs
+@@ -92,6 +92,21 @@ export function docketKeys(r) {
+  * wins when there is one, so the same supplier never splits into two rows of
+  * the owner's report over a spelling.
+  */
++/**
++ * ", filed 5 Aug from this app" — the fact that ends most of these on the spot.
++ * Empty when nothing was recorded, rather than inventing a date.
++ */
++function filedWhen(row) {
++  const stamp = String(row?.addedAt || '').slice(0, 10);
++  if (!stamp) return '';
++  const d = new Date(`${stamp}T12:00:00`);
++  if (Number.isNaN(d.getTime())) return '';
++  const when = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
++  const how = row.source === 'office' ? ' by the office'
++    : row.source === 'form001' ? ' on the Form 001' : '';
++  return `, filed ${when}${how}`;
++}
++
+ export function docketKey(r) {
+   return docketKeys(r)[0] || null;
+ }
+@@ -138,17 +153,15 @@ export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICAT
+   if (!matches.length) return { verdict: 'ok', key, matches: [], reuse: false };
+ 
+   const seen = matches.map((r) => ({
+-    id: r.id, jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0), date: r.date,
++    id: r.id, jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0),
++    date: r.date, addedAt: r.addedAt || null, source: r.source || null,
+   }));
+ 
+   const sameJob = seen.filter((r) => r.jobNumber === String(incoming.jobNumber));
+   if (sameJob.length && policy.blockSameJob) {
+     return {
+       verdict: 'blocked', reason: 'sameJob', key, matches: seen, reuse: true,
+-      message: `This docket is already on job #${incoming.jobNumber}`
+-        + `${matches[0].supplier ? ` — ${matches[0].supplier}` : ''}`
+-        + `${incoming.invoiceNumber ? ` invoice ${incoming.invoiceNumber}` : ''}`
+-        + `, $${sameJob[0].amountIncGst.toFixed(2)}. Filing it twice would claim it twice.`,
++      message: `This docket is already on job #${incoming.jobNumber}${filedWhen(sameJob[0])}.`,
+     };
+   }
+ 
+@@ -163,10 +176,10 @@ export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICAT
+         verdict: 'blocked', reason: 'overDocket', key, matches: seen, reuse: true,
+         docketTotalIncGst: total, remainingIncGst: remaining,
+         message: remaining <= 0
+-          ? `This docket is fully claimed already — $${total.toFixed(2)} across `
++          ? `This docket is fully accounted for — $${total.toFixed(2)} across `
+             + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`
+           : `This docket has $${remaining.toFixed(2)} left on it. `
+-            + `$${claimed.toFixed(2)} of $${total.toFixed(2)} is already claimed on `
++            + `$${claimed.toFixed(2)} of $${total.toFixed(2)} is already recorded against `
+             + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`,
+       };
+     }
+diff --git a/test/receipt-dupes.test.mjs b/test/receipt-dupes.test.mjs
+index f0e2b20..709ae60 100644
+--- a/test/receipt-dupes.test.mjs
++++ b/test/receipt-dupes.test.mjs
+@@ -48,6 +48,8 @@ test('the same docket on the same job is blocked', () => {
+   assert.equal(r.verdict, 'blocked');
+   assert.equal(r.reason, 'sameJob');
+   assert.match(r.message, /already on job #167595/);
++  // The mechanism is never named. Steven: "I wouldn't give them ideas."
++  assert.doesNotMatch(r.message, /claim it twice|twice would/i);
+ });
+ 
+ test('a receipt never blocks against itself — an edit is not a duplicate', () => {
+@@ -85,7 +87,7 @@ test('a fully claimed docket says so rather than quoting nothing left', () => {
+     existing: [first], incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 10 }),
+   });
+   assert.equal(r.reason, 'overDocket');
+-  assert.match(r.message, /fully claimed already/);
++  assert.match(r.message, /fully accounted for/);
+ });
+ 
+ test('cents of rounding do not block a legitimate split', () => {
+@@ -218,6 +220,12 @@ test('the owner report merges a docket seen with and without its ABN', () => {
+ 
+ const claimOf = (...jobs) => ({ id: 'CLM-1', lines: jobs.map((n) => ({ jobNumber: n })) });
+ 
++test('the refusal says WHEN it was filed — usually the whole answer', () => {
++  const first = docket({ addedAt: '2026-08-05T09:14:00Z' });
++  const r = checkDocket({ existing: [first], incoming: docket({ id: 'RCPT-2' }) });
++  assert.match(r.message, /filed 5 Aug/);
++});
++
+ test('a queried receipt flags the job inside the claim', () => {
+   const w = claimWarnings({
+     claim: claimOf('167595', '167610'),
