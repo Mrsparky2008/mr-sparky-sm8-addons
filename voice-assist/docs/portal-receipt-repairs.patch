@@ -1,8 +1,8 @@
 diff --git a/api/index.mjs b/api/index.mjs
-index 8225242..4424ca5 100644
+index 8225242..1d57730 100644
 --- a/api/index.mjs
 +++ b/api/index.mjs
-@@ -773,6 +773,66 @@ export async function handler(event) {
+@@ -773,6 +773,81 @@ export async function handler(event) {
        return json(201, { adjustment });
      }
  
@@ -17,6 +17,21 @@ index 8225242..4424ca5 100644
 +    // record; it keeps its photo, its amount, who lodged it and when, and it
 +    // gains a note of where it came from. Nothing is duplicated because
 +    // nothing was ever duplicated — it was only ever in the wrong place.
++    //
++    // NOBODY IS NOTIFIED, and that is deliberate. Steven's reasoning, which is
++    // better than the notification I proposed: both jobs belong to the same
++    // technician, so it is the same expense reimbursed to the same person
++    // whichever job carries it. The payout is identical, so telling them a
++    // record moved is noise.
++    //
++    // What the move actually buys is reconciliation. The Form 001 check is PER
++    // JOB, so a misfiled docket leaves one job over-evidenced and the other
++    // short — both past tolerance, both raising needsAdmin, both then chased by
++    // somebody. That is an office-time cost, not a pay one.
++    //
++    // A receipt crossing between DIFFERENT technicians is not this. That is a
++    // fraud question, it is never mentioned to either of them, and it surfaces
++    // only on the owner's dashboard — see docketFlags().
 +    if (path === '/api/receipts/move' && method === 'POST') {
 +      if (!who.isAdmin) return json(403, { error: 'Admins only' });
 +      const body = safeJson(event.body, event.isBase64Encoded);
