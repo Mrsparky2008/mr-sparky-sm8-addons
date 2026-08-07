@@ -1,0 +1,610 @@
+diff --git a/api/index.mjs b/api/index.mjs
+index 2b6b0a4..88299a6 100644
+--- a/api/index.mjs
++++ b/api/index.mjs
+@@ -24,6 +24,7 @@ import { ladderFor, assessLadder } from '../lib/ladder.mjs';
+ import * as conv from '../lib/conversion.mjs';
+ import * as settingsStore from '../lib/settings-store.mjs';
+ import { suppliersFor } from '../lib/suppliers.mjs';
++import * as dupes from '../lib/receipt-dupes.mjs';
+ import { runReview } from '../lib/review.mjs';
+ import * as analytics from '../lib/analytics.mjs';
+ import * as receipts from '../lib/receipts.mjs';
+@@ -667,12 +668,31 @@ export async function handler(event) {
+           amountIncGst: body.amountIncGst, supplier: body.supplier,
+           invoiceNumber: body.invoiceNumber, date: body.date,
+           imageKey: body.imageKey,
++          docketTotalIncGst: body.docketTotalIncGst,
+           source: who.isAdmin && body.name ? receipts.SOURCE.OFFICE : receipts.SOURCE.PORTAL,
+           addedBy: who.person.id, addedAt: new Date().toISOString(), note: body.note,
+         });
+       } catch (e) { return json(400, { error: e.message }); }
++
++      // One docket, one claim.
++      //
++      // Only this contractor's own receipts are consulted. The same docket
++      // turning up under a DIFFERENT contractor is a far more serious signal,
++      // and it is deliberately not checked here: refusing the second person's
++      // save would tell them they had been noticed. It goes to the owner's
++      // dashboard instead — see docketFlags() in lib/receipt-dupes.mjs.
++      const mine = await store.listReceipts(contractor.id).catch(() => []);
++      const check = dupes.checkDocket({
++        existing: mine, incoming: receipt, policy: dupes.policyFor(settings),
++      });
++      if (check.verdict === 'blocked') {
++        return json(409, { error: check.message, duplicate: { reason: check.reason, ...check } });
++      }
++
+       await store.saveReceipt(receipt);
+-      return json(201, { receipt });
++      // A reuse that is allowed still says so, so the person filing it knows
++      // the split registered and the office is not being surprised later.
++      return json(201, { receipt, reuse: check.reuse ? check : null });
+     }
+ 
+     // A short-lived URL to upload the photo straight to a private bucket, so
+@@ -755,6 +775,7 @@ export async function handler(event) {
+         .map((p) => contractorById(settings, p.id));
+ 
+       const statements = {}, claimsByOwner = {}, conversions = {}, unfinished = {};
++      const receiptsByContractor = {};
+       const claimedNumbers = new Set();
+       await Promise.all(contractors.map(async (c) => {
+         const cPerson = settings.people.find((p) => p.id === c.id) || {};
+@@ -765,6 +786,7 @@ export async function handler(event) {
+               && loaded.claimedOn[job.jobNumber]?.telegramId === cPerson.telegramId));
+         statements[c.id] = buildStatement({ contractor: c, jobs: own, allJobs: loaded.jobs, gstDivisor: GST,
+           duplicatePolicy: settings.formPolicy?.duplicates || 'last' });
++        receiptsByContractor[c.id] = await store.listReceipts(c.id).catch(() => []);
+         const claims = await store.listClaims(c.id).catch(() => []);
+         claimsByOwner[c.id] = claims.map((x) => ({
+           ...x,
+@@ -788,6 +810,12 @@ export async function handler(event) {
+ 
+       const today = new Date().toISOString().slice(0, 10);
+       return json(200, {
++        // The same docket, seen more than once. This is the ONLY place a
++        // cross-contractor collision surfaces: the subbies' own screens never
++        // mention it, because a system that announces what it has noticed is
++        // no use against two people who are coordinating.
++        dockets: dupes.docketFlags(receiptsByContractor,
++          (id) => (settings.people.find((p) => p.id === id) || {}).name || id),
+         pipeline: business.pipeline({ pipelineJobs: loaded.pipelineJobs, statements, claimsByOwner, claimedNumbers }),
+         people: business.people({
+           contractors: contractors.map((c) => {
+diff --git a/api/shell.mjs b/api/shell.mjs
+index 6028d0b..e806127 100644
+--- a/api/shell.mjs
++++ b/api/shell.mjs
+@@ -1971,6 +1971,47 @@ function unfinishedView(){
+   return h;
+ }
+ 
++/* ── The same docket, more than once ───────────────────────────────────
++   Owner-only, and deliberately so. A subbie reusing their own docket across
++   two jobs is usually a split purchase and needs no action — it is listed so
++   a PATTERN is visible. The same docket under two different contractors
++   cannot be explained by a split, so it leads, and neither of them is ever
++   told it was noticed. */
++function docketsSection(){
++  const D=BIZ.dockets||{};
++  const cross=D.crossContractor||[], reused=D.reused||[];
++  if(!cross.length&&!reused.length)return '';
++
++  const entry=(e)=>'<div class="calcrow"><span class="lbl">'+esc(e.contractor)
++   +' &middot; job #'+esc(e.jobNumber)
++   +'<div class="sub">'+esc(String(e.addedAt||e.date||'').slice(0,10))+'</div></span>'
++   +'<span class="val">'+money(e.amountIncGst)+'</span></div>';
++
++  const block=(f)=>'<div class="card" style="margin-bottom:10px">'
++   +'<div class="row"><span class="grow"><span class="ttl">'+esc(f.supplier||'unnamed supplier')+'</span> '
++   +(f.invoiceNumber?'<span class="pill grey">'+esc(f.invoiceNumber)+'</span> ':'')
++   +(f.overClaimed?'<span class="pill bad">over-claimed</span>':'<span class="pill info">adds up</span>')
++   +'<div class="sub">'+money(f.claimedIncGst)+' claimed'
++   +(f.docketTotalIncGst?' against a docket of '+money(f.docketTotalIncGst):' &middot; no docket total recorded')
++   +'</div></span></div>'+f.entries.map(entry).join('')+'</div>';
++
++  let h='';
++  if(cross.length){
++    h+='<h3 style="font-size:14px;margin:22px 0 8px">One docket, two contractors</h3>'
++     +'<div class="warnbox"><b>'+cross.length+' docket'+(cross.length===1?'':'s')+' claimed by more than one person.</b> '
++     +'A split purchase cannot explain this. Neither of them has been told &mdash; the app took the second '
++     +'receipt exactly as normal, so nothing has tipped anyone off.</div>'
++     +cross.map(block).join('');
++  }
++  if(reused.length){
++    h+='<h3 style="font-size:14px;margin:22px 0 8px">One docket, more than one job</h3>'
++     +'<div class="sub" style="margin-bottom:8px">Normal when materials for two jobs were bought in one run. '
++     +'Listed so a habit is visible; the amounts are capped at the docket total when one was read off the photo.</div>'
++     +reused.map(block).join('');
++  }
++  return h;
++}
++
+ function businessView(){
+   if(!BIZ)return '<div class="card" style="padding:26px;text-align:center;color:var(--muted)">Loading the business&hellip;</div>';
+   const P=BIZ.pipeline||{}, M=BIZ.money||{}, F=BIZ.funnel||{}, E=BIZ.exceptions||{};
+@@ -2002,6 +2043,8 @@ function businessView(){
+    +bizTile('Paid to date',money(v(P.paid)),n(P.paid)+' claims settled','good')
+    +'</div>';
+ 
++  h+=docketsSection();
++
+   h+='<h3 style="font-size:14px;margin:22px 0 8px">Subcontractors <span class="sub">tap to open their page</span></h3><div class="card">';
+   for(const r of (BIZ.people||[])){
+     const bits=[];
+diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
+new file mode 100644
+index 0000000..d05f2e1
+--- /dev/null
++++ b/lib/receipt-dupes.mjs
+@@ -0,0 +1,200 @@
++/**
++ * One docket, one claim.
++ *
++ * The gap Steven found (2026-08-06): nothing stopped the same piece of paper
++ * being filed on job A, then job B, then job A again — and every one of them
++ * would be reimbursed. The receipt loop was built to make evidence easy to
++ * capture; this is the half that makes it hard to capture twice.
++ *
++ * A docket's identity is the supplier plus the invoice number. That is why the
++ * supplier list exists at all: AGM, AGM ELECTRICAL SUPPLIES PTY LTD and "agm
++ * electrical" have to be one supplier or this check leaks. Where a docket
++ * carries no invoice number, supplier + date + amount stands in — weaker, but
++ * better than nothing.
++ *
++ * The image itself is deliberately NOT part of the identity. Photograph the
++ * same docket twice and every byte differs, so hashing would only catch
++ * re-uploading the identical file, which is the one case nobody does.
++ *
++ * Three cases, three different answers, all Steven's calls:
++ *
++ *   Same docket, same job        BLOCKED. Almost always an honest double-tap,
++ *                                so it says so plainly.
++ *   Same docket, different job,  ALLOWED — buying for two jobs on one run is
++ *   same contractor              normal — but the amounts across those jobs
++ *                                may not exceed what the paper says, and every
++ *                                reuse stays visible to the office.
++ *   Same docket, two contractors SILENT. The second person's save behaves
++ *                                completely normally. The owner is told; they
++ *                                are not. If two people are coordinating, the
++ *                                worst thing the system can do is announce
++ *                                that it noticed.
++ *
++ * That last rule is why the cross-contractor check lives in the owner's
++ * report and NOT in the save path: it cannot refuse anything, so it cannot
++ * leak anything. Silence by construction, not by remembering to be quiet.
++ */
++import { round2 } from './commission.mjs';
++import { normalise } from './suppliers.mjs';
++
++export const DEFAULT_DUPLICATE_POLICY = {
++  // Same docket, same job. Off only if a job ever legitimately needs the same
++  // invoice twice, which nobody has been able to describe.
++  blockSameJob: true,
++  // Splitting one docket across jobs may not claim more than the docket says.
++  capToDocketTotal: true,
++  // Cents of slack for rounding when a docket is split. Not a fudge factor for
++  // a genuinely different amount.
++  centsTolerance: 0.02,
++};
++
++export function policyFor(settings) {
++  return { ...DEFAULT_DUPLICATE_POLICY, ...(settings?.receipts?.duplicates || {}) };
++}
++
++/**
++ * What makes this piece of paper this piece of paper. Null when there is not
++ * enough to identify it — a Form 001 expense with no supplier can't be matched
++ * against anything, and guessing would be worse than not checking.
++ */
++export function docketKey(r) {
++  const supplier = normalise(r?.supplier);
++  if (!supplier) return null;
++  const invoice = String(r?.invoiceNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
++  if (invoice) return `S:${supplier}|I:${invoice}`;
++  // No invoice number on the paper: the amount and the day stand in for it.
++  const amount = Number(r?.amountIncGst);
++  if (!r?.date || !Number.isFinite(amount)) return null;
++  return `S:${supplier}|D:${String(r.date).slice(0, 10)}|A:${round2(amount).toFixed(2)}`;
++}
++
++/**
++ * What the paper says the whole docket came to, as opposed to what is being
++ * claimed against this one job. Normally the same number; on a split they
++ * differ, and the difference is the entire point.
++ *
++ * Takes the largest recorded across every entry for the docket. That is not
++ * generosity: the reader can under-read a total, and the human who corrects it
++ * upward on the first entry is the better authority than the OCR was.
++ */
++export function docketTotalOf(rows) {
++  let best = 0;
++  for (const r of rows) {
++    const t = Number(r?.docketTotalIncGst);
++    if (Number.isFinite(t) && t > best) best = t;
++  }
++  return best > 0 ? round2(best) : null;
++}
++
++/**
++ * May this receipt be filed?
++ *
++ * `existing` is THIS contractor's own receipts — every job, not just the one
++ * being filed against. Cross-contractor collisions are not consulted here on
++ * purpose; see the note at the top.
++ */
++export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICATE_POLICY }) {
++  const key = docketKey(incoming);
++  // Not identifiable, so not checkable. It saves, as it always did.
++  if (!key) return { verdict: 'ok', key: null, matches: [], reuse: false };
++
++  const matches = existing.filter((r) => r && r.id !== incoming.id && docketKey(r) === key);
++  if (!matches.length) return { verdict: 'ok', key, matches: [], reuse: false };
++
++  const seen = matches.map((r) => ({
++    id: r.id, jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0), date: r.date,
++  }));
++
++  const sameJob = seen.filter((r) => r.jobNumber === String(incoming.jobNumber));
++  if (sameJob.length && policy.blockSameJob) {
++    return {
++      verdict: 'blocked', reason: 'sameJob', key, matches: seen, reuse: true,
++      message: `This docket is already on job #${incoming.jobNumber}`
++        + `${matches[0].supplier ? ` — ${matches[0].supplier}` : ''}`
++        + `${incoming.invoiceNumber ? ` invoice ${incoming.invoiceNumber}` : ''}`
++        + `, $${sameJob[0].amountIncGst.toFixed(2)}. Filing it twice would claim it twice.`,
++    };
++  }
++
++  const total = docketTotalOf([...matches, incoming]);
++  const claimed = round2(seen.reduce((sum, r) => sum + r.amountIncGst, 0));
++  const amount = round2(Number(incoming.amountIncGst) || 0);
++
++  if (policy.capToDocketTotal && total) {
++    const remaining = round2(total - claimed);
++    if (amount > remaining + policy.centsTolerance) {
++      return {
++        verdict: 'blocked', reason: 'overDocket', key, matches: seen, reuse: true,
++        docketTotalIncGst: total, remainingIncGst: remaining,
++        message: remaining <= 0
++          ? `This docket is fully claimed already — $${total.toFixed(2)} across `
++            + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`
++          : `This docket has $${remaining.toFixed(2)} left on it. `
++            + `$${claimed.toFixed(2)} of $${total.toFixed(2)} is already claimed on `
++            + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`,
++      };
++    }
++    return {
++      verdict: 'ok', key, matches: seen, reuse: true,
++      docketTotalIncGst: total, remainingIncGst: round2(remaining - amount),
++      message: `Split from a docket already used on job${seen.length > 1 ? 's' : ''} `
++        + `${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`,
++    };
++  }
++
++  // Reused, but there is no docket total to measure it against — a hand-typed
++  // receipt from before the reader existed. Recorded and visible, not refused.
++  return {
++    verdict: 'ok', key, matches: seen, reuse: true, uncapped: true,
++    message: `This docket is already on job${seen.length > 1 ? 's' : ''} `
++      + `${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`,
++  };
++}
++
++/**
++ * The owner's view: every docket that appears more than once, anywhere.
++ *
++ * Split in two because they mean completely different things. A contractor
++ * reusing their own docket across two jobs is usually a split purchase and
++ * needs no action — it is here so a PATTERN is visible. The same docket under
++ * two different contractors is not explainable by a split, and is the one the
++ * report leads with.
++ *
++ * `receiptsByContractor` is { contractorId: [receipt, ...] }.
++ */
++export function docketFlags(receiptsByContractor = {}, nameOf = (id) => id) {
++  const byKey = new Map();
++  for (const [contractorId, rows] of Object.entries(receiptsByContractor)) {
++    for (const r of rows || []) {
++      const key = docketKey(r);
++      if (!key) continue;
++      if (!byKey.has(key)) byKey.set(key, []);
++      byKey.get(key).push({ ...r, contractorId });
++    }
++  }
++
++  const crossContractor = [], reused = [];
++  for (const [key, rows] of byKey) {
++    if (rows.length < 2) continue;
++    const entry = {
++      key,
++      supplier: rows[0].supplier || null,
++      invoiceNumber: rows[0].invoiceNumber || null,
++      docketTotalIncGst: docketTotalOf(rows),
++      claimedIncGst: round2(rows.reduce((s, r) => s + (Number(r.amountIncGst) || 0), 0)),
++      entries: rows.map((r) => ({
++        contractorId: r.contractorId, contractor: nameOf(r.contractorId),
++        jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0),
++        date: r.date, addedAt: r.addedAt || null, id: r.id,
++      })).sort((a, b) => String(a.addedAt || '').localeCompare(String(b.addedAt || ''))),
++    };
++    entry.overClaimed = !!(entry.docketTotalIncGst
++      && entry.claimedIncGst > entry.docketTotalIncGst + DEFAULT_DUPLICATE_POLICY.centsTolerance);
++    const owners = new Set(rows.map((r) => r.contractorId));
++    (owners.size > 1 ? crossContractor : reused).push(entry);
++  }
++
++  // Worst first: over-claimed before merely reused, then by the money at stake.
++  const worst = (a, b) => (Number(b.overClaimed) - Number(a.overClaimed)) || (b.claimedIncGst - a.claimedIncGst);
++  return { crossContractor: crossContractor.sort(worst), reused: reused.sort(worst) };
++}
+diff --git a/lib/receipts.mjs b/lib/receipts.mjs
+index ea9c198..6bf3831 100644
+--- a/lib/receipts.mjs
++++ b/lib/receipts.mjs
+@@ -39,6 +39,7 @@ export function validateReceipt({ amountIncGst, supplier, invoiceNumber, date, i
+ export function newReceipt({
+   id, jobNumber, contractorId, amountIncGst, supplier, invoiceNumber = null,
+   date, imageKey = null, source = SOURCE.PORTAL, addedBy = null, addedAt = null, note = null,
++  docketTotalIncGst = null,
+ }) {
+   const errors = validateReceipt({ amountIncGst, supplier, invoiceNumber, date, imageKey, source });
+   if (errors.length) throw new Error(errors.join('; '));
+@@ -47,6 +48,16 @@ export function newReceipt({
+     jobNumber: String(jobNumber),
+     contractorId,
+     amountIncGst: round2(Number(amountIncGst)),
++    // What the PAPER came to, as opposed to what is being claimed against this
++    // one job. Normally the same number. They differ when one docket is split
++    // across two jobs, and that difference is what stops the split from
++    // claiming the docket twice — see lib/receipt-dupes.mjs.
++    //
++    // Never below the claimed amount: if the reader under-read a total and a
++    // human corrected it upward, the human is the better authority.
++    docketTotalIncGst: Number.isFinite(Number(docketTotalIncGst))
++      ? round2(Math.max(Number(docketTotalIncGst), Number(amountIncGst)))
++      : null,
+     supplier, invoiceNumber, date,
+     imageKey,
+     source,
+diff --git a/settings/portal-settings.json b/settings/portal-settings.json
+index 4350b22..468588e 100644
+--- a/settings/portal-settings.json
++++ b/settings/portal-settings.json
+@@ -464,7 +464,13 @@
+     "tolerancePercent": 3,
+     "_toleranceNote": "Gap between declared and receipted. Within this, trust the receipts and say nothing. Beyond it, flag for the office to intervene.",
+     "requirePhoto": true,
+-    "_photoNote": "No evidence, no payment - but the amount is always recorded and visible, never silently dropped."
++    "_photoNote": "No evidence, no payment - but the amount is always recorded and visible, never silently dropped.",
++    "_duplicatesNote": "One docket, one claim. Same docket on the same job is refused outright. Split across two jobs is allowed - buying for two jobs on one run is normal - but the amounts may not add up to more than the paper says. The same docket under TWO CONTRACTORS is never mentioned to either of them; it goes to the owner's dashboard only, because if two people are coordinating, the worst thing the system can do is announce that it noticed.",
++    "duplicates": {
++      "blockSameJob": true,
++      "capToDocketTotal": true,
++      "centsTolerance": 0.02
++    }
+   },
+   "_suppliersNote": "The wholesalers the crew actually stands at. On the phone this is a row of chips on the receipt form, so the same supplier is spelled the same way every time - which is what lets spend group and reconcile at all. Aliases are what the DOCKET prints: the paper says MIDDENDORP ELECTRIC CO PTY LTD, the trade says Middy's. Phone numbers are for dialling from the app later, and are left blank rather than guessed. Edited in the portal under Settings > Suppliers.",
+   "suppliers": [
+diff --git a/test/receipt-dupes.test.mjs b/test/receipt-dupes.test.mjs
+new file mode 100644
+index 0000000..9d0a8b7
+--- /dev/null
++++ b/test/receipt-dupes.test.mjs
+@@ -0,0 +1,173 @@
++/**
++ * One docket, one claim.
++ *
++ * Run: node --test test/receipt-dupes.test.mjs
++ */
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import {
++  DEFAULT_DUPLICATE_POLICY, policyFor, docketKey, docketTotalOf, checkDocket, docketFlags,
++} from '../lib/receipt-dupes.mjs';
++
++const docket = (over = {}) => ({
++  id: 'RCPT-1', jobNumber: '167595', contractorId: 'c1',
++  supplier: 'AGM Electrical Supplies', invoiceNumber: 'IN688575',
++  amountIncGst: 130.17, date: '2026-08-05', docketTotalIncGst: 130.17, ...over,
++});
++
++test('the same paper makes the same key however it is written', () => {
++  const a = docketKey(docket());
++  assert.equal(docketKey(docket({ supplier: 'AGM ELECTRICAL SUPPLIES PTY LTD' })), a);
++  assert.equal(docketKey(docket({ invoiceNumber: 'in 688575' })), a);
++  assert.equal(docketKey(docket({ invoiceNumber: 'IN-688575' })), a);
++  // A different invoice from the same supplier is a different docket.
++  assert.notEqual(docketKey(docket({ invoiceNumber: 'IN688576' })), a);
++});
++
++test('no invoice number: supplier, date and amount stand in', () => {
++  const k = docketKey(docket({ invoiceNumber: null }));
++  assert.ok(k.includes('D:2026-08-05'));
++  assert.equal(docketKey(docket({ invoiceNumber: null, amountIncGst: 130.18 })) === k, false);
++});
++
++test('unidentifiable receipts are not guessed at', () => {
++  assert.equal(docketKey({ supplier: null, amountIncGst: 50, date: '2026-08-05' }), null);
++  assert.equal(docketKey({ supplier: 'AGM', invoiceNumber: null, date: null, amountIncGst: 50 }), null);
++  assert.equal(docketKey(null), null);
++});
++
++test('a first receipt always saves', () => {
++  const r = checkDocket({ existing: [], incoming: docket() });
++  assert.equal(r.verdict, 'ok');
++  assert.equal(r.reuse, false);
++});
++
++test('the same docket on the same job is blocked', () => {
++  const r = checkDocket({ existing: [docket()], incoming: docket({ id: 'RCPT-2' }) });
++  assert.equal(r.verdict, 'blocked');
++  assert.equal(r.reason, 'sameJob');
++  assert.match(r.message, /already on job #167595/);
++});
++
++test('a receipt never blocks against itself — an edit is not a duplicate', () => {
++  const r = checkDocket({ existing: [docket()], incoming: docket() });
++  assert.equal(r.verdict, 'ok');
++});
++
++test('one docket split across two jobs is allowed, and says so', () => {
++  const first = docket({ id: 'RCPT-1', jobNumber: '167595', amountIncGst: 80, docketTotalIncGst: 130.17 });
++  const r = checkDocket({
++    existing: [first],
++    incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 50.17 }),
++  });
++  assert.equal(r.verdict, 'ok');
++  assert.equal(r.reuse, true);
++  assert.equal(r.remainingIncGst, 0);
++  assert.match(r.message, /Split from a docket already used on job #167595/);
++});
++
++test('a split may not claim more than the paper says', () => {
++  const first = docket({ id: 'RCPT-1', jobNumber: '167595', amountIncGst: 80 });
++  const r = checkDocket({
++    existing: [first],
++    incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 90 }),
++  });
++  assert.equal(r.verdict, 'blocked');
++  assert.equal(r.reason, 'overDocket');
++  assert.equal(r.remainingIncGst, 50.17);
++  assert.match(r.message, /\$50\.17 left on it/);
++});
++
++test('a fully claimed docket says so rather than quoting nothing left', () => {
++  const first = docket({ id: 'RCPT-1', amountIncGst: 130.17 });
++  const r = checkDocket({
++    existing: [first], incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 10 }),
++  });
++  assert.equal(r.reason, 'overDocket');
++  assert.match(r.message, /fully claimed already/);
++});
++
++test('cents of rounding do not block a legitimate split', () => {
++  const first = docket({ id: 'RCPT-1', amountIncGst: 65.08, docketTotalIncGst: 130.17 });
++  const r = checkDocket({
++    existing: [first], incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 65.09 }),
++  });
++  assert.equal(r.verdict, 'ok');
++});
++
++test('the human correcting an under-read total is believed over the OCR', () => {
++  // The reader said 130.17 and the human corrected it to 140 on the first
++  // entry: the docket total follows the largest figure recorded.
++  assert.equal(docketTotalOf([{ docketTotalIncGst: 130.17 }, { docketTotalIncGst: 140 }]), 140);
++  assert.equal(docketTotalOf([{ amountIncGst: 99 }]), null);
++});
++
++test('with no docket total there is no cap, but the reuse is still reported', () => {
++  const first = docket({ id: 'RCPT-1', docketTotalIncGst: null, amountIncGst: 80 });
++  const r = checkDocket({
++    existing: [first],
++    incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 900, docketTotalIncGst: null }),
++  });
++  assert.equal(r.verdict, 'ok');
++  assert.equal(r.uncapped, true);
++  assert.equal(r.reuse, true);
++});
++
++test('policy comes from settings, and the defaults are only a fallback', () => {
++  assert.equal(policyFor(null).blockSameJob, true);
++  assert.equal(policyFor({ receipts: { duplicates: { blockSameJob: false } } }).blockSameJob, false);
++  // Turning the same-job block off does NOT open the door: the docket total
++  // catches it anyway, because claiming $130.17 twice off a $130.17 docket is
++  // over-claiming however it is spelled. Two independent lines, on purpose.
++  const off = { ...DEFAULT_DUPLICATE_POLICY, blockSameJob: false };
++  const r = checkDocket({ existing: [docket()], incoming: docket({ id: 'RCPT-2' }), policy: off });
++  assert.equal(r.verdict, 'blocked');
++  assert.equal(r.reason, 'overDocket');
++});
++
++/* ---------- the owner's report ---------- */
++
++test('the same docket under two contractors is the flag that leads', () => {
++  const flags = docketFlags({
++    c1: [docket({ id: 'A', contractorId: 'c1' })],
++    c2: [docket({ id: 'B', contractorId: 'c2', jobNumber: '167610' })],
++  }, (id) => ({ c1: 'Charlie', c2: 'Sam' })[id]);
++  assert.equal(flags.crossContractor.length, 1);
++  assert.equal(flags.reused.length, 0);
++  const f = flags.crossContractor[0];
++  assert.deepEqual(f.entries.map((e) => e.contractor), ['Charlie', 'Sam']);
++  assert.equal(f.claimedIncGst, 260.34);
++  assert.equal(f.overClaimed, true);
++});
++
++test('one contractor reusing their own docket is reported separately', () => {
++  const flags = docketFlags({
++    c1: [
++      docket({ id: 'A', amountIncGst: 80 }),
++      docket({ id: 'B', jobNumber: '167610', amountIncGst: 50.17 }),
++    ],
++  });
++  assert.equal(flags.crossContractor.length, 0);
++  assert.equal(flags.reused.length, 1);
++  // A legitimate split adds up, so it is visible without being an accusation.
++  assert.equal(flags.reused[0].overClaimed, false);
++});
++
++test('a docket used once is not a flag', () => {
++  const flags = docketFlags({ c1: [docket()], c2: [docket({ id: 'B', invoiceNumber: 'IN999' })] });
++  assert.equal(flags.crossContractor.length, 0);
++  assert.equal(flags.reused.length, 0);
++});
++
++test('over-claimed dockets sort above merely reused ones', () => {
++  const flags = docketFlags({
++    c1: [
++      docket({ id: 'A', invoiceNumber: 'IN1', amountIncGst: 50, docketTotalIncGst: 100 }),
++      docket({ id: 'B', invoiceNumber: 'IN1', jobNumber: '2', amountIncGst: 50, docketTotalIncGst: 100 }),
++      docket({ id: 'C', invoiceNumber: 'IN2', amountIncGst: 20, docketTotalIncGst: 20 }),
++      docket({ id: 'D', invoiceNumber: 'IN2', jobNumber: '2', amountIncGst: 20, docketTotalIncGst: 20 }),
++    ],
++  });
++  assert.equal(flags.reused[0].invoiceNumber, 'IN2');
++  assert.equal(flags.reused[0].overClaimed, true);
++});
+diff --git a/test/settings-coverage.test.mjs b/test/settings-coverage.test.mjs
+index 78a1367..071fe21 100644
+--- a/test/settings-coverage.test.mjs
++++ b/test/settings-coverage.test.mjs
+@@ -14,6 +14,7 @@ import { loadSettings, gstDivisor, contractorById, contractorFor } from '../lib/
+ import { DEFAULT_LADDER, ladderFor } from '../lib/ladder.mjs';
+ import { DEFAULTS as RETENTION_DEFAULTS, policyFor } from '../lib/retention.mjs';
+ import { DEFAULT_POLICY as WARRANTY_DEFAULTS, policy as warrantyPolicy } from '../lib/warranty.mjs';
++import { DEFAULT_DUPLICATE_POLICY, policyFor as duplicatePolicyFor } from '../lib/receipt-dupes.mjs';
+ 
+ const settings = loadSettings();
+ const keysOf = (o) => Object.keys(o).filter((k) => !k.startsWith('_'));
+@@ -79,6 +80,15 @@ test('the rules that decide money are all tunable', () => {
+   }
+ });
+ 
++test('every duplicate-docket parameter is present in settings', () => {
++  const configured = settings.receipts?.duplicates || {};
++  for (const k of keysOf(DEFAULT_DUPLICATE_POLICY)) {
++    assert.ok(k in configured, `receipts.duplicates.${k} is not in settings — it would silently use the code default`);
++  }
++  // And what the API will actually apply is the configured value, not the code's.
++  assert.equal(duplicatePolicyFor(settings).blockSameJob, configured.blockSameJob);
++});
++
+ test('two people may share a name and still resolve to their own record', () => {
+   // Steven has an owner login and a subcontractor login. A name lookup would
+   // always return the first; by id each gets their own rules.
+diff --git a/test/shell-script.test.mjs b/test/shell-script.test.mjs
+index 99a7a29..896278e 100644
+--- a/test/shell-script.test.mjs
++++ b/test/shell-script.test.mjs
+@@ -51,7 +51,8 @@ test('every handler the click listener dispatches to exists', () => {
+                     'submitClaim', 'flagDecl', 'openJob', 'showMaterials', 'viewSubbie',
+                     'claimRow', 'groupedList', 'groupYM', 'jobSections',
+                     'claimActions', 'bulkMove', 'matchJob', 'matchClaim', 'searchSummary',
+-                    'businessView', 'loadBusiness', 'bizTile', 'section', 'openSection', 'moneyChart', 'runBulk', 'bulkByStatus', 'bulkBar', 'summaryCard', 'unfinishedView']) {
++                    'businessView', 'loadBusiness', 'bizTile', 'section', 'openSection', 'moneyChart', 'runBulk', 'bulkByStatus', 'bulkBar', 'summaryCard', 'unfinishedView',
++                    'docketsSection', 'suppliersSection', 'saveSuppliers', 'addSupplier', 'removeSupplier', 'readSuppliers']) {
+     assert.ok(defined.has(fn), `${fn}() is referenced but never defined`);
+   }
+ });

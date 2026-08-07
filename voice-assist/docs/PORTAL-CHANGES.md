@@ -1,5 +1,58 @@
 # Changes the app needs in the portal repo
 
+## 6. One docket, one claim — `portal-dockets.patch`
+
+The gap Steven found the night the reader went live: nothing stopped the same
+piece of paper being filed on job A, then job B, then job A again, and every
+one of them would be reimbursed.
+
+**Cut against tonight's deployed state** (sections 1–5 applied). Apply, then
+`node scripts/deploy.mjs`.
+
+**A docket's identity** is supplier + invoice number; where a docket carries no
+invoice number, supplier + date + amount stands in. The image is deliberately
+not part of it — photograph the same docket twice and every byte differs, so
+hashing only catches re-uploading the identical file, which is the one case
+nobody does. This is also what the supplier list is *for*: AGM, AGM ELECTRICAL
+SUPPLIES PTY LTD and "agm electrical" have to be one supplier or the check
+leaks.
+
+**Three cases, three answers, all Steven's calls:**
+
+| | |
+|---|---|
+| Same docket, same job | **Blocked.** Nearly always an honest double-tap, so it says so plainly. |
+| Same docket, different job, same contractor | **Allowed** — buying for two jobs in one run is normal — but capped at what the paper says, and every reuse stays visible to the office. |
+| Same docket, two contractors | **Silent.** The second save behaves completely normally. The owner is told; they are not. |
+
+That last rule is why the cross-contractor check lives in the owner's report
+and **not** in the save path: a check that cannot refuse anything cannot leak
+anything. Silence by construction rather than by remembering to be quiet.
+
+**The docket total.** A receipt now carries two numbers — `docketTotalIncGst`
+(what the paper came to) and `amountIncGst` (what is claimed against this job).
+Identical until someone splits a docket across jobs, and that difference is
+what stops the split claiming it twice. It is only ever set from what the
+reader read: a hand-typed figure is the claim, not the docket, and treating
+them as the same would cap an honest split at its first entry. No docket total
+— a hand-typed receipt — means no cap, and the reuse is reported instead of
+refused.
+
+**Where the owner sees it:** a new section in the Business view, above
+Subcontractors. Cross-contractor collisions lead; a contractor's own splits are
+listed separately, marked "adds up" or "over-claimed", so a *pattern* is
+visible without every legitimate split reading as an accusation.
+
+**Two independent lines of defence.** Turning `blockSameJob` off in settings
+does not open the door: the docket total still catches it, because claiming
+$130.17 twice against a $130.17 docket is over-claiming however it is spelled.
+There is a test that says so.
+
+**Verified: 218/218** (200 existing, 18 new).
+
+    git apply <sm8-addons>/voice-assist/docs/portal-dockets.patch
+    node scripts/deploy.mjs
+
 ## How to deploy this repo — `portal-deploy-script.patch`
 
 Apply once, then every deploy after it is one command.
