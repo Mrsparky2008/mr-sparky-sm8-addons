@@ -911,8 +911,25 @@ export async function buildDossier(uuid) {
     description: String(job.job_description || "").slice(0, 700),
     contacts: toArray(contacts.body).filter((c) => c.job_uuid === uuid)
       .map((c) => `${c.type}: ${`${c.first || ""} ${c.last || ""}`.trim()}${c.mobile ? ` ${c.mobile}` : ""}`),
-    bookings: toArray(acts.body).filter((a) => a.job_uuid === uuid)
+    // ServiceM8 keeps two different things in jobactivity, and showing both as
+    // "bookings" is what put eight entries on job 167595 — one of them 32
+    // seconds long. A SCHEDULED activity is a diary booking somebody made. A
+    // RECORDED one is the job timer running while the app had the job open, so
+    // they overlap, they stack up through a day, and they are not appointments.
+    bookings: toArray(acts.body).filter((a) => a.job_uuid === uuid && Number(a.activity_was_scheduled) === 1)
       .map((a) => ({ activity_uuid: a.uuid, staff: staffName(staff, a.staff_uuid), start: a.start_date, end: a.end_date })),
+    // Time actually clocked on the job. Summed here rather than on the phone,
+    // and only where both ends exist — a timer still running has no duration
+    // yet, and inventing one would overstate labour.
+    timeOnSite: (() => {
+      const rows = toArray(acts.body).filter((a) => a.job_uuid === uuid
+        && Number(a.activity_was_recorded) === 1 && a.start_date && a.end_date);
+      const minutes = rows.reduce((sum, a) => {
+        const ms = new Date(String(a.end_date).replace(" ", "T")) - new Date(String(a.start_date).replace(" ", "T"));
+        return sum + (ms > 0 ? ms / 60000 : 0);
+      }, 0);
+      return { entries: rows.length, minutes: Math.round(minutes) };
+    })(),
     billing: toArray(mats.body).filter((m) => String(m.active) === "1" || m.active === 1)
       .map((m) => ({ name: m.name, qty: Number(m.quantity), price: Number(m.price) })),
     notes: toArray(notes.body).slice(-6).map((n) => String(n.note || "").replace(/\s+/g, " ").slice(0, 160)),

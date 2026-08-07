@@ -26,7 +26,15 @@ function when(stamp) {
   return `${label} · ${h12}:${m[5]}${h >= 12 ? "pm" : "am"}`;
 }
 
-export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddReceipt, onTalk, onBack }) {
+// "3h 44m", or "44m" when it's under the hour. The backend adds the minutes
+// up; this only chooses the words.
+function hoursLabel(minutes) {
+  const m = Math.max(0, Math.round(Number(minutes) || 0));
+  const h = Math.floor(m / 60);
+  return h ? `${h}h ${m % 60}m` : `${m}m`;
+}
+
+export default function JobDiary({ jobNumber, bookings = [], notes = [], timeOnSite, onAddReceipt, onTalk, onBack }) {
   const ordered = [...bookings].sort((a, b) => String(b.start || "").localeCompare(String(a.start || "")));
   const [added, setAdded] = useState([]);          // notes written this visit
   const [writing, setWriting] = useState(false);
@@ -94,6 +102,26 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], onAddRe
             />
           </View>
         ) : null}
+        {/* Clocked time, not appointments. ServiceM8 keeps both in the same
+            table and we used to render them together, which is how this job
+            grew eight overlapping "bookings", one of them 32 seconds long. */}
+        {timeOnSite?.entries ? (
+          <View style={s.section}>
+            <SectionLabel>Time on site</SectionLabel>
+            <Card>
+              <View style={s.entry}>
+                <View style={s.entryIcon}><Icon name="board" size={18} color={C.ink} /></View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.entryTitle}>{hoursLabel(timeOnSite.minutes)}</Text>
+                  <Text style={s.entrySub}>
+                    across {timeOnSite.entries} timer run{timeOnSite.entries === 1 ? "" : "s"}
+                  </Text>
+                </View>
+              </View>
+            </Card>
+          </View>
+        ) : null}
+
         {ordered.length ? (
           <View style={s.section}>
             <SectionLabel>Bookings</SectionLabel>

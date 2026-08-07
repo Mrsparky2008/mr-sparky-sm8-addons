@@ -118,7 +118,7 @@ export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddRe
                 icon={<Icon name="board" size={18} color={C.ink} />}
                 label="Diary"
                 value={bookings.length ? `${bookings.length} booked` : "Open"}
-                onPress={() => onJobDiary({ bookings: data?.bookings || [], notes: data?.notes || [] })}
+                onPress={() => onJobDiary({ bookings: data?.bookings || [], notes: data?.notes || [], timeOnSite: data?.timeOnSite || null })}
               />
               <Row
                 icon={<Icon name="receipt" size={18} color={C.ink} />}
