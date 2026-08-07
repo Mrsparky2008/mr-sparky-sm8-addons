@@ -80,6 +80,12 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
   // and it is only as reliable as the spelling is consistent.
   const [suppliers, setSuppliers] = useState([]);
   const [readAs, setReadAs] = useState("");   // what the paper said, when we tidied it
+  // What the PAPER came to, kept apart from what is being claimed against this
+  // job. They are the same number until someone splits one docket across two
+  // jobs, and that difference is what stops the split claiming it twice. Only
+  // ever set from what was READ: a hand-typed figure is the claim, not the
+  // docket, and guessing they are the same would cap an honest split.
+  const [docketTotal, setDocketTotal] = useState(null);
   useEffect(() => {
     let alive = true;
     portal.me()
@@ -123,12 +129,14 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
     setReadError("");
     setRead(null);
     setDocket(null);
+    setDocketTotal(null);
     setAckDocket(false);
     try {
       const imageB64 = await FileSystem.readAsStringAsync(shot.uri, { encoding: "base64" });
       const r = await readReceipt({ imageB64, contentType: shot.mimeType });
       const got = r.receipt || {};
       setRead(got);
+      setDocketTotal(got.amountIncGst ?? null);
       setDocket(r.docket || null);
 
       // The paper prints the legal name; the list holds the one the trade
@@ -139,7 +147,6 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
       if (got.supplier && !touched.current.supplier) {
         const hit = matchSupplier(suppliers, got.supplier);
         setSupplier(hit ? hit.name : got.supplier);
-        setOtherOpen(!hit);
         setReadAs(hit && hit.name !== got.supplier ? got.supplier : "");
       }
       if (got.amountIncGst && !touched.current.amount) setAmount(String(got.amountIncGst.toFixed(2)));
@@ -195,6 +202,7 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
         amountIncGst: Number(amount),
         supplier: supplier.trim(),
         invoiceNumber: invoiceNumber.trim() || undefined,
+        docketTotalIncGst: docketTotal ?? undefined,
         date,
         note: noteOut || undefined,
       });
