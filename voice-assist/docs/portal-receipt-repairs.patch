@@ -85,7 +85,7 @@ index 8225242..1d57730 100644
        const body = safeJson(event.body, event.isBase64Encoded);
        const target = who.isAdmin && body.name ? body.name : who.person.name;
 diff --git a/api/shell.mjs b/api/shell.mjs
-index 7bae839..c244b9b 100644
+index 7bae839..5d217e7 100644
 --- a/api/shell.mjs
 +++ b/api/shell.mjs
 @@ -91,6 +91,8 @@ button.row{cursor:pointer}button.row:hover{background:var(--zebra)}
@@ -177,6 +177,74 @@ index 7bae839..c244b9b 100644
    const qr=e.target.closest&&e.target.closest('[data-query]');
    if(qr){queryReceipt(qr.getAttribute('data-query'),qr.getAttribute('data-qjob'),qr.getAttribute('data-qid'));return}
    const aj=e.target.closest&&e.target.closest('[data-adjust]');
+@@ -1269,8 +1324,6 @@ document.addEventListener('click',function(e){
+   if(bt){TAB=bt.getAttribute('data-biztab');render();return}
+   const cq=e.target.closest&&e.target.closest('[data-clearq]');
+   if(cq){Q='';render();return}
+-  const bk=e.target.closest&&e.target.closest('[data-bulk]');
+-  if(bk){bulkMove(bk.getAttribute('data-bulk'),bk.getAttribute('data-bulkmonth'));return}
+   const yr=e.target.closest&&e.target.closest('[data-year]');
+   if(yr){const k=yr.getAttribute('data-year');OPENY.has(k)?OPENY.delete(k):OPENY.add(k);render();return}
+   const mo=e.target.closest&&e.target.closest('[data-month]');
+@@ -1766,33 +1819,6 @@ function claimRow(c){
+    +'<span class="amt">'+money(st.payableIncGst)+'</span><span class="chev">&rsaquo;</span></button>';
+ }
+ 
+-function claimActions(M){
+-  if(!(ME&&ME.isAdmin))return '';
+-  const at=function(st){return M.items.filter(function(c){return c.status===st})};
+-  const sub=at('submitted'), app=at('approved'), inv=at('invoiced');
+-  const btn=function(to,list,label){
+-    if(!list.length)return '';
+-    const v=list.reduce(function(a,c){return a+((c.settlement||{}).payableIncGst||0)},0);
+-    return '<button class="mini" data-bulk="'+to+'" data-bulkmonth="'+esc(M.month)+'">'
+-      +label+' all '+list.length+' <span class="sub">'+money(v)+'</span></button>';
+-  };
+-  const bar=btn('approved',sub,'Approve')+btn('invoiced',app,'Issue RCTI for')+btn('paid',inv,'Record payment for');
+-  return bar?bar+'<span class="sub" id="bulkMsg"></span>':'';
+-}
+-
+-async function bulkByStatus(to,key){
+-  const from = to==='approved'?'submitted' : to==='invoiced'?'approved' : 'invoiced';
+-  const list=(DATA.claims||[]).filter(matchClaim).filter(function(c){return c.status===from});
+-  await runBulk(to,list);
+-}
+-
+-async function bulkMove(to,month){
+-  const from = to==='approved'?'submitted' : to==='invoiced'?'approved' : 'invoiced';
+-  await runBulk(to,(DATA.claims||[]).filter(function(c){
+-    return String(c.submittedAt||'').slice(0,7)===month && c.status===from;
+-  }));
+-}
+-
+ async function runBulk(to,cs){
+   if(BUSY||!cs.length)return;
+   const what=to==='approved'?'Approve':to==='invoiced'?'Issue an RCTI for':'Record payment for';
+@@ -1822,6 +1848,12 @@ async function runBulk(to,cs){
+   finally{ BUSY=false }
+ }
+ 
++async function bulkByStatus(to,key){
++  const from = to==='approved'?'submitted' : to==='invoiced'?'approved' : 'invoiced';
++  const list=(DATA.claims||[]).filter(matchClaim).filter(function(c){return c.status===from});
++  await runBulk(to,list);
++}
++
+ function claimsView(){
+   const all=DATA.claims||[];
+   if(!all.length)return '<div class="card" style="padding:26px;text-align:center;color:var(--muted)">No claims yet. Pick some jobs and submit one.</div>';
+@@ -2438,9 +2470,10 @@ function drawModal(){
+    +'<div class="calcrow total"><span class="lbl">You get paid</span><span class="val">'+money(j.payableIncGst)+'</span></div>'
+    +'<div class="calcrow"><span class="lbl">&nbsp;</span><span class="val sub">'+money(j.payableExGst)+' ex GST</span></div>'
+    +(j.quotedBy?'<div class="calcrow"><span class="lbl">Quoted by</span><span class="val">'+esc(j.quotedBy)+'</span></div>':'');
++  const withReceipts = body + receiptRow(j);
+   el.innerHTML='<div class="veil" onclick="if(event.target===this)shut()"><div class="sheet" role="dialog" aria-modal="true">'
+    +'<div class="shead"><div class="t">Job '+j.jobNumber+'</div><button class="iconbtn" onclick="shut()" aria-label="Close">&times;</button></div>'
+-   +'<div class="sbody">'+body+'</div></div></div>';
++   +'<div class="sbody">'+withReceipts+'</div></div></div>';
+ }
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')shut()});
+ 
 diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
 index b1bb2c7..81b9b7d 100644
 --- a/lib/receipt-dupes.mjs
@@ -465,11 +533,15 @@ index f0e2b20..2bded23 100644
 +  assert.deepEqual(w, []);
 +});
 diff --git a/test/shell-script.test.mjs b/test/shell-script.test.mjs
-index 54addc9..028c50e 100644
+index 54addc9..9cc2985 100644
 --- a/test/shell-script.test.mjs
 +++ b/test/shell-script.test.mjs
-@@ -53,7 +53,7 @@ test('every handler the click listener dispatches to exists', () => {
-                     'claimActions', 'bulkMove', 'matchJob', 'matchClaim', 'searchSummary',
+@@ -50,10 +50,10 @@ test('every handler the click listener dispatches to exists', () => {
+                     'receiptsPane', 'companyPane', 'addReceipt', 'viewReceipt', 'saveCompany',
+                     'submitClaim', 'flagDecl', 'openJob', 'showMaterials', 'viewSubbie',
+                     'claimRow', 'groupedList', 'groupYM', 'jobSections',
+-                    'claimActions', 'bulkMove', 'matchJob', 'matchClaim', 'searchSummary',
++                    'matchJob', 'matchClaim', 'searchSummary',
                      'businessView', 'loadBusiness', 'bizTile', 'section', 'openSection', 'moneyChart', 'runBulk', 'bulkByStatus', 'bulkBar', 'summaryCard', 'unfinishedView',
                      'docketsSection', 'suppliersSection', 'saveSuppliers', 'addSupplier', 'removeSupplier', 'readSuppliers',
 -                    'queryReceipt', 'raiseAdjustment']) {
@@ -477,8 +549,12 @@ index 54addc9..028c50e 100644
      assert.ok(defined.has(fn), `${fn}() is referenced but never defined`);
    }
  });
-@@ -64,7 +64,7 @@ test('every data-* hook the markup emits has a listener', () => {
-   const COMPANIONS = new Set(['claimid', 'boxed', 'bulkmonth', 'bulkkey',
+@@ -61,10 +61,10 @@ test('every handler the click listener dispatches to exists', () => {
+ test('every data-* hook the markup emits has a listener', () => {
+   // Attributes that carry a value for another hook to read, rather than being
+   // a hook themselves.
+-  const COMPANIONS = new Set(['claimid', 'boxed', 'bulkmonth', 'bulkkey',
++  const COMPANIONS = new Set(['claimid', 'boxed', 'bulkkey',
      // the docket-flag actions: the hook is data-query / data-adjust, and these
      // carry the rest of what each one needs
 -    'qjob', 'qid', 'ajob', 'aamt', 'awhy']);
@@ -486,7 +562,7 @@ index 54addc9..028c50e 100644
    const emitted = new Set([...code.matchAll(/data-([a-z]+)=/g)].map((m) => m[1]));
    const handled = new Set([...code.matchAll(/closest\('\[data-([a-z]+)/g)].map((m) => m[1]));
    const orphans = [...emitted].filter((a) => !handled.has(a) && !COMPANIONS.has(a));
-@@ -74,7 +74,7 @@ test('every data-* hook the markup emits has a listener', () => {
+@@ -74,11 +74,26 @@ test('every data-* hook the markup emits has a listener', () => {
  test('every companion attribute is actually read by its hook', () => {
    // The other half of the pair above — an allowlist that stops being true is
    // worse than no allowlist.
@@ -495,3 +571,22 @@ index 54addc9..028c50e 100644
      assert.ok(code.includes(`getAttribute('data-${a}')`), `data-${a} is emitted but never read`);
    }
  });
+ 
++test('no function builds UI that nothing ever calls', () => {
++  // How this test came to exist: Steven filed three receipts against job
++  // 167595 and had nowhere in the portal to look at them. receiptRow() — the
++  // only door into the receipts pane, and therefore into Move and Void — had
++  // been defined and never called since the day it was written. The page was
++  // not broken, it simply did not contain the feature.
++  //
++  // A dead builder is invisible: no error, no blank space, nothing to notice.
++  // The only way it surfaces is somebody going looking for a feature that was
++  // shipped, tested and unreachable.
++  const defined = [...js.matchAll(/(?:async\s+)?function\s+(\w+)/g)].map((m) => m[1]);
++  const dead = defined.filter((fn) => (js.match(new RegExp(`\\b${fn}\\b`, 'g')) || []).length <= 1);
++  assert.deepEqual(dead, [], 'defined but never called — either wire it up or delete it');
++});
++
+ test('every CSS class the script uses is defined in the stylesheet', () => {
+   const css = html.split('<style>')[1].split('</style>')[0];
+   // Only the ones carrying meaning; a missing pill style renders as bare text.
