@@ -46,6 +46,11 @@ const SHAPES = {
     <Path key="a" d="M4 17.5 10 11l3.5 3.5L20 7.5" />,
     <Path key="b" d="M15.5 7.5H20V12" />,
   ],
+  tools: [
+    <Path key="a" d="M14.5 6.5a4 4 0 0 1 5-5l-2.6 2.6 1 2.5 2.5 1L23 5" transform="translate(-2.5 1.5)" />,
+    <Path key="b" d="m10.5 10.5-6 6a2 2 0 0 0 2.8 2.8l6-6" />,
+    <Circle key="c" cx="6" cy="17.8" r=".4" />,
+  ],
   idcard: [
     <Rect key="a" x="3.5" y="5.5" width="17" height="13" rx="2.5" />,
     <Circle key="b" cx="9" cy="11" r="1.8" />,

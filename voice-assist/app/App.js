@@ -37,6 +37,7 @@ import ClaimsList from "./screens/pay/ClaimsList";
 import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
 import AddReceipt from "./screens/pay/AddReceipt";
+import OwnMaterial from "./screens/pay/OwnMaterial";
 import RctiView from "./screens/pay/RctiView";
 import Statement from "./screens/pay/Statement";
 import Retention from "./screens/pay/Retention";
@@ -384,6 +385,11 @@ function Shell() {
                 onBack={pop}
                 onSaved={() => resetTab("pay")}
               />
+            </View>
+          ) : null}
+          {top?.name === "ownmaterial" ? (
+            <View style={s.fill}>
+              <OwnMaterial onBack={pop} onSaved={() => {}} />
             </View>
           ) : null}
           {top?.name === "submit" ? (

@@ -1,5 +1,5 @@
 diff --git a/api/index.mjs b/api/index.mjs
-index 8225242..e6e809d 100644
+index 8225242..d38511a 100644
 --- a/api/index.mjs
 +++ b/api/index.mjs
 @@ -12,7 +12,7 @@
@@ -11,7 +11,27 @@ index 8225242..e6e809d 100644
  import * as sm8 from '../lib/servicem8.mjs';
  import * as sheets from '../lib/sheets.mjs';
  import { loadSettings, gstDivisor, contractorFor, contractorById, canIssueRcti } from '../lib/settings.mjs';
-@@ -155,9 +155,56 @@ const involves = (contractor, forms) => {
+@@ -34,6 +34,7 @@ import * as rcti from '../lib/rcti.mjs';
+ import * as business from '../lib/business.mjs';
+ import * as approval from '../lib/approval.mjs';
+ import * as abr from '../lib/abr.mjs';
++import * as compliance from '../lib/compliance.mjs';
+ 
+ const SECRET_ID = process.env.PORTAL_SECRET_ID || 'mr-sparky/portal';
+ const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 5 * 60 * 1000);
+@@ -142,7 +143,10 @@ async function loadData(settings) {
+         suburb: (j.job_address || '').split(',').slice(-3, -2).join('').trim() || (j.job_address || '').slice(0, 28),
+       }));
+ 
+-    cache = { at: Date.now(), data: { jobs: all, claims, pipelineJobs, allJobStatus: conv.statusIndex(everyJob), claimedOn: conv.claimIndex(claims) }, inflight: null };
++    // Which jobs have a JSA response — the compliance measure's "done" set.
++    // Empty until settings carry the JSA form uuid; compliance ships dark.
++    const jsaDone = compliance.formDoneKeys(forms, settings.compliance?.jsaFormUuid);
++    cache = { at: Date.now(), data: { jobs: all, claims, pipelineJobs, allJobStatus: conv.statusIndex(everyJob), claimedOn: conv.claimIndex(claims), jsaDone }, inflight: null };
+     return cache.data;
+   })().catch((e) => { cache.inflight = null; throw e; });
+   return cache.inflight;
+@@ -155,9 +159,56 @@ const involves = (contractor, forms) => {
      names.includes(String(f['Job Completed By'] || '').toLowerCase().trim()));
  };
  
@@ -68,7 +88,7 @@ index 8225242..e6e809d 100644
    // By id where we have one: two people may share a name (an owner login and a
    // subcontractor login for the same person), and a name lookup returns only
    // the first of them.
-@@ -171,17 +218,30 @@ async function statementFor(name, personId = null) {
+@@ -171,20 +222,22 @@ async function statementFor(name, personId = null) {
    // as "waiting on Form 001" rather than silently not existing. (Job 167570
    // vanished exactly this way.) The claim is only used to make the job
    // VISIBLE; the engine still refuses to pay it until the form arrives.
@@ -90,6 +110,31 @@ index 8225242..e6e809d 100644
      store.listReceipts(contractor.id).catch(() => []),
 +    store.listOwnMaterial(contractor.id).catch(() => []),
    ]);
+-  const receiptsByJob = receipts.byJob(receiptRows);
+-  const pending = pendingFor(adjustments, contractor.id);
+-  const already = claimedJobNumbers(claims);
+ 
+   // Conversion and the rung it earns. Every threshold comes from settings —
+   // the contractor's own ladder where one is set, the system template otherwise.
+@@ -204,6 +257,34 @@ async function statementFor(name, personId = null) {
+       })
+     : null;
+ 
++  // Compliance: 2 points of the rung hang on ≥80% of jobs completing every
++  // required item, measured on the same window as conversion and floored at
++  // the changeover. Null until there is something to measure — no penalty
++  // during the qualifying period — and dark until settings name the JSA form.
++  const compliancePolicy = compliance.policyFor(settings);
++  const complianceState = record.claimed >= ladder.minimumClaims
++    ? compliance.complianceAssessment({
++        policy: compliancePolicy,
++        rate: compliance.complianceRate({
++          jobs: own.map((x) => x.job), policy: compliancePolicy,
++          jsaDone: loaded.jsaDone || new Set(),
++          windowStart: conv.windowStart(ladder.windowDays), cutoffDate: cutoff,
++        }),
++      })
++    : null;
 +
 +  const statement = buildStatement({
 +    contractor,
@@ -97,11 +142,47 @@ index 8225242..e6e809d 100644
 +    allJobs: all, gstDivisor: GST,
 +    duplicatePolicy: settings.formPolicy?.duplicates || 'last',
 +    cutoffDate: cutoff,
++    compliance: complianceState,
 +  });
-   const receiptsByJob = receipts.byJob(receiptRows);
-   const pending = pendingFor(adjustments, contractor.id);
-   const already = claimedJobNumbers(claims);
-@@ -725,6 +785,43 @@ export async function handler(event) {
++  const receiptsByJob = receipts.byJob(receiptRows);
++  const pending = pendingFor(adjustments, contractor.id);
++  const already = claimedJobNumbers(claims);
++
+   return {
+     claims: claims.map((c) => ({
+       claimId: c.claimId, status: c.status, submittedAt: c.submittedAt,
+@@ -246,6 +327,13 @@ async function statementFor(name, personId = null) {
+       }];
+     })),
+     conversion: record,
++    // The paperwork dial beside the conversion dial. Null = unmeasured (dark
++    // or qualifying), so the client never shows a penalty nobody earned.
++    compliance: complianceState,
++    ownMaterial: Object.fromEntries((ownMaterialRows || []).map((m) => [String(m.jobNumber), {
++      amountIncGst: m.amountIncGst, declaredAt: m.declaredAt,
++    }])),
++    ownMaterialCapIncGst: receipts.ownMaterialCapFor(settings, contractor.id),
+     ladder: assessment ? {
+       ...assessment,
+       rungs: ladder.rungs.map((r, i) => ({
+@@ -405,6 +493,16 @@ export async function handler(event) {
+         return json(400, { error: 'The declaration must be accepted before a claim can be submitted' });
+       }
+ 
++      // Unsigned means unable to claim: with no signed terms there is nothing
++      // to be paid under. Dark until settings.contracts.required is switched
++      // on, so nobody is locked out before contracts exist to sign.
++      if (settings.contracts?.required) {
++        const contract = await store.currentContract(contractor.id).catch(() => null);
++        if (!contract) {
++          return json(403, { error: 'No signed contract on file — the office needs to lock one in before claims can be submitted' });
++        }
++      }
++
+       const data = await statementFor(target);
+       const wanted = new Set((body.jobNumbers || []).map(String));
+       const wantHelp = !!body.includeHelpingHand;
+@@ -725,6 +823,43 @@ export async function handler(event) {
        return json(201, { receipt, reuse: check.reuse ? check : null });
      }
  
@@ -145,7 +226,7 @@ index 8225242..e6e809d 100644
      // A short-lived URL to upload the photo straight to a private bucket, so
      // the image never passes through this function.
      // Query a receipt, or clear it. Admin only, and it NEVER deletes: the row
-@@ -773,6 +870,81 @@ export async function handler(event) {
+@@ -773,6 +908,137 @@ export async function handler(event) {
        return json(201, { adjustment });
      }
  
@@ -224,10 +305,66 @@ index 8225242..e6e809d 100644
 +      }
 +    }
 +
++    // Settings are the contract; these two routes are the signature.
++    //
++    // Upload the signed PDF (presigned, private bucket), then lock it. The
++    // lock row snapshots the contract terms AS THEY STAND — commission rules,
++    // retention policy, warranty terms, own-material cap — so a dispute in a
++    // year is answered by the row, not by archaeology on today's settings.
++    // An amendment is simply a later lock: new terms, new signature, forward
++    // only, because the engine dates everything by rule versions anyway.
++    if (path === '/api/contract/upload-url' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      const contractor = contractorById(settings, body.contractorId);
++      if (!contractor) return json(404, { error: 'No such contractor' });
++      const key = `contracts/${contractor.id}/${Date.now()}.pdf`;
++      const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
++      const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
++      const url = await getSignedUrl(new S3Client({}),
++        new PutObjectCommand({ Bucket: RECEIPT_BUCKET, Key: key, ContentType: 'application/pdf' }),
++        { expiresIn: 300 });
++      return json(200, { uploadUrl: url, docKey: key });
++    }
++
++    if (path === '/api/contract/lock' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      const contractor = contractorById(settings, body.contractorId);
++      if (!contractor) return json(404, { error: 'No such contractor' });
++      if (!body.docKey) return json(400, { error: 'Upload the signed document first — the lock records it' });
++      const locked = await store.saveContract({
++        contractorId: contractor.id,
++        docKey: body.docKey,
++        signedBy: who.person.id,
++        note: body.note || null,
++        terms: {
++          commissionRules: settings.commissionRules[contractor.id] || [],
++          retention: policyFor(settings, contractor.id),
++          warranty: { ...(settings.warranty || {}), ...(settings.warranty?.byContractor?.[contractor.id] || {}) },
++          ownMaterialCapIncGst: receipts.ownMaterialCapFor(settings, contractor.id),
++          ladder: ladderFor(settings, settings.people.find((p) => p.id === contractor.id) || {}),
++        },
++      });
++      return json(201, { contract: locked });
++    }
++
++    if (path === '/api/contract' && method === 'GET') {
++      const id = event?.queryStringParameters?.contractorId
++        || contractorFor(settings, who.person.name)?.id;
++      if (!id) return json(404, { error: 'No such contractor' });
++      // A subbie may read their own contract; only admins may read anyone's.
++      if (!who.isAdmin && contractorFor(settings, who.person.name)?.id !== id) {
++        return json(403, { error: 'Not yours to read' });
++      }
++      const contract = await store.currentContract(id).catch(() => null);
++      return json(200, { contract, required: !!settings.contracts?.required });
++    }
++
      if (path === '/api/receipts/upload-url' && method === 'POST') {
        const body = safeJson(event.body, event.isBase64Encoded);
        const target = who.isAdmin && body.name ? body.name : who.person.name;
-@@ -853,16 +1025,25 @@ export async function handler(event) {
+@@ -853,16 +1119,18 @@ export async function handler(event) {
        const statements = {}, claimsByOwner = {}, conversions = {}, unfinished = {};
        const receiptsByContractor = {};
        const claimedNumbers = new Set();
@@ -247,16 +384,52 @@ index 8225242..e6e809d 100644
 -          duplicatePolicy: settings.formPolicy?.duplicates || 'last' });
          receiptsByContractor[c.id] = await store.listReceipts(c.id).catch(() => []);
 +        const ownMaterialRows = await store.listOwnMaterial(c.id).catch(() => []);
+         const claims = await store.listClaims(c.id).catch(() => []);
+         claimsByOwner[c.id] = claims.map((x) => ({
+           ...x,
+@@ -870,18 +1138,38 @@ export async function handler(event) {
+           review: reviewState({ claim: x, approvalDays: Number(settings.payment?.approvalDays) || 7 }),
+         }));
+         for (const n of claimedJobNumbers(claims)) claimedNumbers.add(n);
+-        const person = settings.people.find((p) => p.id === c.id) || {};
+         // Measured on THEIR ladder — a contractor with custom terms is judged
+         // by them here too, not just at review time.
+-        const ownLadder = ladderFor(settings, person);
++        const ownLadder = ladderFor(settings, cPerson);
+         unfinished[c.id] = approval.neverFinished({
+-          claims: loaded.claims, statusOf: loaded.allJobStatus, telegramId: person.telegramId,
++          claims: loaded.claims, statusOf: loaded.allJobStatus, telegramId: cPerson.telegramId,
+           olderThanDays: Number(ownLadder.staleQuoteDays) || 30,
+         });
+         conversions[c.id] = conv.conversionFor({
+-          claims: loaded.claims, telegramId: person.telegramId, statusOf: loaded.allJobStatus,
++          claims: loaded.claims, telegramId: cPerson.telegramId, statusOf: loaded.allJobStatus,
+           since: conv.windowStart(ownLadder.windowDays), staleQuoteDays: ownLadder.staleQuoteDays,
+         });
++        // The same compliance the subbie's own statement applies — the two
++        // faces must never disagree about what a job pays.
++        const cPolicy = compliance.policyFor(settings);
++        const cState = (conversions[c.id].claimed || 0) >= ownLadder.minimumClaims
++          ? compliance.complianceAssessment({
++              policy: cPolicy,
++              rate: compliance.complianceRate({
++                jobs: own.map((x) => x.job), policy: cPolicy,
++                jsaDone: loaded.jsaDone || new Set(),
++                windowStart: conv.windowStart(ownLadder.windowDays), cutoffDate: cutoff,
++              }),
++            })
++          : null;
 +        statements[c.id] = buildStatement({
 +          contractor: c,
 +          jobs: withNewModelFigures({ jobs: own, receiptRows: receiptsByContractor[c.id], ownMaterialRows, cutoff }),
 +          allJobs: loaded.jobs, gstDivisor: GST,
 +          duplicatePolicy: settings.formPolicy?.duplicates || 'last',
 +          cutoffDate: cutoff,
++          compliance: cState,
 +        });
-         const claims = await store.listClaims(c.id).catch(() => []);
-         claimsByOwner[c.id] = claims.map((x) => ({
-           ...x,
+       }));
+ 
+       const today = new Date().toISOString().slice(0, 10);
 diff --git a/api/shell.mjs b/api/shell.mjs
 index 7bae839..5d217e7 100644
 --- a/api/shell.mjs
@@ -580,6 +753,128 @@ index 4b744fd..50725f8 100644
    const ok = results.filter((r) => r.outcome === OUTCOME.OK);
    const blocked = results.filter((r) => r.outcome === OUTCOME.AWAITING_FORM || r.outcome === OUTCOME.AMBIGUOUS_FORM);
    const helping = helperEarnings({ contractor, jobs: allJobs ?? jobs, gstDivisor });
+diff --git a/lib/compliance.mjs b/lib/compliance.mjs
+new file mode 100644
+index 0000000..f9108c4
+--- /dev/null
++++ b/lib/compliance.mjs
+@@ -0,0 +1,116 @@
++/**
++ * Compliance — 2 points of the rung hang on doing the paperwork.
++ *
++ * The deal (Steven, 8 Aug 2026): a job complies when every required item on
++ * it is done. A contractor keeps their rung rate when at least 80% of their
++ * jobs in the window comply; below that, the rate drops 2 points — 50 becomes
++ * 48. Assessed on the same 90-day rolling window as conversion, floored at
++ * the changeover so nobody is judged on jobs from before the rules existed.
++ *
++ * Two design rules carried over from the ladder:
++ *
++ *  - Store the RUNG and the FLAG, never a pre-baked 48. "Rung 0, compliance
++ *    failed" can answer what a stored 48 cannot: compliance recovers → back
++ *    to 50; they climb a rung while still failing → 58.
++ *  - A rate drop must arrive with its reason attached. An unexplained drop
++ *    is a dispute; an explained one is a conversation about paperwork.
++ *
++ * Version one measures the JSA only — it is a ServiceM8 form, so "done" is
++ * simply "a formresponse exists for this job", the same check Form 001 has
++ * always used. Photos and CCEW join later as tasks/attachments; the shape
++ * here (required set vs done set) already fits them.
++ *
++ * The 0-of-0 hole: a job with nothing required scores complete, so the
++ * required set must come from POLICY (every post-cutoff job requires a JSA),
++ * never from what happens to be attached to the job — otherwise the worst
++ * case reads as the best. requiredOn() is that policy, in one place.
++ */
++import { round2 } from './commission.mjs';
++
++export const DEFAULTS = { passPercent: 80, penaltyPoints: 2 };
++
++export const policyFor = (settings) => ({
++  ...DEFAULTS,
++  passPercent: Number(settings?.compliance?.passPercent) || DEFAULTS.passPercent,
++  penaltyPoints: Number(settings?.compliance?.penaltyPoints) || DEFAULTS.penaltyPoints,
++  jsaFormUuid: settings?.compliance?.jsaFormUuid || null,
++});
++
++/**
++ * Which jobs have a response for the given form, whatever ServiceM8 linked it
++ * by. Rows are matched tolerantly — a related-object uuid when present, and
++ * the "Job Number" answer as the fallback — because the two link styles both
++ * exist in the wild and a missed link must fail SAFE (job reads as not done,
++ * visibly, rather than silently passing).
++ */
++export function formDoneKeys(responses = [], formUuid) {
++  const done = new Set();
++  if (!formUuid) return done;
++  for (const r of responses) {
++    if (r.form_uuid !== formUuid) continue;
++    if (String(r.active) === '0') continue;
++    for (const k of [r.regarding_object_uuid, r.job_uuid, r.related_object_uuid]) {
++      if (k) done.add(String(k));
++    }
++    try {
++      const fields = JSON.parse(r.field_data || '[]');
++      const n = fields.find((f) => /job number/i.test(String(f.Question || '')));
++      if (n?.Response) done.add(String(n.Response).trim());
++    } catch { /* unreadable answers — the uuid keys above may still match */ }
++  }
++  return done;
++}
++
++/** Policy: what a post-cutoff job requires. Version one: a JSA, on every job. */
++export function requiredOn(job, policy) {
++  return policy.jsaFormUuid ? [{ key: 'jsa', label: 'JSA' }] : [];
++}
++
++/** One job: complies when every required item is done. */
++export function jobComplies(job, { policy, jsaDone }) {
++  const required = requiredOn(job, policy);
++  if (!required.length) return null; // nothing measurable — never counts either way
++  const done = required.every((item) =>
++    item.key !== 'jsa'
++    || jsaDone.has(String(job.uuid)) || jsaDone.has(String(job.jobNumber)));
++  return done;
++}
++
++/**
++ * The window: share of this contractor's post-cutoff jobs where everything
++ * required was done. Jobs before the window or the cutoff never count, and a
++ * period with nothing measurable returns null — unmeasured, not 0% and not
++ * 100%.
++ */
++export function complianceRate({ jobs = [], policy, jsaDone, windowStart, cutoffDate }) {
++  let measured = 0, passing = 0;
++  for (const job of jobs) {
++    if (!job.date) continue;
++    if (cutoffDate && job.date < cutoffDate) continue;
++    if (windowStart && job.date < windowStart) continue;
++    const ok = jobComplies(job, { policy, jsaDone });
++    if (ok === null) continue;
++    measured += 1;
++    if (ok) passing += 1;
++  }
++  if (!measured) return null;
++  return { measured, passing, percent: round2(passing / measured * 100) };
++}
++
++/**
++ * What the calculation needs: the flag, the points, and the sentence that
++ * explains the pay slip. Null when nothing is measurable — no penalty during
++ * the qualifying period, because you cannot fail a window that never ran.
++ */
++export function complianceAssessment({ rate, policy }) {
++  if (!rate) return null;
++  const failed = rate.percent < policy.passPercent;
++  return {
++    failed,
++    penaltyPoints: policy.penaltyPoints,
++    percent: rate.percent,
++    note: failed
++      ? `Compliance ran at ${rate.percent}% (${rate.passing} of ${rate.measured} jobs complete) — needed ${policy.passPercent}%, rate drops ${policy.penaltyPoints} points.`
++      : `Compliance at ${rate.percent}% (${rate.passing} of ${rate.measured} jobs) — rung rate holds.`,
++  };
++}
 diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
 index b1bb2c7..81b9b7d 100644
 --- a/lib/receipt-dupes.mjs
@@ -781,10 +1076,10 @@ index 004a382..9fc9b30 100644
      suburb: (job.job_address || '').split(',').slice(-3, -2).join('').trim() || (job.job_address || '').slice(0, 28),
      invoiceIncGst: parseFloat(job.total_invoice_amount || 0),
 diff --git a/lib/settings-store.mjs b/lib/settings-store.mjs
-index 8a050a1..26363fd 100644
+index 8a050a1..e5ef220 100644
 --- a/lib/settings-store.mjs
 +++ b/lib/settings-store.mjs
-@@ -89,6 +89,10 @@ export const EDITABLE = [
+@@ -89,6 +89,13 @@ export const EDITABLE = [
    // Reference data, not money: a bad row here means a chip spelled wrong on a
    // phone, which the person holding the docket can see and fix.
    'suppliers',
@@ -792,17 +1087,48 @@ index 8a050a1..26363fd 100644
 +  // vanStock carries the "own material, no receipt" cap and its review flag.
 +  // Both live here precisely so no date or dollar figure is hardwired.
 +  'changeover', 'vanStock',
++  // Compliance thresholds and the contracts-required switch — policy, not
++  // identity, so a phone edit can tune them without a deploy.
++  'compliance', 'contracts',
  ];
  
  /**
 diff --git a/lib/store.mjs b/lib/store.mjs
-index 3203033..73cdcff 100644
+index 3203033..2d26aaf 100644
 --- a/lib/store.mjs
 +++ b/lib/store.mjs
-@@ -127,6 +127,27 @@ export async function setRetention(contractorId, balance, claimId) {
+@@ -127,6 +127,55 @@ export async function setRetention(contractorId, balance, claimId) {
    });
  }
  
++/* ---------- signed contracts ---------- */
++
++/**
++ * Settings are the contract; this record is the signature. Append-only —
++ * every signing (and every amendment, which is just a later signing) writes a
++ * new row carrying a SNAPSHOT of the terms as they stood, so "what exactly
++ * did Peter sign?" is answered by the row itself, not by inferring from
++ * today's settings. The newest row is the contract in force.
++ */
++export async function saveContract({ contractorId, docKey, terms, signedBy, note }) {
++  const signedAt = new Date().toISOString();
++  return put({
++    pk: pk(contractorId), sk: `CONTRACT#${signedAt}`,
++    contractorId, signedAt, docKey: docKey || null,
++    terms: terms || null, signedBy: signedBy || null, note: note || null,
++  });
++}
++
++export async function listContracts(contractorId) {
++  const rows = await queryPrefix(contractorId, 'CONTRACT#');
++  return rows.sort((a, b) => (a.signedAt < b.signedAt ? -1 : 1));
++}
++
++export async function currentContract(contractorId) {
++  const rows = await listContracts(contractorId);
++  return rows.length ? rows[rows.length - 1] : null;
++}
++
 +/* ---------- own material, no receipt ---------- */
 +
 +/**
@@ -827,7 +1153,7 @@ index 3203033..73cdcff 100644
  /* ---------- receipts ---------- */
  
  export async function saveReceipt(receipt) {
-@@ -141,6 +162,61 @@ export async function receiptsForJob(contractorId, jobNumber) {
+@@ -141,6 +190,61 @@ export async function receiptsForJob(contractorId, jobNumber) {
    return queryPrefix(contractorId, `RCPT#${jobNumber}#`);
  }
  
@@ -889,6 +1215,242 @@ index 3203033..73cdcff 100644
  /** Mark a receipt disputed, or clear it. Never deletes — the record stays. */
  export async function setReceiptDisputed(contractorId, jobNumber, receiptId, disputed, by) {
    const { UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
+diff --git a/scripts/changeover-2026-08-14.mjs b/scripts/changeover-2026-08-14.mjs
+new file mode 100644
+index 0000000..ee7b92d
+--- /dev/null
++++ b/scripts/changeover-2026-08-14.mjs
+@@ -0,0 +1,101 @@
++/**
++ * The 14 August changeover, as one reviewable settings write.
++ *
++ * What it does — all in settings, nothing in code:
++ *
++ *   1. Sets changeover.cutoffDate. This is THE switch: until it exists every
++ *      job calculates on the old model, whatever code is deployed.
++ *   2. Appends a new-model rule version to every network subbie, effective on
++ *      the cutoff: rung 0 (50%), one flat rate, materials funded by subbie.
++ *      Appends — never edits history, so pre-cutoff jobs keep their old rule.
++ *   3. Deletes Alex's stray rule of 2026-07-27 (70%, subbie-funded). Nobody
++ *      was on the new structure before the changeover; it should not exist.
++ *   4. Sets vanStock defaults ($50 cap, 5% review flag) if absent.
++ *   5. Sets retention to the agreed policy: 10% accrual to a $1,000 target.
++ *
++ * Dry run by default — prints the exact before/after and writes nothing.
++ *
++ *   node scripts/changeover-2026-08-14.mjs            # show what would change
++ *   node scripts/changeover-2026-08-14.mjs --apply    # write it, versioned
++ *
++ * The write goes through settings-store.save(), so the previous version is
++ * kept and the change carries a note — the same audit trail as a portal edit.
++ */
++import { loadStored, save } from '../lib/settings-store.mjs';
++
++const APPLY = process.argv.includes('--apply');
++const CUTOFF = process.env.CUTOFF_DATE || '2026-08-14';
++
++const settings = await loadStored();
++if (!settings) {
++  console.error('No stored settings — run against the live table (check AWS credentials/region).');
++  process.exit(1);
++}
++
++const changes = [];
++
++// 1. The switch.
++if (settings.changeover?.cutoffDate === CUTOFF) {
++  console.log(`changeover.cutoffDate already ${CUTOFF} — nothing to do there.`);
++} else {
++  changes.push(`changeover.cutoffDate: ${settings.changeover?.cutoffDate ?? '(unset)'} -> ${CUTOFF}`);
++  settings.changeover = { ...(settings.changeover || {}), cutoffDate: CUTOFF };
++}
++
++// 2. A new-model rule for every network subbie, effective on the cutoff.
++const NEW_RULE = { from: CUTOFF, type: 'fixed', rates: { rate: 50 }, materialsFundedBy: 'subbie',
++  note: 'Changeover: ladder rung 0, tech buys material, reimbursed on top.' };
++const subbies = (settings.people || []).filter((p) => p.role === 'Subbie');
++for (const p of subbies) {
++  const rules = settings.commissionRules[p.id] || [];
++  if (rules.some((r) => r.from === CUTOFF)) {
++    console.log(`${p.name}: already has a rule effective ${CUTOFF} — left alone.`);
++    continue;
++  }
++  changes.push(`${p.name} (${p.id}): append rule from ${CUTOFF} — rate 50, subbie-funded`);
++  settings.commissionRules[p.id] = [...rules, NEW_RULE];
++}
++
++// 3. Alex's stray rule. Match precisely — date AND shape — so this can never
++// delete a legitimate rule that happens to share the date.
++const alex = (settings.people || []).find((p) => /alex/i.test(p.name));
++if (alex) {
++  const rules = settings.commissionRules[alex.id] || [];
++  const stray = rules.filter((r) => r.from === '2026-07-27' && r.materialsFundedBy === 'subbie');
++  if (stray.length) {
++    changes.push(`${alex.name}: delete stray rule of 2026-07-27 (${JSON.stringify(stray[0].rates)})`);
++    settings.commissionRules[alex.id] = rules.filter((r) => !stray.includes(r));
++  } else {
++    console.log(`${alex.name}: no stray 2026-07-27 rule found — nothing to delete.`);
++  }
++}
++
++// 4. Van stock defaults, only where unset — a tuned value is never clobbered.
++if (settings.vanStock?.defaultCapIncGst == null) {
++  changes.push('vanStock: default cap $50, review flag 5% of invoice');
++  settings.vanStock = { defaultCapIncGst: 50, flagPercentOfInvoice: 5, byContractor: {}, ...(settings.vanStock || {}) };
++}
++
++// 5. Retention: 10% to $1,000, held whole, released 12 months after the later
++// of losing job access or the last completed job (the release itself is a
++// human act; the target is what the engine enforces).
++const target = Number(settings.retention?.default?.target) || 0;
++if (target !== 1000) {
++  changes.push(`retention.default.target: ${target} -> 1000 (accrual stays 10%)`);
++  settings.retention = { ...(settings.retention || {}),
++    default: { ...(settings.retention?.default || {}), target: 1000, accrualPercent: 10 } };
++}
++
++if (!changes.length) { console.log('\nEverything already in place. No write needed.'); process.exit(0); }
++
++console.log(`\n${APPLY ? 'APPLYING' : 'DRY RUN — would apply'}:\n  - ${changes.join('\n  - ')}`);
++
++if (APPLY) {
++  const { savedAt } = await save({
++    settings, by: 'changeover-script',
++    note: `14 August changeover: cutoff ${CUTOFF}, ladder rung 0 for all subbies, van stock cap, retention target $1,000.`,
++  });
++  console.log(`\nSaved (versioned) at ${savedAt}. The previous settings version is retained.`);
++} else {
++  console.log('\nNothing written. Re-run with --apply to make it real.');
++}
+diff --git a/settings/portal-settings.json b/settings/portal-settings.json
+index 468588e..412d774 100644
+--- a/settings/portal-settings.json
++++ b/settings/portal-settings.json
+@@ -1,5 +1,5 @@
+ {
+-  "_comment": "Single source of truth for every configurable number. Nothing in lib/ or scripts/ may hardcode a rate, a percentage or a fee \u2014 if it varies by business decision, it belongs here. Replaced by DynamoDB when the portal is deployed; the shape stays the same.",
++  "_comment": "Single source of truth for every configurable number. Nothing in lib/ or scripts/ may hardcode a rate, a percentage or a fee — if it varies by business decision, it belongs here. Replaced by DynamoDB when the portal is deployed; the shape stays the same.",
+   "business": {
+     "name": "Mr Sparky Electrical Services Pty Ltd",
+     "entity": "Company",
+@@ -474,15 +474,81 @@
+   },
+   "_suppliersNote": "The wholesalers the crew actually stands at. On the phone this is a row of chips on the receipt form, so the same supplier is spelled the same way every time - which is what lets spend group and reconcile at all. Aliases are what the DOCKET prints: the paper says MIDDENDORP ELECTRIC CO PTY LTD, the trade says Middy's. Phone numbers are for dialling from the app later, and are left blank rather than guessed. Edited in the portal under Settings > Suppliers.",
+   "suppliers": [
+-    { "id": "middys", "name": "Middy's", "phone": "", "aliases": ["Middendorp", "Middendorp Electric"] },
+-    { "id": "lh", "name": "Lawrence & Hanson", "phone": "", "aliases": ["L&H", "Lawrence and Hanson"] },
+-    { "id": "mmem", "name": "MM Electrical", "phone": "", "aliases": ["MMEM", "MM Electrical Merchandising"] },
+-    { "id": "rexel", "name": "Rexel", "phone": "", "aliases": ["Ideal Electrical", "Rexel Electrical"] },
+-    { "id": "agm", "name": "AGM Electrical Supplies", "phone": "", "aliases": ["AGM", "AGM Electrical"] },
+-    { "id": "auslec", "name": "Auslec", "phone": "", "aliases": [] },
+-    { "id": "cnw", "name": "CNW", "phone": "", "aliases": ["CNW Electrical"] },
+-    { "id": "haymans", "name": "Haymans", "phone": "", "aliases": ["Haymans Electrical"] },
+-    { "id": "bunnings", "name": "Bunnings", "phone": "", "aliases": ["Bunnings Warehouse"] }
++    {
++      "id": "middys",
++      "name": "Middy's",
++      "phone": "",
++      "aliases": [
++        "Middendorp",
++        "Middendorp Electric"
++      ]
++    },
++    {
++      "id": "lh",
++      "name": "Lawrence & Hanson",
++      "phone": "",
++      "aliases": [
++        "L&H",
++        "Lawrence and Hanson"
++      ]
++    },
++    {
++      "id": "mmem",
++      "name": "MM Electrical",
++      "phone": "",
++      "aliases": [
++        "MMEM",
++        "MM Electrical Merchandising"
++      ]
++    },
++    {
++      "id": "rexel",
++      "name": "Rexel",
++      "phone": "",
++      "aliases": [
++        "Ideal Electrical",
++        "Rexel Electrical"
++      ]
++    },
++    {
++      "id": "agm",
++      "name": "AGM Electrical Supplies",
++      "phone": "",
++      "aliases": [
++        "AGM",
++        "AGM Electrical"
++      ]
++    },
++    {
++      "id": "auslec",
++      "name": "Auslec",
++      "phone": "",
++      "aliases": []
++    },
++    {
++      "id": "cnw",
++      "name": "CNW",
++      "phone": "",
++      "aliases": [
++        "CNW Electrical"
++      ]
++    },
++    {
++      "id": "haymans",
++      "name": "Haymans",
++      "phone": "",
++      "aliases": [
++        "Haymans Electrical"
++      ]
++    },
++    {
++      "id": "bunnings",
++      "name": "Bunnings",
++      "phone": "",
++      "aliases": [
++        "Bunnings Warehouse"
++      ]
++    }
+   ],
+   "payment": {
+     "_note": "When a claim becomes due and how remittance reaches the contractor. The portal knows what is outstanding and what is overdue; the bank sends the remittance advice to the address held against the company.",
+@@ -493,5 +559,25 @@
+     "remittanceSentBy": "bank",
+     "_remittanceNote": "'bank' means the payment file carries the remittance email and the bank sends the advice. 'portal' would mean sending it ourselves - not built."
+   },
+-  "_sampleDataNote": "ABNs, bank details, addresses and RCTI agreement dates below are SAMPLES so the build is complete end to end. Replace each in Settings -> Contractor details before anyone is paid; an RCTI raised against a sample ABN is not a valid tax invoice."
++  "_sampleDataNote": "ABNs, bank details, addresses and RCTI agreement dates below are SAMPLES so the build is complete end to end. Replace each in Settings -> Contractor details before anyone is paid; an RCTI raised against a sample ABN is not a valid tax invoice.",
++  "changeover": {
++    "_comment": "The Form 001 era ends here. Null means the old model everywhere — the code ships dark and this date is the switch. Set to 2026-08-14 at go-live.",
++    "cutoffDate": null
++  },
++  "vanStock": {
++    "_comment": "Own material, no receipt. The cap is the rule the tech lives inside; the flag percent is a review flag on the approval panel, never a gate. Zero in byContractor means receipts only for that person.",
++    "defaultCapIncGst": 50,
++    "flagPercentOfInvoice": 5,
++    "byContractor": {}
++  },
++  "compliance": {
++    "_comment": "Ships dark until jsaFormUuid is set. 2 points of the rung hang on >=80% of jobs completing every required item, measured on the same 90-day window as conversion, floored at the changeover.",
++    "jsaFormUuid": null,
++    "passPercent": 80,
++    "penaltyPoints": 2
++  },
++  "contracts": {
++    "_comment": "Settings are the contract. When required is true, a contractor with no locked signed contract cannot submit a claim. Ships dark.",
++    "required": false
++  }
+ }
 diff --git a/test/commission-new-model.test.mjs b/test/commission-new-model.test.mjs
 new file mode 100644
 index 0000000..86401c1
@@ -1049,6 +1611,81 @@ index 0000000..86401c1
 +  assert.equal(byNumber.new.outcome, OUTCOME.OK);            // new world pays
 +  assert.equal(s.totals.jobsIncGst, 500);                    // 1000 × 50%
 +  assert.equal(s.helperEarnings.length, 0);                  // no forms → no helping hand
++});
+diff --git a/test/compliance.test.mjs b/test/compliance.test.mjs
+new file mode 100644
+index 0000000..85db241
+--- /dev/null
++++ b/test/compliance.test.mjs
+@@ -0,0 +1,69 @@
++/**
++ * Compliance: 2 points of the rung hang on the paperwork.
++ * Run: node --test test/compliance.test.mjs
++ */
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { policyFor, formDoneKeys, jobComplies, complianceRate, complianceAssessment } from '../lib/compliance.mjs';
++
++const JSA = 'jsa-form-uuid';
++const policy = policyFor({ compliance: { jsaFormUuid: JSA, passPercent: 80, penaltyPoints: 2 } });
++
++const job = (n, date, uuid = `u-${n}`) => ({ jobNumber: String(n), uuid, date });
++
++test('formDoneKeys matches by related uuid and by Job Number answer, and fails safe', () => {
++  const done = formDoneKeys([
++    { form_uuid: JSA, active: '1', regarding_object_uuid: 'u-1' },
++    { form_uuid: JSA, active: '1', field_data: JSON.stringify([{ Question: 'Job Number', Response: '167595' }]) },
++    { form_uuid: JSA, active: '0', regarding_object_uuid: 'u-dead' },   // inactive never counts
++    { form_uuid: 'other-form', active: '1', regarding_object_uuid: 'u-2' },
++    { form_uuid: JSA, active: '1', field_data: 'not json' },            // unreadable — no crash, no match
++  ], JSA);
++  assert.equal(done.has('u-1'), true);
++  assert.equal(done.has('167595'), true);
++  assert.equal(done.has('u-dead'), false);
++  assert.equal(done.has('u-2'), false);
++});
++
++test('a job with no policy in force is unmeasured — never a free pass', () => {
++  const noPolicy = policyFor({});   // jsaFormUuid null → ships dark
++  assert.equal(jobComplies(job(1, '2026-08-20'), { policy: noPolicy, jsaDone: new Set() }), null);
++});
++
++test('the 80% window: 9 of 10 passes, 7 of 10 fails, nothing measured is null', () => {
++  const jobs = Array.from({ length: 10 }, (_, i) => job(i, '2026-08-20'));
++  const doneNine = new Set(jobs.slice(0, 9).map((j) => j.uuid));
++  const doneSeven = new Set(jobs.slice(0, 7).map((j) => j.uuid));
++
++  const nine = complianceRate({ jobs, policy, jsaDone: doneNine, cutoffDate: '2026-08-14' });
++  assert.equal(nine.percent, 90);
++  assert.equal(complianceAssessment({ rate: nine, policy }).failed, false);
++
++  const seven = complianceRate({ jobs, policy, jsaDone: doneSeven, cutoffDate: '2026-08-14' });
++  assert.equal(seven.percent, 70);
++  const a = complianceAssessment({ rate: seven, policy });
++  assert.equal(a.failed, true);
++  assert.equal(a.penaltyPoints, 2);
++  assert.match(a.note, /70% \(7 of 10 jobs complete\)/);
++  assert.match(a.note, /needed 80%/);
++
++  assert.equal(complianceRate({ jobs: [], policy, jsaDone: new Set() }), null);
++  assert.equal(complianceAssessment({ rate: null, policy }), null);   // qualifying period: no penalty
++});
++
++test('jobs before the cutoff or the window never count', () => {
++  const jobs = [job(1, '2026-08-10'), job(2, '2026-08-20'), job(3, '2026-05-01')];
++  const r = complianceRate({
++    jobs, policy, jsaDone: new Set(['u-2']),
++    cutoffDate: '2026-08-14', windowStart: '2026-06-01',
++  });
++  assert.equal(r.measured, 1);   // only job 2 — pre-cutoff and pre-window are out
++  assert.equal(r.percent, 100);
++});
++
++test('exactly 80% keeps the rate — the threshold is a floor, not a ceiling', () => {
++  const jobs = Array.from({ length: 10 }, (_, i) => job(i, '2026-08-20'));
++  const done8 = new Set(jobs.slice(0, 8).map((j) => j.uuid));
++  const r = complianceRate({ jobs, policy, jsaDone: done8, cutoffDate: '2026-08-14' });
++  assert.equal(complianceAssessment({ rate: r, policy }).failed, false);
 +});
 diff --git a/test/receipt-dupes.test.mjs b/test/receipt-dupes.test.mjs
 index f0e2b20..2bded23 100644

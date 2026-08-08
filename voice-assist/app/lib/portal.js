@@ -181,3 +181,13 @@ export const abnLookup = (q) => get(`/api/abr${qs({ q })}`);
 
 /** A short-lived URL to look at a receipt; the bucket blocks public access. */
 export const receiptViewUrl = (key) => get(`/api/receipts/view${qs({ key })}`);
+
+/**
+ * "Own material, no receipt" — van stock, declared on trust. Material bought
+ * earlier in bulk has no per-job docket and never can, so it is declared
+ * rather than photographed. The server holds the cap ($50 default, set per
+ * person, zero = receipts only) and refuses anything over it with the cap in
+ * the message. Zero clears a declaration.
+ */
+export const declareOwnMaterial = ({ jobNumber, amountIncGst, name }) =>
+  post("/api/material/declare", { jobNumber, amountIncGst, name });
