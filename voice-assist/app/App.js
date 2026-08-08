@@ -293,7 +293,7 @@ function Shell() {
           ) : null}
           {top?.name === "ownmaterial" ? (
             <View style={s.fill}>
-              <OwnMaterial jobNumber={top.jobNumber} onBack={pop} onSaved={pop} />
+              <OwnMaterial jobNumber={top.jobNumber} onBack={pop} />
             </View>
           ) : null}
         </View>
@@ -399,7 +399,7 @@ function Shell() {
           ) : null}
           {top?.name === "ownmaterial" ? (
             <View style={s.fill}>
-              <OwnMaterial jobNumber={top.jobNumber} onBack={pop} onSaved={pop} />
+              <OwnMaterial jobNumber={top.jobNumber} onBack={pop} />
             </View>
           ) : null}
           {top?.name === "submit" ? (

@@ -19,6 +19,7 @@ import {
 import { Cta, Header, SectionLabel } from "../../components/ui";
 import { C, R, S, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
+import { postJobNote } from "../../lib/api";
 
 export default function OwnMaterial({ jobNumber: initial, onBack, onSaved }) {
   const [jobNumber, setJobNumber] = useState(initial ? String(initial) : "");
@@ -39,6 +40,12 @@ export default function OwnMaterial({ jobNumber: initial, onBack, onSaved }) {
       });
       setSaved(r.declared);
       if (onSaved) onSaved(r.declared);
+      // Paper trail on the job card itself (Steven, 9 Aug): the SM8 diary
+      // shows the declaration without anyone opening the portal. Best-effort —
+      // the declaration is already saved; a failed note never fails the save.
+      postJobNote(jobNumber.trim(),
+        `Own material (van stock, no receipt): $${Number(amount).toFixed(2)} declared via Mr Sparky app.`,
+      ).catch(() => {});
     } catch (e) {
       // The server's message carries the real cap for this account —
       // "capped at $50.00 a job" — so it is shown as-is, not rewritten.
