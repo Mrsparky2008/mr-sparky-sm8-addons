@@ -31,9 +31,18 @@ export default function OwnMaterial({ jobNumber: initial, onBack, onSaved }) {
   const ready = !!(jobNumber.trim() && amount.trim() && !saving);
 
   async function save() {
+    // Saving the same number again changes nothing — say so instead of
+    // silently re-saving, which reads as a dead button, and instead of
+    // posting the same diary note a third time.
+    if (saved && Number(amount) === Number(saved.amountIncGst)) {
+      setError(null);
+      setSaved({ ...saved, unchanged: true });
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
+      const was = saved ? Number(saved.amountIncGst) : null;
       const r = await portal.declareOwnMaterial({
         jobNumber: jobNumber.trim(),
         amountIncGst: Number(amount),
@@ -44,7 +53,9 @@ export default function OwnMaterial({ jobNumber: initial, onBack, onSaved }) {
       // shows the declaration without anyone opening the portal. Best-effort —
       // the declaration is already saved; a failed note never fails the save.
       postJobNote(jobNumber.trim(),
-        `Own material (van stock, no receipt): $${Number(amount).toFixed(2)} declared via Mr Sparky app.`,
+        was === null
+          ? `Own material (van stock, no receipt): $${Number(amount).toFixed(2)} declared via Mr Sparky app.`
+          : `Own material (van stock, no receipt): updated to $${Number(amount).toFixed(2)} (was $${was.toFixed(2)}) via Mr Sparky app.`,
       ).catch(() => {});
     } catch (e) {
       // The server's message carries the real cap for this account —
@@ -89,8 +100,9 @@ export default function OwnMaterial({ jobNumber: initial, onBack, onSaved }) {
         {error ? <Text style={s.warn}>{error}</Text> : null}
         {saved ? (
           <Text style={s.ok}>
-            Declared ${Number(saved.amountIncGst).toFixed(2)} on #{saved.jobNumber}. It
-            comes back on top of your split, same as a receipted expense.
+            {saved.unchanged
+              ? `Already declared $${Number(saved.amountIncGst).toFixed(2)} on #${saved.jobNumber} — nothing to change.`
+              : `Declared $${Number(saved.amountIncGst).toFixed(2)} on #${saved.jobNumber}. It comes back on top of your split, same as a receipted expense.`}
           </Text>
         ) : null}
 
@@ -98,7 +110,7 @@ export default function OwnMaterial({ jobNumber: initial, onBack, onSaved }) {
         {saving ? (
           <ActivityIndicator color={C.brand} />
         ) : (
-          <Cta label={saved ? "Update it" : "Declare it"} onPress={save} disabled={!ready} />
+          <Cta label="Save" onPress={save} disabled={!ready} />
         )}
         <Pressable onPress={onBack} style={s.cancel} hitSlop={8}>
           <Text style={s.cancelText}>Cancel</Text>
