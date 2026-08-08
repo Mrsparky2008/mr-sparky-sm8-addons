@@ -110,11 +110,6 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
             onPress={() => onOpen("receipt", data)}
           />
           <HubTile
-            icon="tools" label="Own material"
-            sub="van stock, no receipt"
-            onPress={() => onOpen("ownmaterial", data)}
-          />
-          <HubTile
             icon="chart" label="Statement"
             sub={heldCount ? `${heldCount} job${heldCount === 1 ? "" : "s"} held` : "all jobs payable"}
             onPress={() => onOpen("statement", data)}

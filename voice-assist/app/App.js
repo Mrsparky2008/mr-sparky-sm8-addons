@@ -284,7 +284,16 @@ function Shell() {
 
           {top?.name === "jobreceipt" ? (
             <View style={s.fill}>
-              <AddReceipt jobNumbers={[top.jobNumber]} jobNumber={top.jobNumber} onBack={pop} onSaved={pop} />
+              <AddReceipt
+                jobNumbers={[top.jobNumber]} jobNumber={top.jobNumber}
+                onBack={pop} onSaved={pop}
+                onOwnMaterial={(jobNumber) => push({ name: "ownmaterial", jobNumber })}
+              />
+            </View>
+          ) : null}
+          {top?.name === "ownmaterial" ? (
+            <View style={s.fill}>
+              <OwnMaterial jobNumber={top.jobNumber} onBack={pop} onSaved={pop} />
             </View>
           ) : null}
         </View>
@@ -384,12 +393,13 @@ function Shell() {
                 jobNumbers={(top.data?.statement?.jobs || []).map((j) => j.jobNumber)}
                 onBack={pop}
                 onSaved={() => resetTab("pay")}
+                onOwnMaterial={(jobNumber) => push({ name: "ownmaterial", jobNumber })}
               />
             </View>
           ) : null}
           {top?.name === "ownmaterial" ? (
             <View style={s.fill}>
-              <OwnMaterial onBack={pop} onSaved={() => {}} />
+              <OwnMaterial jobNumber={top.jobNumber} onBack={pop} onSaved={pop} />
             </View>
           ) : null}
           {top?.name === "submit" ? (

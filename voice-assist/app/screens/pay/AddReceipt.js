@@ -49,7 +49,7 @@ function todayLocal() {
 
 const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic" };
 
-export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack, onSaved }) {
+export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack, onSaved, onOwnMaterial }) {
   const anchored = initial ? String(initial) : "";
   const chips = jobNumbers.map(String);
   const [jobNumber, setJobNumber] = useState(
@@ -314,6 +314,13 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
             <View style={{ gap: 8 }}>
               <Cta label="📷 Photograph the receipt" onPress={() => take(false)} />
               <Cta label="Choose from photos" tone="ghost" onPress={() => take(true)} />
+              {/* Van stock has no docket and never can — it was bought in bulk
+                  weeks ago. The declaration lives HERE, on the job, so the job
+                  number rides in from context instead of being typed. */}
+              {onOwnMaterial && jobNumber ? (
+                <Cta label="Van stock — own material, no receipt" tone="ghost"
+                  onPress={() => onOwnMaterial(jobNumber)} />
+              ) : null}
               <Text style={s.note}>
                 A photo is required — a receipt without one is not reimbursed. It's read
                 for you the moment it's taken; you check it before it's filed.
