@@ -1,5 +1,5 @@
 diff --git a/api/index.mjs b/api/index.mjs
-index 8225242..0b2826d 100644
+index 8225242..b918a66 100644
 --- a/api/index.mjs
 +++ b/api/index.mjs
 @@ -12,7 +12,7 @@
@@ -166,7 +166,7 @@ index 8225242..0b2826d 100644
 +    // and a docket is filed from a Work Order weeks before the job gets
 +    // there. This is what the job card's materials list reads.
 +    myReceipts: receiptRows.map((r) => ({
-+      jobNumber: r.jobNumber, supplier: r.supplier, amountIncGst: r.amountIncGst,
++      id: r.id, jobNumber: r.jobNumber, supplier: r.supplier, amountIncGst: r.amountIncGst,
 +      date: r.date, invoiceNumber: r.invoiceNumber, imageKey: r.imageKey || null,
 +      voided: !!r.voided, disputed: !!r.disputed,
 +    })),
@@ -235,7 +235,7 @@ index 8225242..0b2826d 100644
      // A short-lived URL to upload the photo straight to a private bucket, so
      // the image never passes through this function.
      // Query a receipt, or clear it. Admin only, and it NEVER deletes: the row
-@@ -773,6 +917,137 @@ export async function handler(event) {
+@@ -773,6 +917,154 @@ export async function handler(event) {
        return json(201, { adjustment });
      }
  
@@ -293,9 +293,26 @@ index 8225242..0b2826d 100644
 +    // Void a receipt, or bring it back. Never deletes: the row and its photo
 +    // stay, marked, so "this should not have existed" is itself on the record.
 +    if (path === '/api/receipts/void' && method === 'POST') {
-+      if (!who.isAdmin) return json(403, { error: 'Admins only' });
 +      const body = safeJson(event.body, event.isBase64Encoded);
-+      if (!body.contractorId || !body.jobNumber || !body.receiptId) {
++      // A subbie may void their OWN mistaken upload — wrong photo, wrong
++      // docket — but only while the job is not on a claim. Once money has
++      // been claimed against it, pulling evidence back out is exactly what
++      // the office should look at first, so it goes through them. Never a
++      // delete either way: the row and its photo stay on file, marked.
++      let contractorId = body.contractorId;
++      if (!who.isAdmin) {
++        const own = contractorFor(settings, who.person.name);
++        if (!own) return json(403, { error: 'No contractor record for this login' });
++        if (contractorId && contractorId !== own.id) {
++          return json(403, { error: 'Only your own receipts' });
++        }
++        contractorId = own.id;
++        const myClaims = await store.listClaims(own.id).catch(() => []);
++        if (claimedJobNumbers(myClaims).includes(String(body.jobNumber))) {
++          return json(403, { error: 'That job is already on a claim — ask the office to sort the receipt' });
++        }
++      }
++      if (!contractorId || !body.jobNumber || !body.receiptId) {
 +        return json(400, { error: 'contractorId, jobNumber and receiptId are all required' });
 +      }
 +      const voiding = body.voided !== false;
@@ -305,7 +322,7 @@ index 8225242..0b2826d 100644
 +      }
 +      try {
 +        const updated = await store.setReceiptVoided(
-+          body.contractorId, String(body.jobNumber), body.receiptId,
++          contractorId, String(body.jobNumber), body.receiptId,
 +          voiding, who.person.name, String(body.reason || '').trim() || null,
 +        );
 +        return json(200, { receipt: updated });
@@ -373,7 +390,7 @@ index 8225242..0b2826d 100644
      if (path === '/api/receipts/upload-url' && method === 'POST') {
        const body = safeJson(event.body, event.isBase64Encoded);
        const target = who.isAdmin && body.name ? body.name : who.person.name;
-@@ -853,16 +1128,18 @@ export async function handler(event) {
+@@ -853,16 +1145,18 @@ export async function handler(event) {
        const statements = {}, claimsByOwner = {}, conversions = {}, unfinished = {};
        const receiptsByContractor = {};
        const claimedNumbers = new Set();
@@ -396,7 +413,7 @@ index 8225242..0b2826d 100644
          const claims = await store.listClaims(c.id).catch(() => []);
          claimsByOwner[c.id] = claims.map((x) => ({
            ...x,
-@@ -870,18 +1147,38 @@ export async function handler(event) {
+@@ -870,18 +1164,38 @@ export async function handler(event) {
            review: reviewState({ claim: x, approvalDays: Number(settings.payment?.approvalDays) || 7 }),
          }));
          for (const n of claimedJobNumbers(claims)) claimedNumbers.add(n);

@@ -191,3 +191,12 @@ export const receiptViewUrl = (key) => get(`/api/receipts/view${qs({ key })}`);
  */
 export const declareOwnMaterial = ({ jobNumber, amountIncGst, name }) =>
   post("/api/material/declare", { jobNumber, amountIncGst, name });
+
+/**
+ * Remove your own mistaken upload. A VOID, never a delete — the row and its
+ * photo stay on file, marked, counted towards nothing. The server refuses
+ * once the job is on a claim: pulling evidence out of claimed money is the
+ * office's call, on the record.
+ */
+export const voidReceipt = ({ jobNumber, receiptId, reason }) =>
+  post("/api/receipts/void", { jobNumber, receiptId, reason });

@@ -7,9 +7,9 @@
 // carries EVERY receipt this contractor filed (a docket lands on a Work Order
 // weeks before the job reaches the statement), and ownMaterial carries the
 // declaration. Nothing here writes anything.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Alert, Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { Card, Empty, Header, SectionLabel } from "../components/ui";
 import { C, S, T, mono, money } from "../lib/theme";
@@ -19,21 +19,50 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [viewer, setViewer] = useState(null);   // { uri } while a docket photo is open
+  const [imgLoading, setImgLoading] = useState(false);
   const [opening, setOpening] = useState(null); // imageKey being fetched
 
-  useEffect(() => {
-    let alive = true;
+  const load = useCallback(() => {
     portal.statement()
-      .then((d) => { if (alive) setData(d); })
-      .catch((e) => { if (alive) setError(e?.message || "Couldn't load"); });
-    return () => { alive = false; };
+      .then((d) => { setData(d); setError(null); })
+      .catch((e) => setError(e?.message || "Couldn't load"));
   }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // Wrong docket, wrong job, fat finger — the uploader can remove their own
+  // mistake while the job is unclaimed. It VOIDS (row and photo stay on file,
+  // marked, counted towards nothing); once the job is on a claim the server
+  // says "ask the office", which is the point at which it should.
+  function confirmRemove(r) {
+    Alert.alert(
+      "Remove this receipt?",
+      `${r.supplier || "Receipt"} — $${Number(r.amountIncGst).toFixed(2)}. It stays on file marked removed, and counts towards nothing.`,
+      [
+        { text: "Keep it", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await portal.voidReceipt({
+                jobNumber: r.jobNumber, receiptId: r.id,
+                reason: "Wrong receipt — removed by the uploader in the app.",
+              });
+              load();
+            } catch (e) {
+              Alert.alert("Couldn't remove it", e?.message || "Try again, or ask the office.");
+            }
+          },
+        },
+      ],
+    );
+  }
 
   async function openImage(imageKey) {
     setOpening(imageKey);
     try {
       const r = await portal.receiptViewUrl(imageKey);
-      if (r?.url) setViewer({ uri: r.url });
+      if (r?.url) { setImgLoading(true); setViewer({ uri: r.url }); }
     } catch { /* the row simply stays closed */ }
     finally { setOpening(null); }
   }
@@ -60,8 +89,10 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
               <Card>
                 {rows.map((r, i) => (
                   <Pressable
-                    key={`${r.invoiceNumber || r.imageKey || i}`}
+                    key={`${r.id || r.invoiceNumber || i}`}
                     onPress={r.imageKey ? () => openImage(r.imageKey) : undefined}
+                    onLongPress={r.id ? () => confirmRemove(r) : undefined}
+                    delayLongPress={450}
                     style={[s.row, i === rows.length - 1 && s.rowLast]}
                   >
                     <View style={{ flex: 1 }}>
@@ -71,6 +102,7 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
                       <Text style={s.sub}>
                         {[r.date, r.invoiceNumber].filter(Boolean).join(" · ")}
                         {r.imageKey ? "  ·  tap for the docket" : ""}
+                        {"  ·  hold to remove"}
                       </Text>
                     </View>
                     {opening === r.imageKey
@@ -108,12 +140,38 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
         </ScrollView>
       )}
 
-      {/* The docket, full screen. Presigned link, so it just renders. */}
+      {/* The docket, full screen. Pinch to zoom (the whole point of opening
+          it is reading the small print), spinner while the image comes down
+          from S3, and closing is the ✕ ONLY — a stray tap mid-zoom must
+          never throw the docket away. */}
       <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
-        <Pressable style={s.viewer} onPress={() => setViewer(null)}>
-          {viewer ? <Image source={{ uri: viewer.uri }} style={s.viewerImg} resizeMode="contain" /> : null}
-          <Text style={s.viewerHint}>Tap anywhere to close</Text>
-        </Pressable>
+        <View style={s.viewer}>
+          <ScrollView
+            style={{ flex: 1, width: "100%" }}
+            contentContainerStyle={s.viewerScroll}
+            maximumZoomScale={5}
+            minimumZoomScale={1}
+            centerContent
+          >
+            {viewer ? (
+              <Image
+                source={{ uri: viewer.uri }}
+                style={s.viewerImg}
+                resizeMode="contain"
+                onLoadEnd={() => setImgLoading(false)}
+              />
+            ) : null}
+          </ScrollView>
+          {imgLoading ? (
+            <View style={s.viewerLoading} pointerEvents="none">
+              <ActivityIndicator size="large" color={C.brand} />
+              <Text style={s.viewerHint}>Fetching the docket…</Text>
+            </View>
+          ) : null}
+          <Pressable onPress={() => setViewer(null)} style={s.viewerClose} hitSlop={12}>
+            <Text style={s.viewerCloseText}>✕</Text>
+          </Pressable>
+        </View>
       </Modal>
     </View>
   );
@@ -134,7 +192,15 @@ const s = StyleSheet.create({
   totalRow: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4, marginTop: 2 },
   totalLabel: { ...T.small },
   totalValue: { color: C.ink, fontSize: 14.5, fontWeight: "800" },
-  viewer: { flex: 1, backgroundColor: "rgba(6,10,18,.96)", alignItems: "center", justifyContent: "center" },
-  viewerImg: { width: "100%", height: "86%" },
-  viewerHint: { color: C.muted, fontSize: 12, marginTop: 8 },
+  viewer: { flex: 1, backgroundColor: "rgba(6,10,18,.97)" },
+  viewerScroll: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
+  viewerImg: { width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.88 },
+  viewerLoading: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, alignItems: "center", justifyContent: "center", gap: 10 },
+  viewerHint: { color: C.muted, fontSize: 12 },
+  viewerClose: {
+    position: "absolute", top: 54, right: 20, width: 40, height: 40, borderRadius: 20,
+    backgroundColor: "rgba(22,35,58,.9)", borderWidth: 1, borderColor: C.line,
+    alignItems: "center", justifyContent: "center",
+  },
+  viewerCloseText: { color: C.ink, fontSize: 17, fontWeight: "700" },
 });
