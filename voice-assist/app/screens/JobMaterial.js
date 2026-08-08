@@ -14,6 +14,7 @@ import {
 import { Card, Empty, Header, SectionLabel } from "../components/ui";
 import { C, S, T, mono, money } from "../lib/theme";
 import * as portal from "../lib/portal";
+import { postJobNote } from "../lib/api";
 
 export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
   const [data, setData] = useState(null);
@@ -55,6 +56,39 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
           },
         },
       ],
+    );
+  }
+
+  // Edit the declaration in place. Re-declaring overwrites server-side and
+  // zero clears it; the cap is enforced at the server, whose message names
+  // the real figure for this account. iOS-native prompt — the dev fleet.
+  function editDeclared() {
+    const current = data?.ownMaterial?.[String(jobNumber)];
+    Alert.prompt(
+      "Own material, no receipt",
+      "New amount inc GST — zero clears it. Over your cap needs a receipt instead.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Save",
+          onPress: async (text) => {
+            const amount = Number(text);
+            if (!Number.isFinite(amount) || amount < 0) return;
+            try {
+              await portal.declareOwnMaterial({ jobNumber, amountIncGst: amount });
+              await postJobNote(String(jobNumber),
+                `Own material (van stock, no receipt): updated to $${amount.toFixed(2)} (was $${Number(current?.amountIncGst || 0).toFixed(2)}) via Mr Sparky app.`,
+              ).catch(() => {});
+              load();
+            } catch (e) {
+              Alert.alert("Couldn't save it", e?.message || "Try again.");
+            }
+          },
+        },
+      ],
+      "plain-text",
+      String(current?.amountIncGst ?? ""),
+      "decimal-pad",
     );
   }
 
@@ -118,13 +152,13 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
             <View>
               <SectionLabel>Own material — no receipt</SectionLabel>
               <Card>
-                <View style={[s.row, s.rowLast]}>
+                <Pressable onPress={editDeclared} style={[s.row, s.rowLast]}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.supplier}>Van stock, declared</Text>
-                    <Text style={s.sub}>off your van — no docket exists</Text>
+                    <Text style={s.sub}>off your van — no docket exists  ·  tap to edit</Text>
                   </View>
                   <Text style={[s.amount, mono]}>{money(declared.amountIncGst)}</Text>
-                </View>
+                </Pressable>
               </Card>
             </View>
           ) : null}
