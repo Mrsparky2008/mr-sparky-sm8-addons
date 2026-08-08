@@ -1,5 +1,5 @@
 diff --git a/api/index.mjs b/api/index.mjs
-index 8225242..b918a66 100644
+index 8225242..c1a7a79 100644
 --- a/api/index.mjs
 +++ b/api/index.mjs
 @@ -12,7 +12,7 @@
@@ -308,7 +308,7 @@ index 8225242..b918a66 100644
 +        }
 +        contractorId = own.id;
 +        const myClaims = await store.listClaims(own.id).catch(() => []);
-+        if (claimedJobNumbers(myClaims).includes(String(body.jobNumber))) {
++        if (claimedJobNumbers(myClaims).has(String(body.jobNumber))) {
 +          return json(403, { error: 'That job is already on a claim — ask the office to sort the receipt' });
 +        }
 +      }
