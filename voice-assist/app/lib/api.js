@@ -46,10 +46,16 @@ async function apiGet(path) {
   return j;
 }
 
-/** Recent jobs when q is empty, fuzzy search when it isn't. */
+/**
+ * Recent jobs when q is empty, fuzzy search when it isn't. With no query the
+ * backend sends the newest of EACH bucket plus the real totals, so the bucket
+ * headers can say how many there are rather than how many were sent.
+ */
 export async function fetchJobs(q) {
   const j = await apiGet(`/api/jobs${q ? `?q=${encodeURIComponent(q)}` : ""}`);
-  return j.matches || [];
+  const matches = j.matches || [];
+  matches.counts = j.counts || null;
+  return matches;
 }
 
 /** Everything the job card shows: status, description, contacts, billing, notes. */
@@ -61,6 +67,55 @@ export function fetchJob(jobNumber) {
 export function fetchDiary(date) {
   return apiGet(`/api/diary${date ? `?date=${encodeURIComponent(date)}` : ""}`);
 }
+
+async function apiPost(path, body) {
+  const token = await getIdToken();
+  const res = await fetch(BACKEND + path, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) throw httpError(401);
+  let j = null;
+  try { j = await res.json(); } catch {}
+  if (!res.ok || !j?.ok) throw new Error(j?.error || `backend error ${res.status}`);
+  return j;
+}
+
+/** Add a note to the job — an SM8 note, on the SM8 job card, immediately. */
+export const postJobNote = (jobNumber, note) =>
+  apiPost(`/api/job/${encodeURIComponent(jobNumber)}/note`, { note });
+
+/**
+ * File a record copy of a receipt photo into SM8's job diary. Best-effort
+ * paper trail — the portal holds the working copy that gets reimbursed.
+ */
+export const postReceiptCopy = (jobNumber, { imageB64, fileType, caption }) =>
+  apiPost(`/api/job/${encodeURIComponent(jobNumber)}/receipt-copy`, { imageB64, fileType, caption });
+
+/**
+ * Read a photographed docket. Returns { receipt, docket, unreadable } — the
+ * fields it could read, and, if the paper quotes a job number, what SM8 says
+ * that job is. Nothing is filed; the fields land in the form for a human to
+ * confirm. Missing values come back null rather than guessed.
+ */
+export const readReceipt = ({ imageB64, contentType }) =>
+  apiPost("/api/receipt/read", { imageB64, contentType });
+
+/**
+ * Put a real task on somebody's list in ServiceM8.
+ *
+ * A note is not enough and the data says so: the only three notes ever flagged
+ * "action required" in this account go back to October 2025 and none has been
+ * completed. An @mention can't be written through the API either — ServiceM8
+ * stores "@marites" as plain characters, and fires the notification from its
+ * own app as you type. A task has an owner, a due date and a tick box.
+ */
+export const postJobTask = (jobNumber, { name, details, assignee, dueDate }) =>
+  apiPost(`/api/job/${encodeURIComponent(jobNumber)}/task`, { name, details, assignee, dueDate });
+
+/** Who a note or a query can be handed to. */
+export const fetchStaff = () => apiGet("/api/staff");
 
 // One conversation turn. Resolves { reply } after the stream ends.
 // onDelta(text) per text fragment; onAudio(seq, b64mp3) per Polly chunk.

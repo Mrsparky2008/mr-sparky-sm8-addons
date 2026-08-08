@@ -44,7 +44,14 @@ export const T = {
   small: { fontSize: 12.5, lineHeight: 17, color: C.muted },
 };
 
-export const money = (n) => `$${(Number(n) || 0).toFixed(2)}`;
+// $23,587.62 — the comma is what makes a five-figure number readable at arm's
+// length in a ute. Formatting only; the number itself always arrives computed.
+// Deduction lines are negative, and "-$1,550.67" reads right where "$-" doesn't.
+export function money(n) {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${v < 0 ? "-$" : "$"}${abs}`;
+}
 
 // ServiceM8 addresses arrive with embedded newlines; a job chip is one line.
 export const oneLine = (s) => String(s || "").replace(/\s+/g, " ").trim();

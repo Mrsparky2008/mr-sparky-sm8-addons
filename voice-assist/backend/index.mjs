@@ -14,7 +14,7 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
-import { runTurn, jobIndex, buildDossier, executeTool } from "./brain.mjs";
+import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
 
 const polly = new PollyClient({});
@@ -127,12 +127,20 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
     if (method === "POST" && path === "/llm/chat/completions") {
       const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
       if (!LLM_TOKEN || headers["authorization"] !== `Bearer ${LLM_TOKEN}`) {
+        // Silent before. If this token ever drifts out of step with the Vapi
+        // credential, every turn 401s and the call simply goes quiet — the
+        // exact symptom, with nothing anywhere saying so.
+        console.warn(`llm bridge: REJECTED — ${LLM_TOKEN ? "token mismatch" : "LLM_TOKEN not set"}`);
         return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ error: "unauthorized" }));
       }
       let body = {};
       try {
         body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : event.body || "{}");
       } catch {}
+      // A successful turn used to log NOTHING, so "Charlie isn't answering" and
+      // "Charlie was never asked" looked identical from CloudWatch. That cost
+      // an evening on a fault that turned out not to be in this Lambda at all.
+      console.log(`llm bridge: turn in — ${(body.messages || []).length} messages, call ${body.call?.id || "(none)"}`);
 
       // Caller gate: this brain can WRITE to ServiceM8, and the phone number is
       // public-facing (Henri's Text-us line). Only allowlisted callers get the
@@ -294,6 +302,170 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       stream.end();
       return;
     }
+    // ---- Native app writes ------------------------------------------------
+    // Two, and deliberately only two — Steven's scope line (2026-08-06): the
+    // app is Charlie's cockpit plus the money loop, not an SM8 replacement.
+    // Both write INTO ServiceM8 itself; the app never keeps its own truth.
+    if (method === "POST" && path.startsWith("/api/job/")) {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const jsonOut = (status, body) => respond(status, {
+        "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      }, JSON.stringify(body));
+
+      let who;
+      try {
+        who = await verifyIdToken(bearer(headers));
+      } catch {
+        return jsonOut(401, { ok: false, error: "not signed in" });
+      }
+
+      // Everything the backend writes rides the one SM8 API key, so SM8
+      // attributes it all to the bot account. The stamp puts the real author
+      // on the record — from the VERIFIED token, not from anything the app
+      // sends, so it can't be forged by a client.
+      const stamp = `Mr Sparky App (${who.name || who.email.split("@")[0]})`;
+
+      const m = /^\/api\/job\/(\d+)\/(note|receipt-copy|task)$/.exec(path);
+      if (!m) return jsonOut(404, { ok: false, error: "no such route" });
+
+      const index = await jobIndex();
+      const job = index.find((j) => String(j.number) === m[1]);
+      if (!job) return jsonOut(404, { ok: false, error: "no such job" });
+
+      let payload = {};
+      try {
+        payload = JSON.parse(event.isBase64Encoded
+          ? Buffer.from(event.body || "", "base64").toString("utf8")
+          : event.body || "{}");
+      } catch {
+        return jsonOut(400, { ok: false, error: "bad request body" });
+      }
+
+      // A task, because a note nobody is assigned to is a note nobody reads.
+      // The three notes ever flagged action_required in this account date back
+      // to October 2025 and none has been completed; every job queue has no
+      // subscribed staff. A task has an owner and a tick box.
+      if (m[2] === "task") {
+        const title = String(payload.name || "").trim();
+        if (!title) return jsonOut(400, { ok: false, error: "The task needs a title." });
+        const r = await createTask({
+          job_uuid: job.uuid,
+          name: title,
+          details: `${payload.details ? `${String(payload.details).trim()}\n\n` : ""}Raised by ${stamp}.`,
+          assigneeName: payload.assignee,
+          dueDate: payload.dueDate,
+        });
+        if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+        return jsonOut(200, { ok: true, task_uuid: r.task_uuid, assignedTo: r.assignedTo });
+      }
+
+      if (m[2] === "note") {
+        const note = String(payload.note || "").trim();
+        if (!note) return jsonOut(400, { ok: false, error: "The note is empty." });
+        const r = await executeTool("add_note", { job_uuid: job.uuid, note: `${stamp}: ${note}` });
+        if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+        return jsonOut(200, { ok: true });
+      }
+
+      // Receipt record-copy: the portal keeps the working copy that gets
+      // reimbursed; this puts the same photo on the SM8 job card as the
+      // paper trail. Caption becomes the attachment name.
+      const bytes = Buffer.from(String(payload.imageB64 || ""), "base64");
+      if (!bytes.length) return jsonOut(400, { ok: false, error: "No image supplied." });
+      if (bytes.length > 5 * 1024 * 1024) return jsonOut(413, { ok: false, error: "Photo too large." });
+      // SM8 caps the attachment name at 120. Trim the CAPTION to fit, never
+      // the stamp — the stamp is the record-keeping half, and a long supplier
+      // name was quietly eating it off the end.
+      const room = Math.max(12, 120 - stamp.length - 3);
+      const caption = String(payload.caption || "Receipt").slice(0, room);
+      const r = await attachFileToJob({
+        job_uuid: job.uuid,
+        name: `${caption} — ${stamp}`,
+        fileType: payload.fileType === ".png" ? ".png" : ".jpg",
+        contentType: payload.fileType === ".png" ? "image/png" : "image/jpeg",
+        bytes,
+      });
+      if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+      return jsonOut(200, { ok: true, attachment_uuid: r.attachment_uuid });
+    }
+
+    // ---- Read a receipt ----------------------------------------------------
+    // The photo goes to Claude, the fields come back, the human confirms them.
+    // Nothing is filed here: this route writes to nothing and returns only what
+    // was legible on the paper, plus — if the docket quotes a job number — what
+    // ServiceM8 says that job actually is, so the app can flag a mismatch with
+    // the job the receipt is being filed against.
+    if (method === "POST" && path === "/api/receipt/read") {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const jsonOut = (status, body) => respond(status, {
+        "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      }, JSON.stringify(body));
+
+      try {
+        await verifyIdToken(bearer(headers));
+      } catch {
+        return jsonOut(401, { ok: false, error: "not signed in" });
+      }
+
+      let payload = {};
+      try {
+        payload = JSON.parse(event.isBase64Encoded
+          ? Buffer.from(event.body || "", "base64").toString("utf8")
+          : event.body || "{}");
+      } catch {
+        return jsonOut(400, { ok: false, error: "bad request body" });
+      }
+
+      const imageB64 = String(payload.imageB64 || "");
+      if (!imageB64) return jsonOut(400, { ok: false, error: "No photo supplied." });
+      // base64 is 4 chars per 3 bytes; the Messages API caps an image at 5MB.
+      if (imageB64.length > 7 * 1024 * 1024) {
+        return jsonOut(413, { ok: false, error: "That photo is too big to read." });
+      }
+      const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+      const contentType = ALLOWED.has(payload.contentType) ? payload.contentType : "image/jpeg";
+
+      let read;
+      try {
+        read = await readReceipt({ imageB64, contentType });
+      } catch (err) {
+        console.error("receipt read failed:", err);
+        return jsonOut(502, { ok: false, error: "Couldn't read that one — type it in." });
+      }
+
+      // A number printed on a docket is a claim, not a fact. Check it against
+      // ServiceM8 before the app shows it, so an OCR misread of an account
+      // number can't masquerade as somebody else's job.
+      let docket = null;
+      if (read.jobNumber) {
+        const index = await jobIndex().catch(() => []);
+        const job = index.find((j) => String(j.number) === read.jobNumber);
+        docket = {
+          jobNumber: read.jobNumber,
+          label: read.jobNumberLabel,
+          known: !!job,
+          address: job?.address || null,
+          contact: job?.contact || null,
+          status: job?.status || null,
+        };
+      }
+
+      return jsonOut(200, {
+        ok: true,
+        receipt: {
+          supplier: read.supplier,
+          amountIncGst: read.amountIncGst,
+          date: read.date,
+          invoiceNumber: read.invoiceNumber,
+          abn: read.abn,
+        },
+        docket,
+        unreadable: read.unreadable,
+      });
+    }
+
     // ---- Native app data routes -------------------------------------------
     // The voice loop is Charlie's; these are for the screens around him — the
     // jobs list, the day diary, a job card. Signed in with the SAME Cognito
@@ -319,17 +491,33 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
 
       if (path === "/api/me") return jsonOut(200, { ok: true, ...who });
 
+      // Who a note or a query can be handed to.
+      if (path === "/api/staff") return jsonOut(200, { ok: true, staff: await staffList() });
+
       if (path === "/api/jobs") {
         const query = String(q.q || "").trim();
         if (!query) {
-          // No search yet: the most recent jobs, which is what "recents" means
-          // on a phone that has just been opened. Job numbers climb over time.
+          // The app buckets these under ServiceM8's own names, so send the
+          // most recent of EACH bucket rather than the most recent overall.
+          // Taking the top 12 by number returned almost nothing but Quotes —
+          // new enquiries arrive as quotes, so they own the high numbers, and
+          // Work Order and Completed were left empty below a long scroll.
           const index = await jobIndex();
-          const recent = [...index]
-            .sort((a, b) => Number(b.number) - Number(a.number))
-            .slice(0, 12)
-            .map((j) => ({ job_uuid: j.uuid, job_number: j.number, status: j.status, address: j.address, contact: j.contact || undefined, work: j.description ? j.description.slice(0, 90) : undefined }));
-          return jsonOut(200, { ok: true, matches: recent });
+          const BUCKETS = ["Quote", "Work Order", "Completed"];
+          const PER_BUCKET = 8;
+          const newestFirst = [...index].sort((a, b) => Number(b.number) - Number(a.number));
+          const counts = {};
+          const picked = [];
+          for (const j of newestFirst) {
+            const bucket = BUCKETS.find((b) => b === j.status);
+            if (!bucket) continue;
+            counts[bucket] = (counts[bucket] || 0) + 1;
+            if (counts[bucket] <= PER_BUCKET) picked.push(j);
+          }
+          const recent = picked.map((j) => ({ job_uuid: j.uuid, job_number: j.number, status: j.status, address: j.address, contact: j.contact || undefined, work: j.description ? j.description.slice(0, 90) : undefined }));
+          // Full totals so the bucket headers can say how many there really
+          // are — the phone counts what it was sent, which is not the truth.
+          return jsonOut(200, { ok: true, matches: recent, counts });
         }
         const result = await executeTool("search_jobs", { query });
         return jsonOut(200, { ok: true, ...result });

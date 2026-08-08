@@ -773,6 +773,183 @@ export async function executeTool(name, input) {
 
 // Everything about the anchored job, fetched ONCE and carried in the prompt so
 // the assistant answers from what it already knows instead of narrating lookups.
+/**
+ * Attach a file to a job so it shows in ServiceM8's own job diary.
+ *
+ * Two-step per SM8's docs: create the Attachment record (uuid comes back in
+ * x-record-uuid), then POST the bytes as multipart to Attachment/{uuid}.file.
+ * Used for receipt record-copies — the portal keeps the working copy that gets
+ * reimbursed; this is the paper trail on the job card.
+ */
+export async function attachFileToJob({ job_uuid, name, fileType, bytes, contentType }) {
+  const rec = await sm8("POST", "/attachment.json", {
+    related_object: "job",
+    related_object_uuid: job_uuid,
+    attachment_name: String(name || "attachment").slice(0, 120),
+    file_type: fileType || ".jpg",
+    active: true,
+  });
+  if (rec.status < 200 || rec.status >= 300) {
+    return { error: `Attachment record failed: ${rec.status}` };
+  }
+  const uuid = rec.headers.get("x-record-uuid");
+  if (!uuid) return { error: "Attachment record came back without a uuid" };
+
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: contentType || "image/jpeg" }), `upload${fileType || ".jpg"}`);
+  const up = await fetch(`${SM8_BASE}/Attachment/${encodeURIComponent(uuid)}.file`, {
+    method: "POST",
+    headers: { "X-Api-Key": API_KEY, Accept: "application/json" },
+    body: form,
+  });
+  if (!up.ok) return { error: `File upload failed: ${up.status}` };
+  return { ok: true, attachment_uuid: uuid };
+}
+
+/**
+ * Read a photographed supplier docket.
+ *
+ * Steven's spec (2026-08-06): "AI can read the receipt, fill in all the
+ * details. If it doesn't have a job number, ask for it. If it has the wrong
+ * job number, flag it."
+ *
+ * So this READS and it does not decide. It returns only what is legibly on the
+ * paper, leaves anything it can't read out entirely rather than guessing, and
+ * says which words a job number came from so the app can show its working. The
+ * phone puts the values in editable fields and the human presses save — the
+ * model never files anything by itself.
+ *
+ * Forced tool call rather than free prose: the shape comes back schema-clean,
+ * so a chatty model can't turn "$182.60" into a sentence the app has to parse.
+ */
+const RECEIPT_TOOL = {
+  name: "receipt",
+  description: "Record what is legibly printed on this supplier receipt.",
+  input_schema: {
+    type: "object",
+    properties: {
+      supplier: { type: "string", description: "Trading name of the supplier, as printed. e.g. Middy's, Lawrence & Hanson, Bunnings." },
+      amountIncGst: { type: "number", description: "The TOTAL amount payable including GST — the final total, not a subtotal, not the GST line." },
+      date: { type: "string", description: "Date of the receipt as YYYY-MM-DD. Australian dockets are DAY first: 04/08/2026 is 4 August 2026." },
+      invoiceNumber: { type: "string", description: "Invoice, docket or tax invoice number as printed." },
+      abn: { type: "string", description: "The SUPPLIER's ABN — 11 digits, usually near their trading name at the top. NOT the customer's ABN: an account invoice made out to the buyer prints theirs too, and taking the wrong one is worse than taking none." },
+      jobNumber: { type: "string", description: "A job/order/site reference ONLY if the docket explicitly labels one (Job, Order, PO, Ref, Site). Never infer it from an invoice or account number." },
+      jobNumberLabel: { type: "string", description: "The exact printed words the job number was taken from, e.g. 'Order No: 4821'." },
+      unreadable: { type: "boolean", description: "True if the photo is too blurred, cropped or dark to read the totals." },
+    },
+    required: [],
+  },
+};
+
+export async function readReceipt({ imageB64, contentType = "image/jpeg" }) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": CLAUDE_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 1024,
+      tools: [RECEIPT_TOOL],
+      tool_choice: { type: "tool", name: "receipt" },
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: contentType, data: imageB64 } },
+          {
+            type: "text",
+            text: [
+              "This is a photo of a supplier receipt for an Australian electrical contractor.",
+              "Record only what you can actually READ on the paper.",
+              "Omit any field you cannot read — an omitted field is correct, a guessed one is a false record someone signs off on.",
+              "The amount is the final total INCLUDING GST.",
+              "The ABN is the SUPPLIER's — the business issuing the invoice, printed with their name and logo.",
+              "If the docket is an account invoice addressed to a customer, that customer's ABN also appears; do not report that one.",
+            ].join(" "),
+          },
+        ],
+      }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const body = await res.json();
+  const call = (body.content || []).find((b) => b.type === "tool_use" && b.name === "receipt");
+  const out = call?.input || {};
+
+  // Tidy, never invent. Anything that doesn't survive these checks is dropped
+  // so the field arrives empty and the human fills it in.
+  const amount = Number(out.amountIncGst);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date || "")) ? out.date : null;
+  return {
+    supplier: String(out.supplier || "").trim().slice(0, 80) || null,
+    amountIncGst: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : null,
+    date,
+    invoiceNumber: String(out.invoiceNumber || "").trim().slice(0, 40) || null,
+    // Eleven digits or nothing. The portal re-checks the mod-89 checksum and
+    // drops anything that fails it, so a misread never becomes an identity.
+    abn: (String(out.abn || "").replace(/[^0-9]/g, "").match(/^\d{11}$/) || [null])[0],
+    jobNumber: (String(out.jobNumber || "").match(/\d{3,7}/) || [null])[0],
+    jobNumberLabel: String(out.jobNumberLabel || "").trim().slice(0, 60) || null,
+    unreadable: out.unreadable === true,
+  };
+}
+
+/**
+ * Put a real task on somebody's list.
+ *
+ * Steven, on being offered a note: "a note on SM8 is actually useless unless
+ * it's addressed to someone... it would just sit there and the office wouldn't
+ * notice it." He is right, and checking the data proved it twice over — the
+ * three notes ever flagged action_required go back to October 2025 and not one
+ * has been completed, and every job queue has an empty subscribed_staff.
+ *
+ * @mentions are not an option either. A note posted from the ServiceM8 app
+ * stores "@marites" as plain characters with no staff uuid anywhere on the
+ * record: the app parses the @ as you type and fires the notification itself.
+ * Written through the API it would LOOK like a mention and notify nobody,
+ * which is worse than saying nothing — it would look handled.
+ *
+ * A task carries assigned_to_staff_uuid, a due date, and task_complete. It
+ * lands on a person and it can be seen to have been dealt with.
+ */
+export async function createTask({ job_uuid, name, details, assigneeName, dueDate }) {
+  const staff = await getStaff().catch(() => []);
+  const wanted = String(assigneeName || process.env.TASK_ASSIGNEE || "Marites").toLowerCase().trim();
+  const hit = staff.find((x) => x.name.toLowerCase().includes(wanted))
+    || staff.find((x) => wanted.includes(x.name.toLowerCase().split(" ")[0]));
+
+  const r = await sm8("POST", "/task.json", {
+    related_object: "job",
+    related_object_uuid: job_uuid,
+    name: String(name || "Task").slice(0, 120),
+    task_details: String(details || "").slice(0, 2000),
+    // Unassigned rather than assigned to the wrong person: a task on nobody's
+    // list is visible on the job; a task on the wrong list is invisible AND
+    // looks handled.
+    assigned_to_staff_uuid: hit?.uuid || "",
+    due_date: dueDate || tomorrowInTz(),
+    active: true,
+  });
+  if (r.status < 200 || r.status >= 300) return { error: `Task failed: ${r.status}` };
+  return { ok: true, task_uuid: r.headers.get("x-record-uuid"), assignedTo: hit?.name || null };
+}
+
+/** Due tomorrow, Sydney — a query raised on site is a next-morning job. */
+function tomorrowInTz() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** Active staff, for "who should look at this". */
+export async function staffList() {
+  return (await getStaff().catch(() => [])).map((s) => ({ uuid: s.uuid, name: s.name }));
+}
+
 export async function buildDossier(uuid) {
   const [j, contacts, notes, acts, mats, staff] = await Promise.all([
     sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),
@@ -788,8 +965,25 @@ export async function buildDossier(uuid) {
     description: String(job.job_description || "").slice(0, 700),
     contacts: toArray(contacts.body).filter((c) => c.job_uuid === uuid)
       .map((c) => `${c.type}: ${`${c.first || ""} ${c.last || ""}`.trim()}${c.mobile ? ` ${c.mobile}` : ""}`),
-    bookings: toArray(acts.body).filter((a) => a.job_uuid === uuid)
+    // ServiceM8 keeps two different things in jobactivity, and showing both as
+    // "bookings" is what put eight entries on job 167595 — one of them 32
+    // seconds long. A SCHEDULED activity is a diary booking somebody made. A
+    // RECORDED one is the job timer running while the app had the job open, so
+    // they overlap, they stack up through a day, and they are not appointments.
+    bookings: toArray(acts.body).filter((a) => a.job_uuid === uuid && Number(a.activity_was_scheduled) === 1)
       .map((a) => ({ activity_uuid: a.uuid, staff: staffName(staff, a.staff_uuid), start: a.start_date, end: a.end_date })),
+    // Time actually clocked on the job. Summed here rather than on the phone,
+    // and only where both ends exist — a timer still running has no duration
+    // yet, and inventing one would overstate labour.
+    timeOnSite: (() => {
+      const rows = toArray(acts.body).filter((a) => a.job_uuid === uuid
+        && Number(a.activity_was_recorded) === 1 && a.start_date && a.end_date);
+      const minutes = rows.reduce((sum, a) => {
+        const ms = new Date(String(a.end_date).replace(" ", "T")) - new Date(String(a.start_date).replace(" ", "T"));
+        return sum + (ms > 0 ? ms / 60000 : 0);
+      }, 0);
+      return { entries: rows.length, minutes: Math.round(minutes) };
+    })(),
     billing: toArray(mats.body).filter((m) => String(m.active) === "1" || m.active === 1)
       .map((m) => ({ name: m.name, qty: Number(m.quantity), price: Number(m.price) })),
     notes: toArray(notes.body).slice(-6).map((n) => String(n.note || "").replace(/\s+/g, " ").slice(0, 160)),

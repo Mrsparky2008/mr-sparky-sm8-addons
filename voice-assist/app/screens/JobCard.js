@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Empty, Header, Row, SectionLabel, StatusChip } from "../components/ui";
+import Icon from "../components/icons";
 import { C, R, S, T, money, mono, oneLine } from "../lib/theme";
 import { fetchJob } from "../lib/api";
 
@@ -26,7 +27,7 @@ function parseContacts(list) {
     .filter((c, i, all) => all.findIndex((o) => o.name === c.name && o.phone === c.phone) === i);
 }
 
-export default function JobCard({ jobNumber, onBack, onTalk, onDiary }) {
+export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddReceipt, onMaterials }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [showBilling, setShowBilling] = useState(false);
@@ -82,7 +83,7 @@ export default function JobCard({ jobNumber, onBack, onTalk, onDiary }) {
                 $89 wrong next to the other app. */}
             <Card style={[s.card, { paddingVertical: 2 }]}>
               <Row
-                icon="💲"
+                icon={<Icon name="dollar" size={18} color={C.ink} />}
                 label="Billing"
                 value={lines.length ? money(incGst) : "None"}
                 onPress={lines.length ? () => setShowBilling((v) => !v) : undefined}
@@ -111,11 +112,25 @@ export default function JobCard({ jobNumber, onBack, onTalk, onDiary }) {
                   </View>
                 </View>
               )}
+              {/* The job's OWN diary — not the day schedule. Steven's call:
+                  a job card's diary answers "what happened on this job". */}
               <Row
-                icon="📖"
+                icon={<Icon name="board" size={18} color={C.ink} />}
                 label="Diary"
-                value={bookings.length ? `${bookings.length} booked` : "None"}
-                onPress={onDiary}
+                value={bookings.length ? `${bookings.length} booked` : "Open"}
+                onPress={() => onJobDiary({ bookings: data?.bookings || [], notes: data?.notes || [], timeOnSite: data?.timeOnSite || null })}
+              />
+              <Row
+                icon={<Icon name="receipt" size={18} color={C.ink} />}
+                label="Receipts"
+                value="Add"
+                onPress={() => onAddReceipt(jobNumber)}
+              />
+              <Row
+                icon={<Icon name="claims" size={18} color={C.ink} />}
+                label="Materials on this job"
+                value="View"
+                onPress={() => onMaterials(jobNumber)}
                 last
               />
             </Card>
