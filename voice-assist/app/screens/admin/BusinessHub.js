@@ -21,13 +21,15 @@ export default function BusinessHub({ onOpen, onAccount, onCountChange }) {
   const [people, setPeople] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(true);
+  const [whoami, setWhoami] = useState(null);
 
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      const [c, p] = await Promise.all([portal.allClaims(), portal.contractors()]);
+      const [c, p, me] = await Promise.all([portal.allClaims(), portal.contractors(), portal.me().catch(() => null)]);
       setClaims(c?.claims || []);
       setPeople(p?.people || []);
+      setWhoami(me?.name || null);
       onCountChange?.((c?.claims || []).filter((x) => x.status === "submitted").length);
       setError(null);
     } catch (err) {
@@ -64,7 +66,10 @@ export default function BusinessHub({ onOpen, onAccount, onCountChange }) {
 
   return (
     <View style={{ flex: 1 }}>
-      <Header title="Business" meta={toApprove.length ? `${toApprove.length} waiting` : undefined} onMeta={onAccount} />
+      {/* Top-right is WHO YOU ARE, on every tab — it opens the account sheet,
+          so a claim count there read as a broken button. The waiting count
+          already lives on the Needs-You tile and the To-approve badge. */}
+      <Header title="Business" meta={whoami || undefined} onMeta={onAccount} />
       <ScrollView
         contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={C.muted} />}
