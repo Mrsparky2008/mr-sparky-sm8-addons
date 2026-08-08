@@ -27,7 +27,7 @@ function parseContacts(list) {
     .filter((c, i, all) => all.findIndex((o) => o.name === c.name && o.phone === c.phone) === i);
 }
 
-export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddReceipt }) {
+export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddReceipt, onMaterials }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [showBilling, setShowBilling] = useState(false);
@@ -125,6 +125,12 @@ export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddRe
                 label="Receipts"
                 value="Add"
                 onPress={() => onAddReceipt(jobNumber)}
+              />
+              <Row
+                icon={<Icon name="claims" size={18} color={C.ink} />}
+                label="Materials on this job"
+                value="View"
+                onPress={() => onMaterials(jobNumber)}
                 last
               />
             </Card>

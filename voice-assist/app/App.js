@@ -38,6 +38,7 @@ import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
 import AddReceipt from "./screens/pay/AddReceipt";
 import OwnMaterial from "./screens/pay/OwnMaterial";
+import JobMaterial from "./screens/JobMaterial";
 import RctiView from "./screens/pay/RctiView";
 import Statement from "./screens/pay/Statement";
 import Retention from "./screens/pay/Retention";
@@ -264,6 +265,7 @@ function Shell() {
                 onTalk={openCharlie}
                 onJobDiary={(payload) => push({ name: "jobdiary", job: top.job, ...payload })}
                 onAddReceipt={(jobNumber) => push({ name: "jobreceipt", jobNumber })}
+                onMaterials={(jobNumber) => push({ name: "jobmaterial", jobNumber })}
               />
             </View>
           ) : null}
@@ -294,6 +296,11 @@ function Shell() {
           {top?.name === "ownmaterial" ? (
             <View style={s.fill}>
               <OwnMaterial jobNumber={top.jobNumber} onBack={pop} />
+            </View>
+          ) : null}
+          {top?.name === "jobmaterial" ? (
+            <View style={s.fill}>
+              <JobMaterial jobNumber={top.jobNumber} onBack={pop} />
             </View>
           ) : null}
         </View>

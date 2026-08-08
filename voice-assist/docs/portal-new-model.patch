@@ -1,5 +1,5 @@
 diff --git a/api/index.mjs b/api/index.mjs
-index 8225242..d38511a 100644
+index 8225242..0b2826d 100644
 --- a/api/index.mjs
 +++ b/api/index.mjs
 @@ -12,7 +12,7 @@
@@ -151,7 +151,7 @@ index 8225242..d38511a 100644
    return {
      claims: claims.map((c) => ({
        claimId: c.claimId, status: c.status, submittedAt: c.submittedAt,
-@@ -246,6 +327,13 @@ async function statementFor(name, personId = null) {
+@@ -246,6 +327,22 @@ async function statementFor(name, personId = null) {
        }];
      })),
      conversion: record,
@@ -161,11 +161,20 @@ index 8225242..d38511a 100644
 +    ownMaterial: Object.fromEntries((ownMaterialRows || []).map((m) => [String(m.jobNumber), {
 +      amountIncGst: m.amountIncGst, declaredAt: m.declaredAt,
 +    }])),
++    // EVERY receipt this contractor has filed, whatever job it landed on —
++    // the per-job `receipts` map above only covers jobs on the statement,
++    // and a docket is filed from a Work Order weeks before the job gets
++    // there. This is what the job card's materials list reads.
++    myReceipts: receiptRows.map((r) => ({
++      jobNumber: r.jobNumber, supplier: r.supplier, amountIncGst: r.amountIncGst,
++      date: r.date, invoiceNumber: r.invoiceNumber, imageKey: r.imageKey || null,
++      voided: !!r.voided, disputed: !!r.disputed,
++    })),
 +    ownMaterialCapIncGst: receipts.ownMaterialCapFor(settings, contractor.id),
      ladder: assessment ? {
        ...assessment,
        rungs: ladder.rungs.map((r, i) => ({
-@@ -405,6 +493,16 @@ export async function handler(event) {
+@@ -405,6 +502,16 @@ export async function handler(event) {
          return json(400, { error: 'The declaration must be accepted before a claim can be submitted' });
        }
  
@@ -182,7 +191,7 @@ index 8225242..d38511a 100644
        const data = await statementFor(target);
        const wanted = new Set((body.jobNumbers || []).map(String));
        const wantHelp = !!body.includeHelpingHand;
-@@ -725,6 +823,43 @@ export async function handler(event) {
+@@ -725,6 +832,43 @@ export async function handler(event) {
        return json(201, { receipt, reuse: check.reuse ? check : null });
      }
  
@@ -226,7 +235,7 @@ index 8225242..d38511a 100644
      // A short-lived URL to upload the photo straight to a private bucket, so
      // the image never passes through this function.
      // Query a receipt, or clear it. Admin only, and it NEVER deletes: the row
-@@ -773,6 +908,137 @@ export async function handler(event) {
+@@ -773,6 +917,137 @@ export async function handler(event) {
        return json(201, { adjustment });
      }
  
@@ -364,7 +373,7 @@ index 8225242..d38511a 100644
      if (path === '/api/receipts/upload-url' && method === 'POST') {
        const body = safeJson(event.body, event.isBase64Encoded);
        const target = who.isAdmin && body.name ? body.name : who.person.name;
-@@ -853,16 +1119,18 @@ export async function handler(event) {
+@@ -853,16 +1128,18 @@ export async function handler(event) {
        const statements = {}, claimsByOwner = {}, conversions = {}, unfinished = {};
        const receiptsByContractor = {};
        const claimedNumbers = new Set();
@@ -387,7 +396,7 @@ index 8225242..d38511a 100644
          const claims = await store.listClaims(c.id).catch(() => []);
          claimsByOwner[c.id] = claims.map((x) => ({
            ...x,
-@@ -870,18 +1138,38 @@ export async function handler(event) {
+@@ -870,18 +1147,38 @@ export async function handler(event) {
            review: reviewState({ claim: x, approvalDays: Number(settings.payment?.approvalDays) || 7 }),
          }));
          for (const n of claimedJobNumbers(claims)) claimedNumbers.add(n);
