@@ -48,11 +48,21 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
   }, []);
 
   async function start() {
+    // A dial that hangs looks identical to a dial in progress — and "it just
+    // takes ages, it doesn't connect" is unanswerable without a clock. If the
+    // line is not live in 15 seconds, say so out loud instead of spinning.
+    const watchdog = setTimeout(() => {
+      if (!liveRef.current && phaseRef.current === "thinking") {
+        addMsg("sys", "Still not connected after 15s — that's a network or Vapi problem, not you. Tap the orb to retry, or check reception.");
+      }
+    }, 15000);
     try {
       await VV.start({ onEvent, job });
     } catch (e) {
       addMsg("sys", "Couldn't start the voice session — " + (e?.message || e));
       setPhase("idle");
+    } finally {
+      clearTimeout(watchdog);
     }
   }
 
