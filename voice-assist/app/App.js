@@ -16,7 +16,14 @@
 // while a call is live; that used to need a hidden absolutely-positioned
 // overlay, and now it is just what a tab bar does.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SafeAreaView, StyleSheet, View } from "react-native";
+import { LogBox, SafeAreaView, StyleSheet, View } from "react-native";
+
+// Hanging up a Vapi call mid-flight (switching to dictation unmounts the
+// call screen) makes Daily console.error about its own aborted cleanup —
+// "Meeting ended in error: Network request failed". It is the sound of a
+// hang-up, not a fault, but the dev build promotes any console.error to the
+// full red screen. Silence that one message; everything else still shows.
+LogBox.ignoreLogs([/Meeting ended in error/]);
 import { StatusBar } from "expo-status-bar";
 import * as Linking from "expo-linking";
 import ErrorBoundary from "./components/ErrorBoundary";

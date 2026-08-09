@@ -97,8 +97,14 @@ export async function start({ onEvent, job }) {
   // What dictation already discussed rides along too, so the call continues
   // the conversation instead of meeting a Charlie with amnesia.
   const priorTalk = recap();
+  // The greeting matches the moment: a FRESH conversation gets the job named
+  // (proof he knows where he is); a call continuing a thread gets a nod, not
+  // a recital — hearing the job number re-announced on every reconnect is
+  // Charlie introducing himself to someone mid-sentence.
   const overrides = (j?.job_number || priorTalk) ? {
-    ...(j?.job_number ? {
+    ...(priorTalk ? {
+      firstMessage: "Righto — what do you need now?",
+    } : j?.job_number ? {
       firstMessage: `Job ${j.job_number}${j.address ? `, ${String(j.address).split(",")[0]}` : ""}. What do you need?`,
     } : {}),
     variableValues: {

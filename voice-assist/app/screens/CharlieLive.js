@@ -80,11 +80,11 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     if (kind === "speaking") { setPhase(payload.on ? "speaking" : "listening"); return; }
     if (kind === "draft") { onDraft(payload); return; }
     if (kind === "error") { addMsg("sys", "Voice error — " + payload); return; }
-    // Where the sound is going. On screen because a voice fault you cannot see
-    // is exactly what made "I can't hear it properly" so hard to pin down.
+    // Audio routing: loud when it FAILS, silent when it works. The success
+    // line earned its keep while the earpiece bug was being chased; once
+    // fixed it was just four grey lines of noise per call (Steven, 9 Aug).
     if (kind === "audio") {
       if (payload?.error) addMsg("sys", "Audio route failed — " + payload.error);
-      else addMsg("sys", `Speaker: ${payload.chose}${payload.devices?.length ? ` (of ${payload.devices.join(", ")})` : ""}`);
       return;
     }
     if (kind !== "speech") return;
