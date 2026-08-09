@@ -79,9 +79,13 @@ function Shell() {
   // app opened and started talking. So he is born on the FIRST visit to his
   // tab and stays mounted after (leaving mid-call must not hang up the line).
   const [charlieBorn, setCharlieBorn] = useState(false);
-  // "dictate" | "voice". Dictation costs nothing to mount; the live session
-  // DIALS the moment it mounts, which is why it stays behind charlieBorn.
-  const [charlieMode, setCharlieMode] = useState("dictate");
+  // "dictate" | "voice". Live voice is the default again (Steven, 9 Aug:
+  // "we do need a live conversation") — dictation was shipped as the default
+  // when it was only ever asked for as an option, and reaching the live orb
+  // through an extra switch was part of why connecting felt so slow. The
+  // live session DIALS the moment it mounts, which is why it stays behind
+  // charlieBorn; dictation remains one tap away from the live screen.
+  const [charlieMode, setCharlieMode] = useState("voice");
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
   const [committing, setCommitting] = useState(false);
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
