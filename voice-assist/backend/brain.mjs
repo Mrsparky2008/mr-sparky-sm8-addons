@@ -1070,6 +1070,17 @@ export async function runTurn(messages, onDelta, context = {}) {
   while (apiMessages.length && apiMessages[0].role !== "user") apiMessages.shift();
   if (!apiMessages.length) throw new Error("No user message");
 
+  // One conversation, two mouths: when a voice call starts after a dictation
+  // exchange (or vice versa via /chat's full history), the other channel's
+  // recent turns arrive as a recap. It rides ahead of the first user message
+  // so the model treats it as the same conversation, because it is.
+  if (context.recap) {
+    apiMessages.unshift(
+      { role: "user", content: `(Recap of this same conversation so far, from the other input mode — text/voice. Continue it; do not re-introduce yourself or re-ask what's answered here.)\n${String(context.recap).slice(0, 2000)}` },
+      { role: "assistant", content: "Got it — same conversation, continuing." },
+    );
+  }
+
   let anchor = context.anchor || null;
   let fullReply = "";
 

@@ -180,6 +180,10 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
           .map((m) => /job\s+(\d+)/i.exec(m.content)?.[1])
           .filter(Boolean)
           .pop();
+      // One conversation, two mouths: what was said by dictation before this
+      // call started rides in the same way the job does, and runTurn treats
+      // it as the same conversation — because it is.
+      const recap = body.call?.assistantOverrides?.variableValues?.recap || null;
 
       // Vapi speaks OpenAI chat format; the brain wants {role, text} pairs and
       // supplies its own system prompt, so system messages are dropped.
@@ -215,7 +219,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
             if (found?.job?.uuid) anchorIn = { ...found.job };
           } catch (err) { console.error("app pre-anchor failed:", err); }
         }
-        const { anchor } = await runTurn(messages, async (delta) => chunk({ content: delta }), { anchor: anchorIn });
+        const { anchor } = await runTurn(messages, async (delta) => chunk({ content: delta }), { anchor: anchorIn, recap });
         rememberAnchor(callId, anchor);
         chunk({}, "stop");
       } catch (err) {

@@ -29,11 +29,15 @@ import Icon from "../components/icons";
 import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono } from "../lib/theme";
 import { chatTurn } from "../lib/api";
+import { addToThread, asHistory, getThread } from "../lib/thread";
 
 let msgId = 0;
 
 export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }) {
-  const [log, setLog] = useState([]);          // { id, who: me|ai, text }
+  // Seeded from the shared thread, so a voice call's conversation is sitting
+  // here when you switch — one conversation, whatever the mouth.
+  const [log, setLog] = useState(() =>
+    getThread().map((m) => ({ id: msgId++, who: m.who, text: m.text })));
   const [draft, setDraft] = useState("");      // what he said, before sending
   const [partial, setPartial] = useState("");  // while still speaking
   const [listening, setListening] = useState(false);
@@ -46,7 +50,7 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
 
   // The transcript, as the brain needs it. Kept in a ref as well because a
   // send reads it inside a callback that would otherwise capture a stale copy.
-  const history = useRef([]);
+  const history = useRef(asHistory());   // continues whatever was said in voice
 
   // Stopping the recogniser makes iOS deliver one LAST final result — after
   // send() has already cleared the box — which silently refills it with the
@@ -115,6 +119,7 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
 
     setLog((l) => [...l, { id: msgId++, who: "me", text }]);
     history.current = [...history.current, { role: "user", text }];
+    addToThread("me", text);
     setDraft("");
     setPartial("");
     setThinking(true);
@@ -131,6 +136,7 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
       const answer = (reply || acc || "").trim();
       history.current = [...history.current, { role: "assistant", text: answer }];
       setLog((l) => [...l, { id: msgId++, who: "ai", text: answer || "(no answer)" }]);
+      addToThread("ai", answer);
     } catch (e) {
       setError(e?.message === "signed out" ? "Signed out — sign in again." : (e?.message || "Charlie didn't answer."));
     } finally {

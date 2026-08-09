@@ -6,6 +6,7 @@
 // echo are the transport's job here, not ours.
 import Vapi from "@vapi-ai/react-native";
 import { VAPI_PUBLIC_KEY, VAPI_ASSISTANT_ID } from "./config";
+import { recap } from "./thread";
 
 let vapi = null;
 let handlers = {};
@@ -61,7 +62,15 @@ export async function start({ onEvent, job }) {
         if (Array.isArray(args.lines)) handlers.onEvent("draft", args.lines);
       }
     });
-    vapi.on("error", (e) => handlers.onEvent("error", String(e?.message || e)));
+    // Vapi's error objects rarely carry .message — String() of one is the
+    // useless "[object Object]" that reached the screen on 9 Aug. Dig for
+    // the real words, whatever shape they arrive in.
+    vapi.on("error", (e) => {
+      const words = e?.message || e?.error?.message || e?.errorMsg || e?.error?.msg
+        || (typeof e === "string" ? e : null)
+        || (() => { try { return JSON.stringify(e).slice(0, 300); } catch { return "unknown error"; } })();
+      handlers.onEvent("error", words);
+    });
   }
   handlers.onEvent("status", "connecting");
 
@@ -85,13 +94,21 @@ export async function start({ onEvent, job }) {
   // through to the custom-LLM bridge inside body.call, where OUR code reads
   // them and no Vapi validation applies.
   const j = handlers.job;
-  const overrides = j?.job_number ? {
-    firstMessage: `Job ${j.job_number}${j.address ? `, ${String(j.address).split(",")[0]}` : ""}. What do you need?`,
+  // What dictation already discussed rides along too, so the call continues
+  // the conversation instead of meeting a Charlie with amnesia.
+  const priorTalk = recap();
+  const overrides = (j?.job_number || priorTalk) ? {
+    ...(j?.job_number ? {
+      firstMessage: `Job ${j.job_number}${j.address ? `, ${String(j.address).split(",")[0]}` : ""}. What do you need?`,
+    } : {}),
     variableValues: {
-      jobNumber: String(j.job_number),
-      jobAddress: j.address || "",
-      jobContact: j.contact || "",
-      jobDescription: j.work || j.description || "",
+      ...(j?.job_number ? {
+        jobNumber: String(j.job_number),
+        jobAddress: j.address || "",
+        jobContact: j.contact || "",
+        jobDescription: j.work || j.description || "",
+      } : {}),
+      ...(priorTalk ? { recap: priorTalk } : {}),
     },
   } : undefined;
 

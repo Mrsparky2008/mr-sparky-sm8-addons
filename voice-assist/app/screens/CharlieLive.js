@@ -13,6 +13,7 @@ import { useKeepAwake } from "expo-keep-awake";
 import { Header, JobChip } from "../components/ui";
 import { C, R, S, T, mono } from "../lib/theme";
 import * as VV from "../lib/vapiVoice";
+import { addToThread, getThread } from "../lib/thread";
 
 const ORB = 120;
 
@@ -21,7 +22,10 @@ let msgId = 0;
 export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate }) {
   useKeepAwake();
 
-  const [log, setLog] = useState([]);
+  // Seeded from the shared thread: a call opened after a dictation exchange
+  // shows that exchange above it — one conversation, whatever the mouth.
+  const [log, setLog] = useState(() =>
+    getThread().map((m) => ({ id: msgId++, cls: m.who, text: m.text })));
   const [streamAi, setStreamAi] = useState("");
   const [liveText, setLiveText] = useState("");
   const [typed, setTyped] = useState("");
@@ -87,7 +91,10 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
 
     const { who, text, final } = payload;
     if (who === "user") {
-      if (final) { if (text.trim()) addMsg("me", text.trim()); setLiveText(""); }
+      if (final) {
+        if (text.trim()) { addMsg("me", text.trim()); addToThread("me", text.trim()); }
+        setLiveText("");
+      }
       else setLiveText(text);
       return;
     }
@@ -95,6 +102,8 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     const t = text.trim();
     setStreamAi("");
     if (!t) return;
+    // The thread gets each final sentence; its duplicate guard drops echoes.
+    addToThread("ai", t);
     // Vapi reports Charlie sentence by sentence and repeats a line when the
     // audio restarts — glue the run into one bubble, drop the echoes.
     const now = Date.now();
@@ -171,6 +180,7 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     const t = typed.trim();
     if (!t) return;
     addMsg("me", t);
+    addToThread("me", t);
     VV.say(t);
     setTyped("");
   }
