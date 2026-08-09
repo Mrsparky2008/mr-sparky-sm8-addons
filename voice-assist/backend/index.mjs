@@ -168,14 +168,18 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
 
       const rawMessages = Array.isArray(body.messages) ? body.messages : [];
 
-      // The app pre-anchors: when Charlie is opened from a job card it injects
-      // a system line naming the job, so the conversation starts where the user
-      // already is instead of asking which job we're on.
-      const appJob = rawMessages
-        .filter((m) => m.role === "system" && typeof m.content === "string" && m.content.startsWith("APP_CONTEXT:"))
-        .map((m) => /job\s+(\d+)/i.exec(m.content)?.[1])
-        .filter(Boolean)
-        .pop();
+      // The app pre-anchors: when Charlie is opened from a job card the job
+      // number arrives as a variableValue on the call — Vapi passes those
+      // straight through to this bridge with no validation of its own. (An
+      // earlier version put an APP_CONTEXT system line in a model override;
+      // Vapi 400s any model override without a provider from its list, which
+      // killed the whole call. The message-scan stays as a fallback.)
+      const appJob = body.call?.assistantOverrides?.variableValues?.jobNumber
+        || rawMessages
+          .filter((m) => m.role === "system" && typeof m.content === "string" && m.content.startsWith("APP_CONTEXT:"))
+          .map((m) => /job\s+(\d+)/i.exec(m.content)?.[1])
+          .filter(Boolean)
+          .pop();
 
       // Vapi speaks OpenAI chat format; the brain wants {role, text} pairs and
       // supplies its own system prompt, so system messages are dropped.
@@ -260,6 +264,20 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const wantAudio = body.audio !== false;
 
+      // Dictation opened from a job card sends the job number along — same
+      // pre-anchor the voice bridge does, so Charlie never asks "which job?"
+      // about the job whose chip is on screen. (Found live, 9 Aug: the chip
+      // said #167598 and Charlie said no job was open — this route never got
+      // told.)
+      let anchorIn = null;
+      const appJob = String(body.jobNumber || "").trim();
+      if (appJob) {
+        try {
+          const found = await executeTool("find_job", { job_number: appJob });
+          if (found?.job?.uuid) anchorIn = { ...found.job };
+        } catch (err) { console.error("chat pre-anchor failed:", err); }
+      }
+
       const stream = awslambda.HttpResponseStream.from(responseStream, {
         statusCode: 200,
         headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
@@ -291,7 +309,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
           sentenceBuf += delta;
           // Flush on sentence end (or long clause) — keeps latency low.
           if (/[.!?]["')\]]?\s$/.test(sentenceBuf) || /\n/.test(sentenceBuf) || sentenceBuf.length > 180) flush(true);
-        });
+        }, { anchor: anchorIn });
         flush(true);
         await audioChain;
         sse(stream, { t: "done", reply });
