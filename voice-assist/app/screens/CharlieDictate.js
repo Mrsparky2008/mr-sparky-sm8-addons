@@ -48,7 +48,14 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
   // send reads it inside a callback that would otherwise capture a stale copy.
   const history = useRef([]);
 
+  // Stopping the recogniser makes iOS deliver one LAST final result — after
+  // send() has already cleared the box — which silently refills it with the
+  // sentence just sent. Anything that arrives between a send and the next
+  // deliberate mic tap is an echo, and echoes are dropped.
+  const discard = useRef(false);
+
   useSpeechRecognitionEvent("result", (e) => {
+    if (discard.current) return;
     const said = e.results?.[0]?.transcript || "";
     if (e.isFinal) {
       // Append rather than replace: iOS ends a segment on a long pause, and
@@ -75,6 +82,7 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
       try { ExpoSpeechRecognitionModule.stop(); } catch {}
       return;
     }
+    discard.current = false;   // a deliberate mic tap — results are wanted again
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
       setError("AI Assist needs the microphone and speech recognition to take dictation.");
@@ -102,6 +110,7 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
     const text = `${draft} ${partial}`.trim();
     if (!text || sending.current) return;
     sending.current = true;
+    discard.current = true;   // the stop below echoes a final result; drop it
     if (listening) { try { ExpoSpeechRecognitionModule.stop(); } catch {} }
 
     setLog((l) => [...l, { id: msgId++, who: "me", text }]);
@@ -116,6 +125,7 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
       let acc = "";
       const { reply } = await chatTurn({
         messages: history.current,
+        jobNumber: job?.job_number,
         onDelta: (d) => { acc += d; setStreamed(acc); },
       });
       const answer = (reply || acc || "").trim();
