@@ -18,12 +18,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LogBox, SafeAreaView, StyleSheet, View } from "react-native";
 
-// Hanging up a Vapi call mid-flight (switching to dictation unmounts the
-// call screen) makes Daily console.error about its own aborted cleanup —
-// "Meeting ended in error: Network request failed". It is the sound of a
-// hang-up, not a fault, but the dev build promotes any console.error to the
-// full red screen. Silence that one message; everything else still shows.
-LogBox.ignoreLogs([/Meeting ended in error/]);
+// Daily (Vapi's call layer) console.errors two things that are not faults,
+// and the dev build promotes any console.error to the full red screen:
+//  - "Meeting ended in error: Network request failed" — its own aborted
+//    cleanup when a call is hung up mid-flight; the sound of a hang-up.
+//  - "daily-js version … is no longer supported" — a deprecation nag on
+//    every call start. Real fix is upgrading @vapi-ai/react-native and its
+//    Daily dependency, which is NATIVE code — next full build, not OTA.
+// Everything else still shows.
+LogBox.ignoreLogs([/Meeting ended in error/, /daily-js version .* no longer supported/]);
 import { StatusBar } from "expo-status-bar";
 import * as Linking from "expo-linking";
 import ErrorBoundary from "./components/ErrorBoundary";
