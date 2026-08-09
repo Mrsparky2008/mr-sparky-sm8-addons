@@ -119,12 +119,14 @@ export const fetchStaff = () => apiGet("/api/staff");
 
 // One conversation turn. Resolves { reply } after the stream ends.
 // onDelta(text) per text fragment; onAudio(seq, b64mp3) per Polly chunk.
-export async function chatTurn({ messages, onDelta, onAudio }) {
+// jobNumber pre-anchors the brain to the job on screen, so dictation opened
+// from a job card never has to be told which job it is.
+export async function chatTurn({ messages, jobNumber, onDelta, onAudio }) {
   const token = await getIdToken();
   const res = await expoFetch(BACKEND + "/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, jobNumber: jobNumber || undefined }),
   });
   if (res.status === 401) throw httpError(401);
   if (!res.ok || !res.body) throw httpError(res.status);

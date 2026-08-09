@@ -76,6 +76,14 @@ export async function start({ onEvent, job }) {
   // It also takes a whole round trip out of the first reply: without it the
   // brain has to run find_job before it can say anything, which is a second
   // Claude call plus a ServiceM8 lookup while you stand there waiting.
+  // NO `model` key in the overrides — ever. Vapi validates an overridden
+  // model object and demands a provider from its own list; sending only
+  // model.messages fails the WHOLE CALL with a 400 before it dials, which
+  // showed up as "connecting…" forever (found live, 9 Aug — every
+  // job-anchored call since the override shipped had been dying this way).
+  // The job context travels as variableValues instead: Vapi passes them
+  // through to the custom-LLM bridge inside body.call, where OUR code reads
+  // them and no Vapi validation applies.
   const j = handlers.job;
   const overrides = j?.job_number ? {
     firstMessage: `Job ${j.job_number}${j.address ? `, ${String(j.address).split(",")[0]}` : ""}. What do you need?`,
@@ -84,14 +92,6 @@ export async function start({ onEvent, job }) {
       jobAddress: j.address || "",
       jobContact: j.contact || "",
       jobDescription: j.work || j.description || "",
-    },
-    model: {
-      messages: [{
-        role: "system",
-        content: `APP_CONTEXT: the user has job ${j.job_number} open on screen`
-          + `${j.address ? ` at ${j.address}` : ""}${j.contact ? `, contact ${j.contact}` : ""}.`
-          + " That IS the job — never ask which job they mean. Anchor to it and get straight to work.",
-      }],
     },
   } : undefined;
 
