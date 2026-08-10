@@ -197,6 +197,8 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
         messages: history.current,
         jobNumber: job?.job_number,
         onDelta: (d) => { acc += d; setStreamed(acc); },
+        // Quote lines get their own screen, exactly as they do on a call.
+        onDraft: (lines) => { if (onDraft && lines.length) onDraft(lines); },
       });
       const answer = (reply || acc || "").trim();
       history.current = [...history.current, { role: "assistant", text: answer }];

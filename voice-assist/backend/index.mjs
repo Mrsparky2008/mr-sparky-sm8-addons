@@ -313,7 +313,13 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
           sentenceBuf += delta;
           // Flush on sentence end (or long clause) — keeps latency low.
           if (/[.!?]["')\]]?\s$/.test(sentenceBuf) || /\n/.test(sentenceBuf) || sentenceBuf.length > 180) flush(true);
-        }, { anchor: anchorIn });
+        }, {
+          anchor: anchorIn,
+          // Quote lines go down the same pipe as the words, tagged, so the
+          // dictation screen can render the draft instead of being told it
+          // is already showing.
+          onDraft: (lines) => sse(stream, { t: "draft", lines }),
+        });
         flush(true);
         await audioChain;
         sse(stream, { t: "done", reply });

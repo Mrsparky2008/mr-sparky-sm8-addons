@@ -1158,6 +1158,14 @@ export async function runTurn(messages, onDelta, context = {}) {
         console.error(`voice tool ${block.name} failed:`, err);
         result = { error: `${block.name} failed: ${err.message}` };
       }
+      // The quote draft is RENDERED, not spoken. Vapi carries the tool call
+      // to the app itself; the /chat route (dictation) has no such channel,
+      // so the caller gets a hook — without it Charlie says "that's on your
+      // screen" about a screen that never received anything.
+      if (block.name === "show_quote_draft" && context.onDraft) {
+        try { await context.onDraft(Array.isArray(block.input?.lines) ? block.input.lines : []); }
+        catch (err) { console.error("onDraft hook failed:", err.message); }
+      }
       if (block.name === "find_job" && result?.job?.uuid) anchor = { ...result.job };
       // One clear search hit anchors just as well as a number.
       if (block.name === "search_jobs" && result?.matches?.length === 1) {

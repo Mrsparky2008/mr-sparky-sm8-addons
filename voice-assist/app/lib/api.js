@@ -121,7 +121,7 @@ export const fetchStaff = () => apiGet("/api/staff");
 // onDelta(text) per text fragment; onAudio(seq, b64mp3) per Polly chunk.
 // jobNumber pre-anchors the brain to the job on screen, so dictation opened
 // from a job card never has to be told which job it is.
-export async function chatTurn({ messages, jobNumber, onDelta, onAudio }) {
+export async function chatTurn({ messages, jobNumber, onDelta, onAudio, onDraft }) {
   const token = await getIdToken();
   const res = await expoFetch(BACKEND + "/chat", {
     method: "POST",
@@ -142,6 +142,8 @@ export async function chatTurn({ messages, jobNumber, onDelta, onAudio }) {
     try { ev = JSON.parse(line.slice(6)); } catch { return; }
     if (ev.t === "d" && onDelta) onDelta(ev.x);
     else if (ev.t === "a" && onAudio) onAudio(ev.seq, ev.b64);
+    // A quote draft is rendered, never recited — same as on the voice side.
+    else if (ev.t === "draft" && onDraft) onDraft(ev.lines || []);
     else if (ev.t === "done") reply = ev.reply;
     else if (ev.t === "err") streamErr = new Error(ev.x || "backend error");
   };
