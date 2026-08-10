@@ -184,12 +184,33 @@ did it, or whether one fixed it while the other made something else worse.
 For example: *"the job at Ryde — [pause two seconds] — the switchboard one"*. If the test
 sentence changes between attempts, you're comparing nothing.
 
+**Ask two questions after every test, not one.**
+
+1. Did it cut you off? y/n
+2. Did *short* answers feel sluggish — "yeah", "that's right", a job number? y/n
+
+Question 2 is the one that gets forgotten. Raising `onPunctuationSeconds` buys patience and
+pays for it in responsiveness on short complete utterances. If the cut-offs stop but short
+answers drag, the tuning isn't finished — the right value sits between 0.1 and 0.6, so try
+0.35 next. Logging only "no cut-off" lands you on the *first* value that works rather than the
+best one.
+
+**A missing field is a valid answer.** `transcriber.endpointing` is marked unverified above for
+a reason: it appears in Vapi's custom-transcriber example, which is not the same thing as the
+built-in Deepgram config. If the authenticated read returns no such field, that closes the
+question — it isn't exposed, or it's on Deepgram's own default and out of reach. Don't treat an
+absent field as a blocked step.
+
 **Record each change here** — setting, old value, new value, what it did. This document going
 stale is exactly how everything ended up on defaults in the first place.
 
 ### Change log
 
-| Date | Setting | From | To | Result |
+The working change log lives in **`Charlie-Voice-Settings-Tracker.xlsx`** (same folder),
+Change Log tab — append-only, one row per change. This document is the reference; that
+workbook is the thing you fill in as you go.
+
+| Date | Setting | From | To | Result (cut off? y/n · short answers sluggish? y/n) |
 |---|---|---|---|---|
 | | | | | |
 
