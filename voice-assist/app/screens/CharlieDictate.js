@@ -18,13 +18,15 @@
 // The live session stays. Hands full up a ladder, talking is still better.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView,
-  StyleSheet, Text, TextInput, View,
+  ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable,
+  ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import {
   ExpoSpeechRecognitionModule, useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
 import { Empty, Header, JobChip } from "../components/ui";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import Icon from "../components/icons";
 import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono } from "../lib/theme";
@@ -32,6 +34,16 @@ import { chatTurn } from "../lib/api";
 import { addToThread, asHistory, getThread } from "../lib/thread";
 
 let msgId = 0;
+
+// Dictating means talking, not touching — so iOS auto-lock fires mid-sentence
+// and takes the recogniser (and the words) with it. The live call screen has
+// always held the screen awake; this one never did (Steven, 9 Aug: "phone
+// goes off screen while talking and not saving the dictation").
+const AWAKE_TAG = "charlie-dictation";
+
+// Where an unsent draft waits out a lock, a phone call, or a force-quit.
+// Per job, because a draft belongs to the job it was spoken about.
+const draftKey = (job) => `charlie.draft.${job?.job_number || "general"}`;
 
 export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }) {
   // Seeded from the shared thread, so a voice call's conversation is sitting
@@ -47,6 +59,12 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const sending = useRef(false);
+  // Mirrors `draft` so the restore-on-mount effect can tell "nothing typed
+  // yet" from "already speaking" without re-running on every word.
+  const draftRef = useRef("");
+  // Mirrors `partial` so the AppState handler — registered once, at mount —
+  // can read the in-flight sentence instead of a stale copy of it.
+  const partialRef = useRef("");
 
   // The transcript, as the brain needs it. Kept in a ref as well because a
   // send reads it inside a callback that would otherwise capture a stale copy.
@@ -78,7 +96,54 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
     if (e.error && e.error !== "no-speech") setError(`Couldn't hear that — ${e.error}`);
   });
 
-  useEffect(() => () => { try { ExpoSpeechRecognitionModule.abort(); } catch {} }, []);
+  useEffect(() => () => {
+    try { ExpoSpeechRecognitionModule.abort(); } catch {}
+    try { deactivateKeepAwake(AWAKE_TAG); } catch {}
+  }, []);
+
+  // Hold the screen open while there is anything to lose — listening, or an
+  // unsent draft sitting there. Released the moment there isn't, so a screen
+  // left open on the bench doesn't cook the battery.
+  useEffect(() => {
+    const holding = listening || !!draft.trim() || !!partial.trim();
+    if (holding) activateKeepAwakeAsync(AWAKE_TAG).catch(() => {});
+    else { try { deactivateKeepAwake(AWAKE_TAG); } catch {} }
+  }, [listening, draft, partial]);
+
+  // Belt and braces: iOS kills the recogniser when the app leaves the
+  // foreground (a call, a lock, the app switcher). Fold whatever was
+  // mid-sentence into the draft and write it down before that happens —
+  // the words are the thing that must not be lost.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") return;
+      const p = partialRef.current.trim();
+      if (p) {
+        setDraft((d) => (d ? `${d} ${p}`.trim() : p));
+        setPartial("");
+      }
+      try { ExpoSpeechRecognitionModule.stop(); } catch {}
+    });
+    return () => sub.remove();
+  }, []);
+
+  // The draft outlives the screen, the lock, even a force-quit.
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(draftKey(job))
+      .then((saved) => { if (alive && saved && !draftRef.current) setDraft(saved); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [job?.job_number]);
+
+  useEffect(() => { partialRef.current = partial; }, [partial]);
+
+  useEffect(() => {
+    draftRef.current = draft;
+    const key = draftKey(job);
+    if (draft.trim()) AsyncStorage.setItem(key, draft).catch(() => {});
+    else AsyncStorage.removeItem(key).catch(() => {});
+  }, [draft, job?.job_number]);
 
   async function toggleMic() {
     setError("");
