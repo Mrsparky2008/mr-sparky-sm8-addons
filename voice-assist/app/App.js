@@ -98,6 +98,8 @@ function Shell() {
   const [charlieMode, setCharlieMode] = useState("voice");
   const [draft, setDraft] = useState(null);           // quote lines from Charlie
   const [committing, setCommitting] = useState(false);
+  // An approval waiting for the dictation screen to say on our behalf.
+  const [pendingSay, setPendingSay] = useState(null);
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
   const [account, setAccount] = useState(false);      // the who-am-I / sign-out sheet
 
@@ -145,11 +147,25 @@ function Shell() {
   // Committing is Charlie's job, not the app's: saying the approval out loud
   // runs the same add-only, duplicate-guarded write the voice flow already uses,
   // rather than inventing a second path into ServiceM8 billing.
+  // Committing is Charlie's job, not the app's — but it has to reach him.
+  // VV.say() only speaks into a LIVE call; pressed from dictation it went
+  // nowhere at all, so "Lock it in" closed the draft and wrote nothing
+  // (Steven, 9 Aug: "it says it saved but it's not happening"). Route it to
+  // whichever mouth is actually open.
   const lockIn = useCallback(() => {
+    const approval = "Lock it in — add those lines to the job.";
     setCommitting(true);
-    VV.say("Lock it in — add those lines to the job.");
-    setTimeout(() => { setCommitting(false); setDraft(null); }, 900);
-  }, []);
+    if (charlieMode === "voice" && charlieBorn) {
+      VV.say(approval);
+      setTimeout(() => { setCommitting(false); setDraft(null); }, 900);
+      return;
+    }
+    // Dictation: hand it to that screen, which sends it the ordinary way and
+    // shows the answer, so "did it save?" is answered on screen.
+    setPendingSay(approval);
+    setCommitting(false);
+    setDraft(null);
+  }, [charlieMode, charlieBorn]);
 
   // Deep link from the ServiceM8 job card: mrsparky-aiassist://job/167483.
   // The add-on is the doorway, this is the room — it opens the job card for
@@ -335,6 +351,8 @@ function Shell() {
               job={charlieJob}
               onBack={() => setTab("work")}
               onDraft={onDraft}
+              pendingSay={pendingSay}
+              onPendingSaid={() => setPendingSay(null)}
               onSwitchToVoice={() => { setCharlieMode("voice"); setCharlieBorn(true); }}
             />
           ) : charlieBorn ? (

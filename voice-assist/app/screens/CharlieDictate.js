@@ -45,7 +45,7 @@ const AWAKE_TAG = "charlie-dictation";
 // Per job, because a draft belongs to the job it was spoken about.
 const draftKey = (job) => `charlie.draft.${job?.job_number || "general"}`;
 
-export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }) {
+export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice, pendingSay, onPendingSaid }) {
   // Seeded from the shared thread, so a voice call's conversation is sitting
   // here when you switch — one conversation, whatever the mouth.
   const [log, setLog] = useState(() =>
@@ -175,8 +175,7 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
     }
   }
 
-  const send = useCallback(async () => {
-    const text = `${draft} ${partial}`.trim();
+  const sendText = useCallback(async (text) => {
     if (!text || sending.current) return;
     sending.current = true;
     discard.current = true;   // the stop below echoes a final result; drop it
@@ -193,17 +192,21 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
 
     try {
       let acc = "";
+      let drafted = false;
       const { reply } = await chatTurn({
         messages: history.current,
         jobNumber: job?.job_number,
         onDelta: (d) => { acc += d; setStreamed(acc); },
         // Quote lines get their own screen, exactly as they do on a call.
-        onDraft: (lines) => { if (onDraft && lines.length) onDraft(lines); },
+        onDraft: (lines) => { if (onDraft && lines.length) { drafted = true; onDraft(lines); } },
       });
       const answer = (reply || acc || "").trim();
       history.current = [...history.current, { role: "assistant", text: answer }];
-      setLog((l) => [...l, { id: msgId++, who: "ai", text: answer || "(no answer)" }]);
-      addToThread("ai", answer);
+      // A turn that only drafted has already answered — on the draft screen.
+      // "(no answer)" there reads as a failure when something did happen.
+      const shown = answer || (drafted ? "Draft's on your screen." : "(no answer)");
+      setLog((l) => [...l, { id: msgId++, who: "ai", text: shown }]);
+      addToThread("ai", shown);
     } catch (e) {
       setError(e?.message === "signed out" ? "Signed out — sign in again." : (e?.message || "Charlie didn't answer."));
     } finally {
@@ -211,9 +214,21 @@ export default function CharlieDictate({ job, onBack, onDraft, onSwitchToVoice }
       setThinking(false);
       sending.current = false;
     }
-  }, [draft, partial, listening]);
+  }, [listening, job?.job_number, onDraft]);
 
   const heard = `${draft}${partial ? (draft ? " " : "") + partial : ""}`;
+
+  const send = useCallback(() => sendText(heard.trim()), [sendText, heard]);
+
+  // Approving a quote draft says the approval out loud in the live flow; in
+  // dictation there is no call to say it into, so App hands it here and it
+  // goes down the same pipe a typed message would — same tool, same guard
+  // rails, and it lands in the log so the approval is on the record.
+  useEffect(() => {
+    if (!pendingSay) return;
+    sendText(pendingSay);
+    onPendingSaid?.();
+  }, [pendingSay]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <View style={s.screen}>
