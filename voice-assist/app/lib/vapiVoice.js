@@ -31,9 +31,14 @@ export async function start({ onEvent, job }) {
       // Charlie sounded faint unless the phone was against your ear. The SDK's
       // own device handling only re-applies whatever is already selected, so
       // nothing ever asks for the loudspeaker. Ask.
+      lastRoute = null;
       routeToSpeaker();
-      // The device list can arrive after the call starts; try once more.
-      setTimeout(routeToSpeaker, 800);
+      // A Bluetooth headset is often missing from the device list at
+      // call-start, so re-check a few times as it registers. routeToSpeaker
+      // only touches the device when its answer CHANGES, so once the headset
+      // is found these are silent no-ops — which is what stopped the audio
+      // flipping audibly between headset and loudspeaker mid-sentence.
+      for (const ms of [400, 1200, 2500]) setTimeout(routeToSpeaker, ms);
     });
     vapi.on("call-end", () => handlers.onEvent("status", "ended"));
     vapi.on("speech-start", () => handlers.onEvent("speaking", { who: "assistant", on: true }));
@@ -137,6 +142,10 @@ const ROUTES = [
   { test: /speaker/i, label: "speakerphone" },
 ];
 
+// What we last told the SDK to use. Re-setting the SAME device mid-call makes
+// the audio audibly drop and re-open, so we only ever act on a real change.
+let lastRoute = null;
+
 /**
  * Send Charlie's audio somewhere the tech can actually hear him.
  *
@@ -160,6 +169,8 @@ function routeToSpeaker() {
     // Nothing recognised (or an empty list, which happens before the devices
     // arrive): the loudspeaker is still a better guess than the earpiece.
     if (!chosen) chosen = "speakerphone";
+    if (chosen === lastRoute) return;
+    lastRoute = chosen;
     vapi.setAudioDevice(chosen);
     handlers.onEvent("audio", { devices: named, chose: chosen });
   } catch (e) {
