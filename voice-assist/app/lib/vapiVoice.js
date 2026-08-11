@@ -121,13 +121,29 @@ export async function start({ onEvent, job }) {
   await vapi.start(VAPI_ASSISTANT_ID, overrides);
 }
 
+// Route order, best first. A headset the tech has actually put on beats the
+// loudspeaker every time; the loudspeaker only beats the earpiece.
+//
+// This used to grab the loudspeaker unconditionally, which fixed the original
+// fault (iOS hands a WebRTC call to the EARPIECE by default, so Charlie was
+// faint unless the phone was against your ear) and created a new one: it also
+// stole the call back off a connected headset. In a van, with a headset on, that
+// is the wrong answer every single time.
+//
+// The earpiece is deliberately absent — it is the default we are overriding.
+const ROUTES = [
+  { test: /blue ?tooth|bt|airpod|headset/i, label: "bluetooth" },
+  { test: /wired|headphone|head ?set|jack|usb/i, label: "wired" },
+  { test: /speaker/i, label: "speakerphone" },
+];
+
 /**
- * Put Charlie on the loudspeaker.
+ * Send Charlie's audio somewhere the tech can actually hear him.
  *
- * Deliberately picks from what the SDK reports rather than hardcoding a name:
- * the identifiers differ between platforms, and a wrong one thrown blind would
- * fail silently and leave the call on the earpiece with nothing to show for it.
- * "speakerphone" is the documented React Native fallback when the list is empty.
+ * Picks from what the SDK reports rather than hardcoding a name: the identifiers
+ * differ between platforms, and a wrong one thrown blind would fail silently and
+ * leave the call on the earpiece with nothing to show for it. "speakerphone" is
+ * the documented React Native fallback when the list comes back empty.
  *
  * Reports what it found either way — a voice fault you cannot see is the thing
  * that made this hard to diagnose in the first place.
@@ -136,8 +152,14 @@ function routeToSpeaker() {
   try {
     const devices = (vapi?.getAudioDevices?.() || []).filter(Boolean);
     const named = devices.map((d) => String(d.value ?? d.label ?? d)).filter(Boolean);
-    const loud = named.find((n) => /speaker/i.test(n));
-    const chosen = loud || "speakerphone";
+    let chosen = null;
+    for (const r of ROUTES) {
+      const hit = named.find((n) => r.test.test(n));
+      if (hit) { chosen = hit; break; }
+    }
+    // Nothing recognised (or an empty list, which happens before the devices
+    // arrive): the loudspeaker is still a better guess than the earpiece.
+    if (!chosen) chosen = "speakerphone";
     vapi.setAudioDevice(chosen);
     handlers.onEvent("audio", { devices: named, chose: chosen });
   } catch (e) {
