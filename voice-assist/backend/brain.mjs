@@ -424,13 +424,18 @@ export async function jobIndex() {
     const address = String(j.job_address || "").replace(/\s+/g, " ").trim();
     const description = String(j.job_description || "").replace(/\s+/g, " ").trim();
     const contact = contactByJob.get(j.uuid) || "";
-    const haystack = `${address} ${contact} ${description}`.toLowerCase();
+    // The job NUMBER belongs in the searchable text. It was left out, so typing
+    // a job number into the app's search fuzzy-matched those digits against
+    // street names and work descriptions, scored nothing, and answered "did you
+    // mean Mortlake?" — for a job that was sitting right there. Found on 167590.
+    const num = String(j.generated_job_id || "");
+    const haystack = `${num} ${address} ${contact} ${description}`.toLowerCase();
     jobs.push({
       uuid: j.uuid,
       number: j.generated_job_id,
       status: j.status,
       address, contact, description, haystack,
-      tokens: new Set(tokens(`${address} ${contact} ${description}`)),
+      tokens: new Set(tokens(`${num} ${address} ${contact} ${description}`)),
     });
   }
   jobCache = { at: Date.now(), jobs };
@@ -630,6 +635,28 @@ export async function executeTool(name, input) {
     const q = tokens(input.query);
     const rawQ = String(input.query || "").toLowerCase();
     if (!q.length) return { error: "Nothing to search for" };
+
+    // A number typed on its own is a job number, not a word to fuzzy-match.
+    // Exact first, then the tail ("ending 590"), because that is how everyone
+    // actually says them. Fuzzy scoring on digits is meaningless — every job
+    // number in the account is six digits and within an edit or two of the next.
+    const digits = rawQ.replace(/\D/g, "");
+    if (digits && /^\d+$/.test(rawQ.trim())) {
+      const exact = index.filter((j) => String(j.number) === digits);
+      const tail = exact.length ? [] : index.filter((j) => String(j.number).endsWith(digits));
+      const hits = (exact.length ? exact : tail)
+        .sort((a, b) => Number(b.number) - Number(a.number))
+        .slice(0, 6);
+      if (hits.length) {
+        return {
+          matches: hits.map((j) => ({
+            job_uuid: j.uuid, job_number: j.number, status: j.status,
+            address: j.address, contact: j.contact || undefined,
+            work: j.description ? j.description.slice(0, 90) : undefined,
+          })),
+        };
+      }
+    }
     // Also try adjacent words glued together — "Moj Lake" is one word misheard.
     const terms = [...q];
     for (let i = 0; i < q.length - 1; i++) terms.push(q[i] + q[i + 1]);
