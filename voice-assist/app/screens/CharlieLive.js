@@ -37,6 +37,7 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
   const liveRef = useRef(false);
   const scrollRef = useRef(null);
   const aiTailRef = useRef({ text: "", at: 0 });
+  const speakTimer = useRef(null);
 
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
@@ -48,7 +49,10 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
   // ---------- session ----------
   useEffect(() => {
     start();
-    return () => { VV.stop().catch(() => {}); };
+    return () => {
+      if (speakTimer.current) clearTimeout(speakTimer.current);
+      VV.stop().catch(() => {});
+    };
   }, []);
 
   async function start() {
@@ -77,7 +81,31 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
       if (payload === "ended") { liveRef.current = false; setPhase("idle"); setLiveText(""); setStreamAi(""); }
       return;
     }
-    if (kind === "speaking") { setPhase(payload.on ? "speaking" : "listening"); return; }
+    // A speech turn OPENING is not the same as Charlie saying something.
+    //
+    // Now that he holds his tongue on an unfinished sentence, he returns
+    // nothing for each fragment — but Vapi still opens and closes a speech
+    // turn around that empty reply. Rendering those directly made the label
+    // strobe listening/speaking on every fragment while no audio ever played:
+    // "the microphone keeps swapping from listening to speaker back and forth,
+    // it doesn't stay in listening mode while I'm talking" (Steven, 13 Aug).
+    // The mic never stopped listening — the label was lying.
+    //
+    // So make "speaking" earn it: hold the flip for a beat, and cancel it if
+    // the turn closes first. Real speech lasts far longer than this; an empty
+    // turn never survives it.
+    if (kind === "speaking") {
+      if (speakTimer.current) { clearTimeout(speakTimer.current); speakTimer.current = null; }
+      if (payload.on) {
+        speakTimer.current = setTimeout(() => {
+          speakTimer.current = null;
+          if (phaseRef.current !== "idle") setPhase("speaking");
+        }, 350);
+      } else if (phaseRef.current !== "idle") {
+        setPhase("listening");
+      }
+      return;
+    }
     if (kind === "draft") { onDraft(payload); return; }
     if (kind === "error") { addMsg("sys", "Voice error — " + payload); return; }
     // Audio routing: loud when it FAILS, silent when it works. The success
