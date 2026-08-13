@@ -1,8 +1,15 @@
 # Charlie Voice — Settings Inventory
 
-**Assistant:** `8ff8436f-b6b3-4c3b-9226-0a70d22f2c63`
-**Prepared:** 10 August 2026
-**Status:** Nothing has been changed. Every setting below is on its platform default unless marked otherwise.
+**Assistant:** `8ff8436f-b6b3-4c3b-9226-0a70d22f2c63` (named **"AI Assist"** — "Charlie" is the
+ElevenLabs *voice*, not the assistant)
+**Prepared:** 10 August 2026 · **Read from the live API:** 13 August 2026
+
+**Status: no longer presumed.** Every value below was read from the live assistant with an
+authenticated call. The earlier framing — "everything is on defaults" — was **wrong**, and
+wrong in a way that cost real time: the assistant had been tuned, and tuned *tighter* than the
+platform defaults in exactly the places that were causing the trouble.
+
+Read it before you reason about it. That is the lesson of this document.
 
 ---
 
@@ -51,17 +58,26 @@ curl https://api.vapi.ai/assistant/8ff8436f-b6b3-4c3b-9226-0a70d22f2c63 \
 *When Vapi decides the speaker has finished and lets Charlie begin.*
 **This is where the cut-off problem lives.**
 
-| Parameter | Type | Range / options | Default | Current | Controls | New value |
-|---|---|---|---|---|---|---|
-| ⚠️ `startSpeakingPlan.transcriptionEndpointingPlan.onPunctuationSeconds` | number (s) | float | `0.1` | default (presumed) | Silence to wait when the transcript ends **with** punctuation | |
-| `startSpeakingPlan.transcriptionEndpointingPlan.onNoPunctuationSeconds` | number (s) | float | `1.5` | default (presumed) | Silence to wait when there's **no** punctuation | |
-| `startSpeakingPlan.transcriptionEndpointingPlan.onNumberSeconds` | number (s) | float | `0.5` | default (presumed) | Silence to wait when the transcript ends on a **number** | |
-| `startSpeakingPlan.transcriptionEndpointingPlan.waitSeconds` | number (s) | float | not stated | default (presumed) | Base delay after transcription, before the branches above | |
-| ⚠️ `startSpeakingPlan.smartEndpointingPlan.provider` | enum | `off` · `livekit` · `vapi` · `krisp` · `deepgram-flux` · `assembly` | `off` | default (presumed) | Whether the **words** get a vote on "are they finished", or only silence does | |
-| `startSpeakingPlan.smartEndpointingPlan.waitFunction` | string (expression) | maths expr, `x` = probability | `200 + 8000 * x` | n/a unless LiveKit on | LiveKit only. Maps probability-they're-done → wait in ms | |
-| `startSpeakingPlan.smartEndpointingPlan.threshold` | number | 0.0 – 1.0 | `0.5` | n/a unless Krisp on | Krisp only. Audio-based confidence cut-off | |
-| `startSpeakingPlan.waitSeconds` | number (s) | 0 – 5 | `0.4` | default (presumed) | Final pause after the turn commits, before Charlie's audio starts | |
-| `startSpeakingPlan.customEndpointingRules` | object[] | `{type, regex, timeoutSeconds}` | none | none (presumed) | Per-phrase timeout overrides | |
+| Parameter | Type | Default | **Was** (13 Aug) | **Now** | Controls |
+|---|---|---|---|---|---|
+| ⚠️ `…transcriptionEndpointingPlan.onPunctuationSeconds` | number (s) | `0.1` | **0.1** | **1** | Silence to wait when the transcript ends **with** punctuation |
+| `…transcriptionEndpointingPlan.onNoPunctuationSeconds` | number (s) | `1.5` | **1** *(below default)* | **2** | Silence to wait when there's **no** punctuation |
+| `…transcriptionEndpointingPlan.onNumberSeconds` | number (s) | `0.5` | **0.4** *(below default)* | **2** | Silence to wait when the transcript ends on a **number** |
+| `…transcriptionEndpointingPlan.waitSeconds` | number (s) | not stated | *absent* | *absent* | Base delay before the branches above. Never set — so it adds nothing |
+| `startSpeakingPlan.smartEndpointingPlan.provider` | enum | `off` | **livekit** | livekit | Whether the **words** get a vote on "are they finished", or only silence does |
+| `startSpeakingPlan.smartEndpointingPlan.waitFunction` | string (expr) | `200 + 8000 * x` | **`2000 + 4000 * max(0, x-0.5)`** | unchanged | LiveKit only. Maps probability-they're-done → wait in ms |
+| `startSpeakingPlan.waitSeconds` | number (s) | `0.4` | **0.2** *(below default)* | unchanged | Final pause after the turn commits, before Charlie's audio starts |
+| `startSpeakingPlan.customEndpointingRules` | object[] | none | *absent* | *absent* | Per-phrase timeout overrides |
+
+**The finding that mattered.** Both plans run at once, and the tighter one wins. Smart
+endpointing being on did **not** take the punctuation timers out of play — they were live the
+whole time at 0.1s. Deepgram's smart-format drops a comma after a filler word ("I want you to
+look at, **um,**"), the punctuation branch fires at 100ms, and the turn commits mid-thought.
+That is what split one sentence into three or four, each triggering its own reply.
+
+**The wait function was a red herring.** `2000 + 4000 * max(0, x-0.5)` was already published
+and live during a test that still fragmented badly — proof, in the assistant's own `updatedAt`
+timestamp, that it was never the thing doing the damage.
 
 **LiveKit `waitFunction` presets:**
 
@@ -78,13 +94,13 @@ curl https://api.vapi.ai/assistant/8ff8436f-b6b3-4c3b-9226-0a70d22f2c63 \
 *How easily the speaker can interrupt Charlie once he's talking.*
 Not the reported fault, but the other half of turn-taking.
 
-| Parameter | Type | Range / options | Default | Current | Controls | New value |
-|---|---|---|---|---|---|---|
-| `stopSpeakingPlan.numWords` | integer | 0 – 10 | `0` | default (presumed) | Words needed to cut Charlie off. `0` = voice-activity detection, so any noise interrupts | |
-| `stopSpeakingPlan.voiceSeconds` | number (s) | 0 – 0.5 | `0.2` | default (presumed) | How long noise must last to count as an interruption. Applies only when `numWords = 0` | |
-| `stopSpeakingPlan.backoffSeconds` | number (s) | 0 – 10 | `1.0` | default (presumed) | How long Charlie stays quiet after being interrupted before he may resume | |
-| `stopSpeakingPlan.acknowledgementPhrases` | string[] | list of phrases | platform list | default (presumed) | Backchannel noises ("mm-hm", "yeah") that must **not** interrupt | |
-| `stopSpeakingPlan.interruptionPhrases` | string[] | list of phrases | platform list | default (presumed) | Phrases that always interrupt ("stop", "hang on") | |
+| Parameter | Type | Default | **Live value** | Controls |
+|---|---|---|---|---|
+| `stopSpeakingPlan.numWords` | integer | `0` | **2** | Words needed to cut Charlie off. Already raised off 0 — this is the van road-noise protection, and it was in place before we started |
+| `stopSpeakingPlan.voiceSeconds` | number (s) | `0.2` | **0.2** | How long noise must last to count as an interruption. Only applies when `numWords = 0`, so currently inert |
+| `stopSpeakingPlan.backoffSeconds` | number (s) | `1.0` | **0.8** | How long Charlie stays quiet after being interrupted before he may resume |
+| `stopSpeakingPlan.acknowledgementPhrases` | string[] | platform list | *absent* | Backchannel noises ("mm-hm", "yeah") that must **not** interrupt |
+| `stopSpeakingPlan.interruptionPhrases` | string[] | platform list | *absent* | Phrases that always interrupt ("stop", "hang on") |
 
 ---
 
@@ -93,19 +109,29 @@ Not the reported fault, but the other half of turn-taking.
 Upstream of everything above. If Deepgram finalises a transcript early, no Vapi setting can
 rescue it — **two cut-off timers in series, and the tighter one wins.**
 
-| Parameter | Type | Range / options | Default | Current | Controls | New value |
-|---|---|---|---|---|---|---|
-| `transcriber.provider` | enum | deepgram · assembly · gladia · … | — | **deepgram** ✅ | Which STT engine | |
-| ⚠️ `transcriber.model` | enum | `nova-2` · `nova-3` · `flux-general-en` · … | — | **nova-2** ✅ | Accuracy, latency — *and* which turn-detection features are available at all | |
-| `transcriber.language` | string | BCP-47 | — | **en-AU** ✅ | Accent model | |
-| ⚠️ `transcriber.smartFormat` | boolean | true / false | unknown | unknown | Inserts punctuation, formats numbers. **This is what feeds `onPunctuationSeconds`** — the link between the two platforms | |
-| `transcriber.numerals` | boolean | true / false | unknown | unknown | "one six seven" → "167". Changes which endpointing branch fires on job numbers | |
-| `transcriber.confidenceThreshold` | number | 0.0 – 1.0 | `0.4` ⁽ᵛ⁾ | unknown | Drops low-confidence words before they reach endpointing | |
-| `transcriber.keywords` | string[] | `["word", "word:2"]` | none | unknown | Boosted vocabulary — trade terms, suburb names, "switchboard", "RCD" | |
-| `transcriber.keyterm` | string[] | nova-3 only | none | n/a on nova-2 | Keyterm prompting for named terms | |
-| `transcriber.eotThreshold` | number | 0.5 – 0.9 | — | **n/a — Flux only** | End-of-turn confidence | |
-| `transcriber.eotTimeoutMs` | integer (ms) | 500 – 10000 | `5000` | **n/a — Flux only** | Max wait before force-finalising a turn | |
-| `transcriber.eagerEotThreshold` | number | 0.0 – 1.0 | — | **n/a — Flux only** | Early end-of-turn guess for snappier replies | |
+The **entire** live transcriber block is four lines:
+
+```json
+"transcriber": {
+  "model": "nova-2",
+  "language": "en-AU",
+  "provider": "deepgram",
+  "fallbackPlan": { "autoFallback": { "enabled": true } }
+}
+```
+
+| Parameter | Live value | Controls |
+|---|---|---|
+| `transcriber.provider` / `.model` / `.language` | **deepgram / nova-2 / en-AU** | The ears |
+| `transcriber.fallbackPlan.autoFallback.enabled` | **true** | Falls back to a backup STT provider if Deepgram falters |
+| `transcriber.endpointing` | **absent** | Deepgram's own silence timer — **priority 0 on the tracker, now closed.** Not set, therefore on Deepgram's default and not reachable from Vapi's config. It is not the second timer we feared |
+| `transcriber.smartFormat` | **absent** (Deepgram default) | Inserts the punctuation that feeds `onPunctuationSeconds`. Still doing so — the link between the platforms is real even though the field isn't set here |
+| `transcriber.numerals` / `.confidenceThreshold` / `.keywords` | **absent** (defaults) | Never configured |
+| `transcriber.eotThreshold` / `.eotTimeoutMs` / `.eagerEotThreshold` | **n/a — Flux models only** | Purpose-built end-of-turn detection, unreachable on nova-2 |
+
+**Priority 0 is answered.** We spent a fortnight treating Deepgram's endpointing as the
+dangerous unknown sitting upstream. It simply isn't set. The "an absent field is a valid
+answer, not a blocked step" rule written into the method section is exactly what happened.
 
 ### Worth a decision
 
@@ -135,10 +161,17 @@ config first.
 
 ## 5. Vapi — Assistant level
 
-| Parameter | Type | Range / options | Default | Current | Controls | New value |
-|---|---|---|---|---|---|---|
-| `silenceTimeoutSeconds` | number (s) | seconds | `30` | default (presumed) | Hangs the call up after total silence | |
-| `backgroundSound` | enum / URL | `off` · `office` · URL | `off` (web/RN) | **off** ✅ | Ambient bed — already off, and staying off | |
+| Parameter | Type | Default | **Live value** | Controls |
+|---|---|---|---|---|
+| `silenceTimeoutSeconds` | number (s) | `30` | **120** | Hangs the call up after total silence |
+| ⚠️ `backgroundSound` | enum / URL | `off` (web/RN) | **`…/plugin/ai-ambient.wav`** | **A custom ambient bed plays through every call.** Not off, as previously recorded — someone chose this deliberately |
+| `voice.provider` / `.model` / `.voiceId` | — | **11labs / eleven_flash_v2_5 / IKne3meq5aSn9XLyUdCD** | The voice everyone calls "Charlie" |
+
+**The background sound is a live decision, not a bug.** The sound spec written for this project
+says to remove any noise playing while the user speaks — a constant bed reads as the machine
+talking over you, and it may also feed the voice-activity detection. It is still on. Left
+alone deliberately, because someone chose that WAV on purpose. Switching it to `"off"` is a
+one-field change whenever that call gets made.
 
 ---
 
@@ -212,7 +245,10 @@ workbook is the thing you fill in as you go.
 
 | Date | Setting | From | To | Result (cut off? y/n · short answers sluggish? y/n) |
 |---|---|---|---|---|
-| | | | | |
+| 13 Aug | *(read only — no change)* | — | — | Live config read for the first time. Every "presumed default" in this document was wrong; the assistant had been tuned tighter than default. Deepgram `endpointing` confirmed absent, closing priority 0 |
+| 13 Aug | `onPunctuationSeconds` | 0.1 | **1** | *pending test* |
+| 13 Aug | `onNoPunctuationSeconds` | 1 | **2** | *same change — one plan, one edit* |
+| 13 Aug | `onNumberSeconds` | 0.4 | **2** | *same change. Matters because job numbers are read aloud with pauses between digits* |
 
 ---
 
