@@ -13,6 +13,7 @@ import { useKeepAwake } from "expo-keep-awake";
 import { Header, JobChip } from "../components/ui";
 import { C, R, S, T, mono } from "../lib/theme";
 import * as VV from "../lib/vapiVoice";
+import * as Thinking from "../lib/thinking";
 import { addToThread, getThread } from "../lib/thread";
 
 const ORB = 120;
@@ -52,6 +53,7 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     start();
     return () => {
       if (speakTimer.current) clearTimeout(speakTimer.current);
+      Thinking.release();
       VV.stop().catch(() => {});
     };
   }, []);
@@ -79,7 +81,7 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     if (kind === "status") {
       if (payload === "connecting") setPhase("thinking");
       if (payload === "live") { liveRef.current = true; setPhase("listening"); }
-      if (payload === "ended") { liveRef.current = false; setPhase("idle"); setLiveText(""); setStreamAi(""); }
+      if (payload === "ended") { liveRef.current = false; setPhase("idle"); setLiveText(""); setStreamAi(""); Thinking.stop(); }
       return;
     }
     // A speech turn OPENING is not the same as Charlie saying something.
@@ -96,6 +98,10 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     // the turn closes first. Real speech lasts far longer than this; an empty
     // turn never survives it.
     if (kind === "speaking") {
+      // The bed dies the instant he opens his mouth — no debounce here, that
+      // delay is for the LABEL, and a bed still playing under his first word
+      // is exactly the noise-over-the-top we removed from the call itself.
+      if (payload.on) Thinking.stop();
       if (speakTimer.current) { clearTimeout(speakTimer.current); speakTimer.current = null; }
       if (payload.on) {
         speakTimer.current = setTimeout(() => {
@@ -148,11 +154,21 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
           }
         }
         setLiveText("");
+        // He's gone quiet and the turn is committed — Charlie is off doing a
+        // ServiceM8 lookup. The bed fades in after 600ms, so a quick answer
+        // stays silent and only a real wait gets covered.
+        Thinking.start();
       }
-      else setLiveText(text);
+      else {
+        setLiveText(text);
+        // Words again: he only paused to think, he hasn't finished. Kill the
+        // bed before it plays over him — that is the whole reason the constant
+        // background sound had to go.
+        Thinking.stop();
+      }
       return;
     }
-    if (!final) { setStreamAi(text); return; }
+    if (!final) { setStreamAi(text); Thinking.stop(); return; }
     const t = text.trim();
     setStreamAi("");
     if (!t) return;
