@@ -37,6 +37,7 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
   const liveRef = useRef(false);
   const scrollRef = useRef(null);
   const aiTailRef = useRef({ text: "", at: 0 });
+  const meTailRef = useRef({ text: "", at: 0 });
   const speakTimer = useRef(null);
 
   const ring1 = useRef(new Animated.Value(0)).current;
@@ -120,7 +121,32 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     const { who, text, final } = payload;
     if (who === "user") {
       if (final) {
-        if (text.trim()) { addMsg("me", text.trim()); addToThread("me", text.trim()); }
+        const mine = text.trim();
+        if (mine) {
+          addToThread("me", mine);
+          // Vapi commits a turn every time it reckons you paused, so ONE
+          // spoken sentence lands as three or four finals. Rendering each as
+          // its own bubble is what made the screen look like a shouting
+          // match with itself — "the transcription is three or four lines"
+          // (Steven, 13 Aug). Glue a run into one bubble, exactly the way
+          // Charlie's own sentences already are below. The run ends when he
+          // answers, so a real back-and-forth still reads as a conversation.
+          const at = Date.now();
+          const run = meTailRef.current;
+          if (run.at && at - run.at < 12000) {
+            setLog((l) => {
+              const copy = [...l];
+              for (let i = copy.length - 1; i >= 0; i--) {
+                if (copy[i].cls === "me") { copy[i] = { ...copy[i], text: `${copy[i].text} ${mine}`.trim() }; break; }
+              }
+              return copy;
+            });
+            meTailRef.current = { text: `${run.text} ${mine}`.trim(), at };
+          } else {
+            addMsg("me", mine);
+            meTailRef.current = { text: mine, at };
+          }
+        }
         setLiveText("");
       }
       else setLiveText(text);
@@ -130,6 +156,9 @@ export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate })
     const t = text.trim();
     setStreamAi("");
     if (!t) return;
+    // Charlie answering closes your run: whatever you say next starts a fresh
+    // bubble rather than being glued onto what you said before he spoke.
+    meTailRef.current = { text: "", at: 0 };
     // The thread gets each final sentence; its duplicate guard drops echoes.
     addToThread("ai", t);
     // Vapi reports Charlie sentence by sentence and repeats a line when the
