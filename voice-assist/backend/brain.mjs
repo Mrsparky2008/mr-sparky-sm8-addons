@@ -404,8 +404,28 @@ function fuzzyScore(heard, known) {
 }
 
 let jobCache = { at: 0, jobs: [] };
-export async function jobIndex() {
-  if (Date.now() - jobCache.at < 10 * 60 * 1000 && jobCache.jobs.length) return jobCache.jobs;
+let indexInflight = null;
+
+// ServiceM8 cannot search jobs by description, so we download every job and
+// every contact and search them ourselves. That download is expensive — ~1,800
+// jobs plus contacts — and it used to sit ON THE CRITICAL PATH: the cache
+// expired after 10 minutes and whoever asked the next question paid for the
+// rebuild while standing there waiting. Steven wore it mid-conversation on
+// 14 Aug; the log line "job index built — 1671 jobs" is stamped between his
+// question and the answer.
+//
+// Now: serve what we have and refresh behind it. FRESH is served outright,
+// USABLE is served immediately with a rebuild kicked off in the background,
+// and only a genuinely cold or ancient index makes anyone wait.
+const INDEX_FRESH_MS = 10 * 60 * 1000;      // serve, don't even think about it
+const INDEX_USABLE_MS = 6 * 60 * 60 * 1000; // serve stale, refresh behind it
+
+// Honest caveat: Lambda freezes the container once a response is returned, so
+// a background rebuild may not finish on this invocation. It resumes when the
+// container is next used, which is exactly when it is wanted. Worst case the
+// index stays stale a little longer — and searchJobs forces a rebuild when a
+// search comes back empty, so a brand-new job is never permanently invisible.
+async function buildJobIndex() {
   const [jobsRes, contactsRes] = await Promise.all([
     sm8("GET", "/job.json"),
     sm8("GET", "/jobcontact.json"),
@@ -441,6 +461,33 @@ export async function jobIndex() {
   jobCache = { at: Date.now(), jobs };
   console.log(`voice: job index built — ${jobs.length} jobs`);
   return jobs;
+}
+
+/** Kick a rebuild, at most one at a time. Callers may or may not await it. */
+function refreshIndex() {
+  if (!indexInflight) {
+    indexInflight = buildJobIndex()
+      .catch((err) => { console.error("job index refresh failed:", err.message); return jobCache.jobs; })
+      .finally(() => { indexInflight = null; });
+  }
+  return indexInflight;
+}
+
+export async function jobIndex() {
+  const age = Date.now() - jobCache.at;
+  const have = jobCache.jobs.length > 0;
+  if (have && age < INDEX_FRESH_MS) return jobCache.jobs;
+  if (have && age < INDEX_USABLE_MS) {
+    refreshIndex();          // deliberately not awaited — nobody waits for this
+    return jobCache.jobs;
+  }
+  return refreshIndex();     // cold or ancient: this one has to be waited for
+}
+
+/** Force a rebuild and wait. Used when a search finds nothing on a stale index. */
+export function rebuildJobIndex() {
+  jobCache = { at: 0, jobs: jobCache.jobs };
+  return refreshIndex();
 }
 
 const WRITE_TOOLS = new Set([
@@ -690,6 +737,14 @@ export async function executeTool(name, input) {
       contact: j.contact || undefined,
       work: j.description ? j.description.slice(0, 90) : undefined,
     }));
+    // Before telling him it isn't there, make sure we didn't just search a
+    // stale copy. A job booked this morning would be missing from an index
+    // built before it existed, and a wrong "can't find it" sends him hunting
+    // for a job number — the exact dead end this tool exists to avoid.
+    if (!matches.length && !input._retried && Date.now() - jobCache.at > INDEX_FRESH_MS) {
+      await rebuildJobIndex();
+      return executeTool("search_jobs", { ...input, _retried: true });
+    }
     if (!matches.length) {
       // Nothing matched: offer the closest real suburbs/streets we do have, so
       // the reply is "did you mean Mortlake?" instead of "spell it for me".
@@ -1107,7 +1162,21 @@ HONESTY: if something fails, say what failed in plain words and what you'll try 
  */
 // context.anchor: job carried across turns of one call (the transcript alone
 // loses tool results, which made every turn re-run find_job).
+// Spoken while the tools run. Short, varied so it does not become a tic, and
+// deliberately the kind of thing a mate says over his shoulder — not a status
+// report. "NEVER narrate what you are about to do" still holds for the model;
+// this is different, it is filling a five-second silence he cannot avoid.
+const HOLD_LINES = [
+  "Hang on, pulling it up.",
+  "Righto, gimme a sec.",
+  "Two ticks.",
+  "Let me have a look.",
+  "Onto it.",
+];
+let holdTurn = 0;
+
 export async function runTurn(messages, onDelta, context = {}) {
+  let saidHold = false;
   const apiMessages = messages
     .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.text)
     .map((m) => ({ role: m.role, content: String(m.text).slice(0, 6000) }))
@@ -1192,6 +1261,28 @@ export async function runTurn(messages, onDelta, context = {}) {
     }
 
     if (stopReason !== "tool_use") return { reply: fullReply, anchor };
+
+    // Say something before disappearing to do the work.
+    //
+    // A ServiceM8 lookup plus another Claude pass is five to eight seconds, and
+    // until now that was pure silence — Steven's "the gap from finishing to
+    // Charlie responding is long". We cannot make the lookup fast, but dead air
+    // is a different complaint from slow, and this fixes the dead air: the
+    // words stream out and get spoken WHILE the tools run underneath.
+    //
+    // Only on the FIRST round, only when he has not already said something
+    // this turn, and never before an instant tool — nobody needs "hang on"
+    // before an answer that was already on screen.
+    if (!saidHold && !fullReply.trim()) {
+      const instant = new Set(["show_quote_draft", "remember"]);
+      const slow = content.some((b) => b.type === "tool_use" && !instant.has(b.name));
+      if (slow) {
+        saidHold = true;
+        const line = HOLD_LINES[holdTurn++ % HOLD_LINES.length];
+        fullReply += line;
+        if (onDelta) onDelta(line);
+      }
+    }
 
     const toolResults = [];
     for (const block of content) {
