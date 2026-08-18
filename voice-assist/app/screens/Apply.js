@@ -97,6 +97,8 @@ export default function Apply({ onBack }) {
   const [password, setPasswordValue] = useState("");
   const codeRef = useRef(null);
   const bizTimer = useRef(null);
+  // The query a response must still match to be allowed on screen.
+  const bizWanted = useRef("");
 
   const set = (key) => (text) => {
     setValues((v) => ({ ...v, [key]: text }));
@@ -110,15 +112,24 @@ export default function Apply({ onBack }) {
   const onBizQuery = (text) => {
     setBizQuery(text);
     setBusiness(null);
-    if (bizTimer.current) clearTimeout(bizTimer.current);
     setNoMatches(false);
-    if (text.trim().length < 3) { setMatches([]); setSearching(false); return; }
-    // Searching starts the moment they type, not when the request fires, so
-    // the button is already disabled during the debounce. Otherwise there is a
-    // half-second where a fast thumb can submit with no business attached.
+    // Old matches go the instant they keep typing. Leaving them up while a new
+    // search runs is what made it look like the search was stuck on "Mr Sparky"
+    // long after the box said something else.
+    setMatches([]);
+    if (bizTimer.current) clearTimeout(bizTimer.current);
+
+    const q = text.trim();
+    bizWanted.current = q;
+    if (q.length < 3) { setSearching(false); return; }
+
     setSearching(true);
     bizTimer.current = setTimeout(async () => {
-      const found = await searchBusiness(text.trim());
+      const found = await searchBusiness(q);
+      // Responses come back out of order — a slow search for a short string can
+      // land after a fast one for a longer string and overwrite it. Only the
+      // answer to what is currently in the box is allowed on screen.
+      if (bizWanted.current !== q) return;
       setMatches(found);
       setNoMatches(found.length === 0);
       setSearching(false);
