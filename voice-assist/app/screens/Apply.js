@@ -20,6 +20,7 @@ import {
   StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Cta, Header } from "../components/ui";
+import { startSignup, verifyCode, isFieldError } from "../lib/demo";
 import { C, R, S, T } from "../lib/theme";
 
 const MOBILE = /^0\d{9}$/;
@@ -73,6 +74,8 @@ export default function Apply({ onBack }) {
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState("");
   const [licence, setLicence] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [done, setDone] = useState(null);
   const codeRef = useRef(null);
 
   const set = (key) => (text) => {
@@ -86,15 +89,61 @@ export default function Apply({ onBack }) {
     const found = validate(values);
     if (Object.keys(found).some((k) => found[k])) { setErrors(found); return; }
     setBusy(true);
-    // TODO: POST /api/demo/signup — sends the SMS and runs the licence check.
-    // Until that route exists the screen shows the shape of the answer rather
-    // than pretending to have sent anything.
-    setTimeout(() => {
-      setBusy(false);
-      setLicence(null);
+    setNotice("");
+    try {
+      const res = await startSignup(values);
+      setLicence(res.licence?.verified ? res.licence : null);
       setStep("code");
-    }, 400);
+    } catch (e) {
+      // The portal validates properly; anything it objects to by field is shown
+      // against that field rather than as a banner nobody reads.
+      if (isFieldError(e)) setErrors(e.errors);
+      else setNotice(e.message);
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const submitCode = async (typed) => {
+    setBusy(true);
+    setNotice("");
+    try {
+      const res = await verifyCode({ mobile: values.mobile, code: typed });
+      setDone(res.name || values.name);
+    } catch (e) {
+      setNotice(e.message);
+      setCode("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    setCode("");
+    setNotice("");
+    setBusy(true);
+    try {
+      await startSignup(values);
+      setNotice("Code sent again.");
+    } catch (e) {
+      setNotice(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <ScrollView contentContainerStyle={[st.wrap, { paddingTop: 80 }]}>
+        <Text style={st.bigTick}>✓</Text>
+        <Text style={st.bigTitle}>You're in, {String(done).split(" ")[0]}</Text>
+        <Text style={[st.blurb, { textAlign: "center" }]}>
+          Your number is verified. Next we'll show you the jobs and what they pay.
+        </Text>
+        <Cta label="Have a look" onPress={onBack} />
+      </ScrollView>
+    );
+  }
 
   if (step === "code") {
     const filled = code.length;
@@ -125,7 +174,14 @@ export default function Apply({ onBack }) {
           <TextInput
             ref={codeRef}
             value={code}
-            onChangeText={(t) => setCode(t.replace(/\D/g, "").slice(0, CODE_LENGTH))}
+            onChangeText={(t) => {
+              const clean = t.replace(/\D/g, "").slice(0, CODE_LENGTH);
+              setCode(clean);
+              // Submitting on the sixth digit saves hunting for a button with
+              // the keyboard up. The code came from an SMS; finish the moment
+              // it is complete.
+              if (clean.length === CODE_LENGTH && !busy) submitCode(clean);
+            }}
             keyboardType="number-pad"
             textContentType="oneTimeCode"
             autoComplete="sms-otp"
@@ -134,13 +190,13 @@ export default function Apply({ onBack }) {
             style={st.hidden}
           />
 
-          <View style={st.pending}>
-            <Text style={st.pendingTitle}>Not connected yet</Text>
-            <Text style={T.small}>
-              No code has been sent. Sending the text and checking the licence is
-              the next piece of work.
-            </Text>
-          </View>
+          {busy ? <ActivityIndicator color={C.brand} style={{ marginBottom: 14 }} /> : null}
+
+          {notice ? (
+            <View style={st.pending}>
+              <Text style={T.small}>{notice}</Text>
+            </View>
+          ) : null}
 
           {licence ? (
             <View style={st.conf}>
@@ -152,7 +208,9 @@ export default function Apply({ onBack }) {
             </View>
           ) : null}
 
-          <Text style={st.foot}>Didn't get it? <Text style={{ color: C.brand }}>Send again</Text></Text>
+          <Text style={st.foot}>
+            Didn't get it? <Text style={{ color: C.brand }} onPress={resend}>Send again</Text>
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     );
@@ -254,4 +312,6 @@ const st = StyleSheet.create({
   tick: { color: C.earth, fontSize: 14 },
   confTitle: { ...T.body, fontSize: 13, fontWeight: "700" },
   foot: { ...T.small, fontSize: 11.5, textAlign: "center", marginTop: 16 },
+  bigTick: { color: C.earth, fontSize: 44, textAlign: "center", marginBottom: 10 },
+  bigTitle: { ...T.body, fontSize: 21, fontWeight: "700", textAlign: "center", marginBottom: 10 },
 });
