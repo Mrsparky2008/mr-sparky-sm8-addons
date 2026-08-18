@@ -61,6 +61,19 @@ function validate(v) {
   return e;
 }
 
+/**
+ * "Mr Steven Sukar" -> "Steven". People put a title in the name box, and
+ * greeting someone as "Mr" undoes the impression the rest of the screen is
+ * working to make. Falls back to the whole string rather than showing nothing
+ * if a name is only a title.
+ */
+const firstName = (full) => {
+  const TITLES = new Set(["mr", "mrs", "ms", "miss", "dr", "prof", "sir", "mx"]);
+  const words = String(full || "").trim().split(/\s+/)
+    .filter((w) => w && !TITLES.has(w.replace(/\./g, "").toLowerCase()));
+  return words[0] || String(full || "").trim();
+};
+
 /** "0412345678" -> "0412 345 678", for reading a number back to someone. */
 const prettyMobile = (m) => {
   const d = String(m || "").replace(/\D/g, "");
@@ -136,7 +149,7 @@ export default function Apply({ onBack }) {
     return (
       <ScrollView contentContainerStyle={[st.wrap, { paddingTop: 80 }]}>
         <Text style={st.bigTick}>✓</Text>
-        <Text style={st.bigTitle}>You're in, {String(done).split(" ")[0]}</Text>
+        <Text style={st.bigTitle}>You're in, {firstName(done)}</Text>
         <Text style={[st.blurb, { textAlign: "center" }]}>
           Your number is verified. Next we'll show you the jobs and what they pay.
         </Text>
