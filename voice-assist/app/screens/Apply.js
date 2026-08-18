@@ -81,6 +81,13 @@ export default function Apply({ onBack }) {
   const licTimer = useRef(null);
   const licWanted = useRef("");
 
+  // The nominated supervisor's own licence, asked for only when the first one
+  // turned out to be a company. That is the licence that names a person.
+  const [supCheck, setSupCheck] = useState(null);
+  const [supBusy, setSupBusy] = useState(false);
+  const supTimer = useRef(null);
+  const supWanted = useRef("");
+
   const [business, setBusiness] = useState(null);
   const [bizQuery, setBizQuery] = useState("");
   const [matches, setMatches] = useState([]);
@@ -101,12 +108,54 @@ export default function Apply({ onBack }) {
   /* -------------------------------------------------------------- licence -- */
 
   // The name is only theirs to type when the register has not given us one.
-  const nameFromRegister = Boolean(licCheck?.verified && licCheck.isPerson);
+  // Whichever licence named a person is the one the name comes from.
+  const personCheck = licCheck?.verified && licCheck.isPerson ? licCheck
+    : supCheck?.verified && supCheck.isPerson ? supCheck
+      : null;
+  const nameFromRegister = Boolean(personCheck);
   // A company contractor licence names the business. In NSW it must have a
   // nominated qualified supervisor holding a personal licence, but the public
   // register does not publish that link - so the company licence is taken as
   // proof of the business and the person is asked for separately.
   const companyLicence = Boolean(licCheck?.verified && !licCheck.isPerson);
+
+  const takeNameFrom = (res) => {
+    setValues((v) => ({
+      ...v,
+      name: res.licensee,
+      // Seeded, not forced. Most people leave it; Frederick changes it to Fred.
+      preferred: v.preferred || firstName(res.licensee),
+    }));
+    setErrors((e) => ({ ...e, name: undefined }));
+  };
+
+  const runSupervisorCheck = async (q) => {
+    if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
+    supWanted.current = q;
+    setSupBusy(true);
+    const res = await checkLicence(q);
+    if (supWanted.current !== q) return;
+    setSupBusy(false);
+    setSupCheck(res);
+    if (res?.verified && res.isPerson) takeNameFrom(res);
+  };
+
+  const onSupervisor = (text) => {
+    set("supervisorLicence")(text);
+    setSupCheck(null);
+    if (supTimer.current) clearTimeout(supTimer.current);
+    const q = text.trim();
+    supWanted.current = q;
+    if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) { setSupBusy(false); return; }
+    supTimer.current = setTimeout(() => runSupervisorCheck(q), 900);
+  };
+
+  const onSupervisorBlur = () => {
+    if (supTimer.current) clearTimeout(supTimer.current);
+    const q = String(values.supervisorLicence || "").trim();
+    if (!q || supCheck || supBusy) return;
+    runSupervisorCheck(q);
+  };
 
   const runLicenceCheck = async (q) => {
     if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
@@ -116,15 +165,7 @@ export default function Apply({ onBack }) {
     if (licWanted.current !== q) return;   // an older answer, ignore it
     setLicBusy(false);
     setLicCheck(res);
-    if (res?.verified && res.isPerson) {
-      setValues((v) => ({
-        ...v,
-        name: res.licensee,
-        // Seeded, not forced. Most people leave it; Frederick changes it to Fred.
-        preferred: v.preferred || firstName(res.licensee),
-      }));
-      setErrors((e) => ({ ...e, name: undefined }));
-    }
+    if (res?.verified && res.isPerson) takeNameFrom(res);
     // A company licence has already told us the business - no point making
     // them search a register for a name we were just handed.
     if (res?.verified && !res.isPerson && !business) {
@@ -386,13 +427,34 @@ export default function Apply({ onBack }) {
         </Field>
 
         {companyLicence ? (
-          <View style={st.refer}>
-            <Text style={T.small}>
-              That's the company licence. A company licence needs a nominated
-              qualified supervisor, so tell us your name and we'll match your
-              own licence when we talk.
-            </Text>
-          </View>
+          <Field
+            label="NOMINATED SUPERVISOR LICENCE NUMBER"
+            hint={
+              supBusy ? <Text style={st.hint}>Checking the NSW register…</Text>
+                : supCheck?.verified && supCheck.isPerson
+                  ? <Text style={st.ok}>✓ {supCheck.licensee} · {supCheck.summary}</Text>
+                  : supCheck?.verified
+                    ? <Text style={st.warn}>That's another company licence — we need the supervisor's own one</Text>
+                    : supCheck
+                      ? <Text style={st.warn}>{supCheck.note}</Text>
+                      : <Text style={st.hint}>
+                          That's the company licence. A company licence needs a
+                          nominated supervisor — their personal number tells us
+                          who you are.
+                        </Text>
+            }
+          >
+            <TextInput
+              value={values.supervisorLicence || ""}
+              onChangeText={onSupervisor}
+              onBlur={onSupervisorBlur}
+              placeholder="184060C"
+              placeholderTextColor={C.muted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              style={st.input}
+            />
+          </Field>
         ) : null}
 
         <Field
