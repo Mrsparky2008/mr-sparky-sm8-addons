@@ -60,3 +60,26 @@ export function startSignup({ name, mobile, email, licence, promoCode }) {
 export function verifyCode({ mobile, code }) {
   return post("/api/demo/verify", { mobile, code });
 }
+
+/**
+ * Search the Australian Business Register by name.
+ *
+ * Returns [] rather than throwing when the register is unavailable — the
+ * portal soft-fails it deliberately, and a sparky should never be stopped
+ * signing up because a government service is having a moment.
+ */
+export async function searchBusiness(q) {
+  try {
+    const res = await fetch(`${PORTAL}/api/demo/abr?q=${encodeURIComponent(q)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.matches || [];
+  } catch {
+    return [];
+  }
+}
+
+/** Choose a password. This is what actually creates the login. */
+export function setPassword({ mobile, password }) {
+  return post("/api/demo/password", { mobile, password });
+}

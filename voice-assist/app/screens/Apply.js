@@ -20,7 +20,7 @@ import {
   StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Cta, Header } from "../components/ui";
-import { startSignup, verifyCode, isFieldError } from "../lib/demo";
+import { startSignup, verifyCode, setPassword, searchBusiness, isFieldError } from "../lib/demo";
 import { C, R, S, T } from "../lib/theme";
 
 const MOBILE = /^0\d{9}$/;
@@ -89,7 +89,12 @@ export default function Apply({ onBack }) {
   const [licence, setLicence] = useState(null);
   const [notice, setNotice] = useState("");
   const [done, setDone] = useState(null);
+  const [business, setBusiness] = useState(null);
+  const [bizQuery, setBizQuery] = useState("");
+  const [matches, setMatches] = useState([]);
+  const [password, setPasswordValue] = useState("");
   const codeRef = useRef(null);
+  const bizTimer = useRef(null);
 
   const set = (key) => (text) => {
     setValues((v) => ({ ...v, [key]: text }));
@@ -98,13 +103,45 @@ export default function Apply({ onBack }) {
     setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
   };
 
+  // Debounced so a search does not fire on every keystroke. The register is a
+  // government service and a sparky types faster than it answers.
+  const onBizQuery = (text) => {
+    setBizQuery(text);
+    setBusiness(null);
+    if (bizTimer.current) clearTimeout(bizTimer.current);
+    if (text.trim().length < 3) { setMatches([]); return; }
+    bizTimer.current = setTimeout(async () => {
+      setMatches(await searchBusiness(text.trim()));
+    }, 450);
+  };
+
+  const pickBusiness = (m) => {
+    setBusiness(m);
+    setBizQuery(m.name);
+    setMatches([]);
+    setErrors((e) => ({ ...e, business: undefined }));
+  };
+
+  const savePassword = async () => {
+    setBusy(true);
+    setNotice("");
+    try {
+      await setPassword({ mobile: values.mobile, password });
+      setDone(values.name);
+    } catch (e) {
+      setNotice(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const sendCode = async () => {
     const found = validate(values);
     if (Object.keys(found).some((k) => found[k])) { setErrors(found); return; }
     setBusy(true);
     setNotice("");
     try {
-      const res = await startSignup(values);
+      const res = await startSignup({ ...values, business });
       setLicence(res.licence?.verified ? res.licence : null);
       setStep("code");
     } catch (e) {
@@ -121,8 +158,8 @@ export default function Apply({ onBack }) {
     setBusy(true);
     setNotice("");
     try {
-      const res = await verifyCode({ mobile: values.mobile, code: typed });
-      setDone(res.name || values.name);
+      await verifyCode({ mobile: values.mobile, code: typed });
+      setStep("password");
     } catch (e) {
       setNotice(e.message);
       setCode("");
@@ -155,6 +192,48 @@ export default function Apply({ onBack }) {
         </Text>
         <Cta label="Have a look" onPress={onBack} />
       </ScrollView>
+    );
+  }
+
+  if (step === "password") {
+    return (
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <Header title="Choose a password" />
+        <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
+          <Text style={st.blurb}>
+            Your number is verified. Pick a password and you're in — you'll sign
+            in with {values.email} from now on.
+          </Text>
+
+          <View style={st.field}>
+            <Text style={T.label}>PASSWORD</Text>
+            <TextInput
+              value={password}
+              onChangeText={(t) => { setPasswordValue(t); setNotice(""); }}
+              placeholder="At least 8 characters"
+              placeholderTextColor={C.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete="new-password"
+              textContentType="newPassword"
+              autoFocus
+              style={[st.input, notice && { borderColor: C.active }]}
+            />
+            <Text style={st.hint}>
+              Needs 8 characters with a capital, a number and a symbol
+            </Text>
+          </View>
+
+          {notice ? <Text style={st.err}>{notice}</Text> : null}
+
+          {busy
+            ? <ActivityIndicator color={C.brand} style={{ marginTop: 22 }} />
+            : <Cta label="Finish" onPress={savePassword} />}
+        </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -261,6 +340,33 @@ export default function Apply({ onBack }) {
           </View>
         ))}
 
+        <View style={st.field}>
+          <Text style={T.label}>BUSINESS NAME</Text>
+          <TextInput
+            value={bizQuery}
+            onChangeText={onBizQuery}
+            placeholder="Start typing, then pick yours"
+            placeholderTextColor={C.muted}
+            autoCapitalize="words"
+            autoCorrect={false}
+            style={st.input}
+          />
+          {business ? (
+            <Text style={st.hint}>✓ ABN {business.abn} · from the business register</Text>
+          ) : matches.length ? (
+            <View style={st.matches}>
+              {matches.slice(0, 5).map((m) => (
+                <Pressable key={m.abn + m.name} onPress={() => pickBusiness(m)} style={st.match}>
+                  <Text style={st.matchName}>{m.name}</Text>
+                  <Text style={T.small}>ABN {m.abn}{m.state ? ` · ${m.state}` : ""}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            <Text style={st.hint}>Optional — helps us verify you faster</Text>
+          )}
+        </View>
+
         {busy
           ? <ActivityIndicator color={C.brand} style={{ marginTop: 22 }} />
           : <Cta label="Send me a code" onPress={sendCode} />}
@@ -325,6 +431,16 @@ const st = StyleSheet.create({
   tick: { color: C.earth, fontSize: 14 },
   confTitle: { ...T.body, fontSize: 13, fontWeight: "700" },
   foot: { ...T.small, fontSize: 11.5, textAlign: "center", marginTop: 16 },
+  matches: {
+    backgroundColor: C.panel,
+    borderColor: C.line,
+    borderWidth: 1,
+    borderRadius: R.card,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  match: { padding: 13, borderBottomColor: C.line, borderBottomWidth: 1 },
+  matchName: { ...T.body, fontSize: 14.5, fontWeight: "600" },
   bigTick: { color: C.earth, fontSize: 44, textAlign: "center", marginBottom: 10 },
   bigTitle: { ...T.body, fontSize: 21, fontWeight: "700", textAlign: "center", marginBottom: 10 },
 });
