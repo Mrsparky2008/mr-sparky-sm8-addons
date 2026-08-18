@@ -39,6 +39,16 @@ const firstName = (full) => {
   return words[0] || String(full || "").trim();
 };
 
+/**
+ * Two business names are the same name if they differ only in case, spacing or
+ * punctuation. "Mr Sparky Electrical Services Pty Ltd" off a licence and
+ * "MR SPARKY ELECTRICAL SERVICES PTY LTD" off the ABR are one business.
+ */
+const sameName = (a, b) => {
+  const flat = (x) => String(x || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return Boolean(flat(a)) && flat(a) === flat(b);
+};
+
 /** "0412345678" -> "0412 345 678", for reading a number back to someone. */
 const prettyMobile = (m) => {
   const d = String(m || "").replace(/\D/g, "");
@@ -166,11 +176,24 @@ export default function Apply({ onBack }) {
     setLicBusy(false);
     setLicCheck(res);
     if (res?.verified && res.isPerson) takeNameFrom(res);
-    // A company licence has already told us the business - no point making
-    // them search a register for a name we were just handed.
+    // A company licence has already told us the business, so the ABR is only
+    // being asked for the ABN. If it comes back with that exact name and only
+    // that one, take it - offering a list when the answer is already known is
+    // a step that earns nothing, and the list is full of same-named businesses
+    // in other states.
     if (res?.verified && !res.isPerson && !business) {
       setBizQuery(res.licensee);
-      onBizQuery(res.licensee);
+      setSearching(true);
+      const found = await searchBusiness(res.licensee);
+      if (licWanted.current !== q) return;
+      const exact = found.filter((m) => sameName(m.name, res.licensee));
+      setSearching(false);
+      if (exact.length === 1) {
+        pickBusiness(exact[0]);
+      } else {
+        setMatches(found);
+        setNoMatches(found.length === 0);
+      }
     }
   };
 
