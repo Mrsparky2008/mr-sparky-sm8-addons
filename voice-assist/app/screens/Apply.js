@@ -1,52 +1,49 @@
 // Having a look around — signing up for the demo.
 //
-// This is a recruitment pitch, not an application. Steven has already spoken to
-// this person; the screen exists so they can get in and see what the work pays
-// without filling in anything heavy. Four boxes and a text message, doable
-// standing at a wholesaler counter.
+// A recruitment pitch, not an application. Steven has already spoken to this
+// person; the screen exists so they can get in and see what the work pays
+// without filling in anything heavy. Insurance, workers comp, service areas and
+// the contract all belong to onboarding, after someone is interested.
 //
-// Insurance, workers comp, ABN, service areas and the contract are all
-// deliberately absent. They belong to onboarding, which happens after someone
-// is interested, and putting any of it here would kill the signup.
+// The licence comes FIRST and the name comes from the register, not the
+// keyboard. Nobody can mistype their own name into a mismatch, the legal name
+// is the one the register holds — which is what an RCTI needs — and being told
+// "we found you" in the first ten seconds does more for credibility than any
+// wording could. A preferred name sits alongside it, because Frederick goes by
+// Fred and Mohammad goes by Moe.
 //
-// Two things are verified because they are cheap and they prove a real sparky:
-// the mobile, by a code, and the licence, against the live NSW register. The
-// licence check must FAIL SOFT - if the register cannot be reached the person
-// still gets in and the number lands on Steven's desk. Never turn away a real
-// electrician because a government website had a bad morning.
+// The licence check FAILS SOFT throughout. Not found, cancelled, register down:
+// they still get in and it lands on Steven's desk. Turning away a real
+// electrician because a government website had a bad morning is much the worse
+// failure.
 import { useRef, useState } from "react";
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView,
   StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Cta, Header } from "../components/ui";
-import { startSignup, verifyCode, setPassword, searchBusiness, checkLicence, isFieldError } from "../lib/demo";
+import {
+  startSignup, verifyCode, setPassword, searchBusiness, checkLicence, isFieldError,
+} from "../lib/demo";
 import { C, R, S, T } from "../lib/theme";
 
 const MOBILE = /^0\d{9}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODE_LENGTH = 6;
+const TITLES = new Set(["mr", "mrs", "ms", "miss", "dr", "prof", "sir", "mx"]);
 
-const FIELDS = [
-  {
-    key: "name", label: "YOUR NAME", placeholder: "Dave Miller",
-    autoCapitalize: "words", autoComplete: "name",
-  },
-  {
-    key: "mobile", label: "MOBILE", placeholder: "0412 345 678",
-    keyboardType: "phone-pad", autoComplete: "tel",
-    hint: "We'll text you a code",
-  },
-  {
-    key: "email", label: "EMAIL", placeholder: "dave@millerelectrical.com.au",
-    keyboardType: "email-address", autoCapitalize: "none", autoComplete: "email",
-  },
-  {
-    key: "licence", label: "ELECTRICAL LICENCE NUMBER", placeholder: "184060C",
-    autoCapitalize: "characters",
-    hint: "Checked against the NSW register",
-  },
-];
+/** "Mr Steven Sukar" -> "Steven". Greeting someone as "Mr" undoes the rest. */
+const firstName = (full) => {
+  const words = String(full || "").trim().split(/\s+/)
+    .filter((w) => w && !TITLES.has(w.replace(/\./g, "").toLowerCase()));
+  return words[0] || String(full || "").trim();
+};
+
+/** "0412345678" -> "0412 345 678", for reading a number back to someone. */
+const prettyMobile = (m) => {
+  const d = String(m || "").replace(/\D/g, "");
+  return d.length === 10 ? `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7)}` : m;
+};
 
 function validate(v) {
   const e = {};
@@ -61,96 +58,68 @@ function validate(v) {
   return e;
 }
 
-/**
- * "Mr Steven Sukar" -> "Steven". People put a title in the name box, and
- * greeting someone as "Mr" undoes the impression the rest of the screen is
- * working to make. Falls back to the whole string rather than showing nothing
- * if a name is only a title.
- */
-const firstName = (full) => {
-  const TITLES = new Set(["mr", "mrs", "ms", "miss", "dr", "prof", "sir", "mx"]);
-  const words = String(full || "").trim().split(/\s+/)
-    .filter((w) => w && !TITLES.has(w.replace(/\./g, "").toLowerCase()));
-  return words[0] || String(full || "").trim();
-};
-
-/** "0412345678" -> "0412 345 678", for reading a number back to someone. */
-const prettyMobile = (m) => {
-  const d = String(m || "").replace(/\D/g, "");
-  return d.length === 10 ? `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7)}` : m;
-};
+function Field({ label, hint, error, children }) {
+  return (
+    <View style={st.field}>
+      <Text style={T.label}>{label}</Text>
+      {children}
+      {error ? <Text style={st.err}>{error}</Text> : hint || null}
+    </View>
+  );
+}
 
 export default function Apply({ onBack }) {
   const [step, setStep] = useState("details");
   const [values, setValues] = useState({});
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
-  const [code, setCode] = useState("");
-  const [licence, setLicence] = useState(null);
   const [notice, setNotice] = useState("");
   const [done, setDone] = useState(null);
-  const [business, setBusiness] = useState(null);
-  const [bizQuery, setBizQuery] = useState("");
-  const [matches, setMatches] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [noMatches, setNoMatches] = useState(false);
-  const [password, setPasswordValue] = useState("");
-  const codeRef = useRef(null);
-  const bizTimer = useRef(null);
-  // The query a response must still match to be allowed on screen.
-  const bizWanted = useRef("");
+
   const [licCheck, setLicCheck] = useState(null);
   const [licBusy, setLicBusy] = useState(false);
   const licTimer = useRef(null);
   const licWanted = useRef("");
 
+  const [business, setBusiness] = useState(null);
+  const [bizQuery, setBizQuery] = useState("");
+  const [matches, setMatches] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [noMatches, setNoMatches] = useState(false);
+  const bizTimer = useRef(null);
+  const bizWanted = useRef("");
+
+  const [code, setCode] = useState("");
+  const [password, setPasswordValue] = useState("");
+  const codeRef = useRef(null);
+
   const set = (key) => (text) => {
     setValues((v) => ({ ...v, [key]: text }));
-    // The licence verdict was judged against the name, so editing the name
-    // makes that verdict stale. Drop it and let the next blur ask again.
-    if (key === "name") { setLicCheck(null); licWanted.current = ""; }
-    // Clearing on edit rather than on submit means the message goes the moment
-    // they start fixing it, instead of nagging until they press again.
     setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
   };
 
-  // Debounced so a search does not fire on every keystroke. The register is a
-  // government service and a sparky types faster than it answers.
-  const onBizQuery = (text) => {
-    setBizQuery(text);
-    setBusiness(null);
-    setNoMatches(false);
-    // Old matches go the instant they keep typing. Leaving them up while a new
-    // search runs is what made it look like the search was stuck on "Mr Sparky"
-    // long after the box said something else.
-    setMatches([]);
-    if (bizTimer.current) clearTimeout(bizTimer.current);
+  /* -------------------------------------------------------------- licence -- */
 
-    const q = text.trim();
-    bizWanted.current = q;
-    if (q.length < 3) { setSearching(false); return; }
-
-    setSearching(true);
-    bizTimer.current = setTimeout(async () => {
-      const found = await searchBusiness(q);
-      // Responses come back out of order — a slow search for a short string can
-      // land after a fast one for a longer string and overwrite it. Only the
-      // answer to what is currently in the box is allowed on screen.
-      if (bizWanted.current !== q) return;
-      setMatches(found);
-      setNoMatches(found.length === 0);
-      setSearching(false);
-    }, 450);
-  };
+  // The name is only theirs to type when the register has not given us one.
+  const nameFromRegister = Boolean(licCheck?.verified && licCheck.isPerson);
 
   const runLicenceCheck = async (q) => {
     if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
     licWanted.current = q;
     setLicBusy(true);
-    const res = await checkLicence(q, String(values.name || "").trim());
+    const res = await checkLicence(q);
     if (licWanted.current !== q) return;   // an older answer, ignore it
-    setLicCheck(res);
     setLicBusy(false);
+    setLicCheck(res);
+    if (res?.verified && res.isPerson) {
+      setValues((v) => ({
+        ...v,
+        name: res.licensee,
+        // Seeded, not forced. Most people leave it; Frederick changes it to Fred.
+        preferred: v.preferred || firstName(res.licensee),
+      }));
+      setErrors((e) => ({ ...e, name: undefined }));
+    }
   };
 
   const onLicence = (text) => {
@@ -160,19 +129,38 @@ export default function Apply({ onBack }) {
     const q = text.trim();
     licWanted.current = q;
     if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) { setLicBusy(false); return; }
-    // Long, because this is a government register and not a search box. The
-    // blur below is what guarantees the check happens; this is only so someone
-    // who types and then sits there still gets an answer.
+    // Long, because this is a government register and not a search box. Leaving
+    // the field is what usually triggers it; this only catches someone who
+    // types and then sits there.
     licTimer.current = setTimeout(() => runLicenceCheck(q), 900);
   };
 
-  // Leaving the field is the natural moment to check, and the one that costs
-  // the register a single request instead of one per keystroke.
   const onLicenceBlur = () => {
     if (licTimer.current) clearTimeout(licTimer.current);
     const q = String(values.licence || "").trim();
     if (!q || licCheck || licBusy) return;
     runLicenceCheck(q);
+  };
+
+  /* ------------------------------------------------------------- business -- */
+
+  const onBizQuery = (text) => {
+    setBizQuery(text);
+    setBusiness(null);
+    setNoMatches(false);
+    setMatches([]);   // old matches go the instant they keep typing
+    if (bizTimer.current) clearTimeout(bizTimer.current);
+    const q = text.trim();
+    bizWanted.current = q;
+    if (q.length < 3) { setSearching(false); return; }
+    setSearching(true);
+    bizTimer.current = setTimeout(async () => {
+      const found = await searchBusiness(q);
+      if (bizWanted.current !== q) return;   // a stale answer
+      setMatches(found);
+      setNoMatches(found.length === 0);
+      setSearching(false);
+    }, 450);
   };
 
   const pickBusiness = (m) => {
@@ -181,28 +169,15 @@ export default function Apply({ onBack }) {
     setMatches([]);
     setNoMatches(false);
     setSearching(false);
-    setErrors((e) => ({ ...e, business: undefined }));
+    bizWanted.current = "";
   };
 
-  const savePassword = async () => {
-    setBusy(true);
-    setNotice("");
-    try {
-      await setPassword({ mobile: values.mobile, password });
-      setDone(values.name);
-    } catch (e) {
-      setNotice(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Typed a business but not picked one yet? Wait. A name sitting in the box
-  // unchosen is not a business - it is a half-finished search, and letting it
-  // through loses the ABN silently. Nothing typed at all is fine: the business
-  // is optional and a sparky without his ABN to hand should not be stuck.
+  // A name typed but not picked is a half-finished search, and letting it
+  // through drops the ABN silently.
   const waitingOnBusiness =
     searching || (bizQuery.trim().length >= 3 && !business && !noMatches);
+
+  /* ---------------------------------------------------------------- steps -- */
 
   const sendCode = async () => {
     const found = validate(values);
@@ -210,12 +185,9 @@ export default function Apply({ onBack }) {
     setBusy(true);
     setNotice("");
     try {
-      const res = await startSignup({ ...values, business });
-      setLicence(res.licence || null);
+      await startSignup({ ...values, business });
       setStep("code");
     } catch (e) {
-      // The portal validates properly; anything it objects to by field is shown
-      // against that field rather than as a banner nobody reads.
       if (isFieldError(e)) setErrors(e.errors);
       else setNotice(e.message);
     } finally {
@@ -242,7 +214,7 @@ export default function Apply({ onBack }) {
     setNotice("");
     setBusy(true);
     try {
-      await startSignup(values);
+      await startSignup({ ...values, business });
       setNotice("Code sent again.");
     } catch (e) {
       setNotice(e.message);
@@ -250,6 +222,21 @@ export default function Apply({ onBack }) {
       setBusy(false);
     }
   };
+
+  const savePassword = async () => {
+    setBusy(true);
+    setNotice("");
+    try {
+      await setPassword({ mobile: values.mobile, password });
+      setDone(values.preferred || values.name);
+    } catch (e) {
+      setNotice(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* -------------------------------------------------------------- screens -- */
 
   if (done) {
     return (
@@ -266,23 +253,20 @@ export default function Apply({ onBack }) {
 
   if (step === "password") {
     return (
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        {/* Back goes to the details, not to the code. Once the number is
-            verified the code screen is a dead end, and the reason someone
-            turns back from here is usually to change the email — which is
-            where the "already an account" message sends them. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        {/* Back goes to the details, not the code: once the number is verified
+            the code screen is a dead end, and the usual reason for turning back
+            is to change the email. */}
         <Header title="Choose a password" onBack={() => { setNotice(""); setStep("details"); }} />
         <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
           <Text style={st.blurb}>
             Your number is verified. Pick a password and you're in — you'll sign
             in with {values.email} from now on.
           </Text>
-
-          <View style={st.field}>
-            <Text style={T.label}>PASSWORD</Text>
+          <Field
+            label="PASSWORD"
+            hint={<Text style={st.hint}>Needs 8 characters with a capital, a number and a symbol</Text>}
+          >
             <TextInput
               value={password}
               onChangeText={(t) => { setPasswordValue(t); setNotice(""); }}
@@ -295,13 +279,8 @@ export default function Apply({ onBack }) {
               autoFocus
               style={[st.input, notice && { borderColor: C.active }]}
             />
-            <Text style={st.hint}>
-              Needs 8 characters with a capital, a number and a symbol
-            </Text>
-          </View>
-
+          </Field>
           {notice ? <Text style={st.err}>{notice}</Text> : null}
-
           {busy
             ? <ActivityIndicator color={C.brand} style={{ marginTop: 22 }} />
             : <Cta label="Finish" onPress={savePassword} />}
@@ -313,10 +292,7 @@ export default function Apply({ onBack }) {
   if (step === "code") {
     const filled = code.length;
     return (
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <Header title="Check your phone" onBack={() => setStep("details")} />
         <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
           <Text style={st.blurb}>
@@ -327,24 +303,20 @@ export default function Apply({ onBack }) {
           <Pressable style={st.code} onPress={() => codeRef.current?.focus()}>
             {Array.from({ length: CODE_LENGTH }).map((_, i) => (
               <View key={i} style={[st.cell, i < filled && { borderColor: C.brand }]}>
-                <Text style={[st.cellText, i >= filled && { color: C.muted }]}>
-                  {code[i] || "·"}
-                </Text>
+                <Text style={[st.cellText, i >= filled && { color: C.muted }]}>{code[i] || "·"}</Text>
               </View>
             ))}
           </Pressable>
 
-          {/* One real input behind the six boxes — six separate fields fight the
-              keyboard and break paste-from-SMS, which is how most people do it. */}
+          {/* One real input behind the six boxes. Six separate fields fight the
+              keyboard and break pasting the code out of the SMS, which is how
+              most people enter one. */}
           <TextInput
             ref={codeRef}
             value={code}
             onChangeText={(t) => {
               const clean = t.replace(/\D/g, "").slice(0, CODE_LENGTH);
               setCode(clean);
-              // Submitting on the sixth digit saves hunting for a button with
-              // the keyboard up. The code came from an SMS; finish the moment
-              // it is complete.
               if (clean.length === CODE_LENGTH && !busy) submitCode(clean);
             }}
             keyboardType="number-pad"
@@ -356,28 +328,7 @@ export default function Apply({ onBack }) {
           />
 
           {busy ? <ActivityIndicator color={C.brand} style={{ marginBottom: 14 }} /> : null}
-
-          {notice ? (
-            <View style={st.pending}>
-              <Text style={T.small}>{notice}</Text>
-            </View>
-          ) : null}
-
-          {licence && !licence.verified ? (
-            <View style={st.refer}>
-              <Text style={T.small}>{licence.note}</Text>
-            </View>
-          ) : null}
-
-          {licence?.verified ? (
-            <View style={st.conf}>
-              <Text style={st.tick}>✓</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={st.confTitle}>Licence {licence.number} confirmed</Text>
-                <Text style={T.small}>{licence.classes} · current to {licence.expires}</Text>
-              </View>
-            </View>
-          ) : null}
+          {notice ? <View style={st.refer}><Text style={T.small}>{notice}</Text></View> : null}
 
           <Text style={st.foot}>
             Didn't get it? <Text style={{ color: C.brand }} onPress={resend}>Send again</Text>
@@ -388,10 +339,7 @@ export default function Apply({ onBack }) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <Header title="Have a look around" onBack={onBack} />
       <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
         <Text style={st.blurb}>
@@ -399,38 +347,109 @@ export default function Apply({ onBack }) {
           minute and there's nothing to upload.
         </Text>
 
-        {FIELDS.map((f) => (
-          <View key={f.key} style={st.field}>
-            <Text style={T.label}>{f.label}</Text>
-            <TextInput
-              value={values[f.key] || ""}
-              onChangeText={f.key === "licence" ? onLicence : set(f.key)}
-              onBlur={f.key === "licence" ? onLicenceBlur : undefined}
-              placeholder={f.placeholder}
-              placeholderTextColor={C.muted}
-              keyboardType={f.keyboardType || "default"}
-              autoCapitalize={f.autoCapitalize || "sentences"}
-              autoComplete={f.autoComplete}
-              autoCorrect={false}
-              style={[st.input, errors[f.key] && { borderColor: C.active }]}
-            />
-            {errors[f.key] ? (
-              <Text style={st.err}>{errors[f.key]}</Text>
-            ) : f.key === "licence" ? (
-              licBusy ? <Text style={st.hint}>Checking the NSW register…</Text>
-                : licCheck?.verified
-                  ? <Text style={st.ok}>✓ {licCheck.licensee} · {licCheck.summary}</Text>
-                  : licCheck
-                    ? <Text style={st.warn}>{licCheck.note}</Text>
-                    : <Text style={st.hint}>{f.hint}</Text>
-            ) : f.hint ? (
-              <Text style={st.hint}>{f.hint}</Text>
-            ) : null}
-          </View>
-        ))}
+        <Field
+          label="ELECTRICAL LICENCE NUMBER"
+          error={errors.licence}
+          hint={
+            licBusy ? <Text style={st.hint}>Checking the NSW register…</Text>
+              : licCheck?.verified
+                ? <Text style={st.ok}>✓ {licCheck.licensee} · {licCheck.summary}</Text>
+                : licCheck
+                  ? <Text style={st.warn}>{licCheck.note}</Text>
+                  : <Text style={st.hint}>We'll look you up on the NSW register</Text>
+          }
+        >
+          <TextInput
+            value={values.licence || ""}
+            onChangeText={onLicence}
+            onBlur={onLicenceBlur}
+            placeholder="184060C"
+            placeholderTextColor={C.muted}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            autoFocus
+            style={[st.input, errors.licence && { borderColor: C.active }]}
+          />
+        </Field>
 
-        <View style={st.field}>
-          <Text style={T.label}>BUSINESS NAME</Text>
+        <Field
+          label={nameFromRegister ? "NAME ON YOUR LICENCE" : "YOUR NAME"}
+          error={errors.name}
+          hint={nameFromRegister
+            ? <Text style={st.hint}>Straight from the register — nothing to type</Text>
+            : null}
+        >
+          <TextInput
+            value={values.name || ""}
+            onChangeText={set("name")}
+            placeholder="Dave Miller"
+            placeholderTextColor={C.muted}
+            editable={!nameFromRegister}
+            autoCapitalize="words"
+            autoComplete="name"
+            style={[
+              st.input,
+              nameFromRegister && st.locked,
+              errors.name && { borderColor: C.active },
+            ]}
+          />
+        </Field>
+
+        {nameFromRegister ? (
+          <Field
+            label="WHAT DO WE CALL YOU?"
+            hint={<Text style={st.hint}>Fred for Frederick, Moe for Mohammad</Text>}
+          >
+            <TextInput
+              value={values.preferred || ""}
+              onChangeText={set("preferred")}
+              placeholder={firstName(values.name)}
+              placeholderTextColor={C.muted}
+              autoCapitalize="words"
+              style={st.input}
+            />
+          </Field>
+        ) : null}
+
+        <Field
+          label="MOBILE"
+          error={errors.mobile}
+          hint={<Text style={st.hint}>We'll text you a code</Text>}
+        >
+          <TextInput
+            value={values.mobile || ""}
+            onChangeText={set("mobile")}
+            placeholder="0412 345 678"
+            placeholderTextColor={C.muted}
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            style={[st.input, errors.mobile && { borderColor: C.active }]}
+          />
+        </Field>
+
+        <Field label="EMAIL" error={errors.email}>
+          <TextInput
+            value={values.email || ""}
+            onChangeText={set("email")}
+            placeholder="dave@millerelectrical.com.au"
+            placeholderTextColor={C.muted}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+            autoCorrect={false}
+            style={[st.input, errors.email && { borderColor: C.active }]}
+          />
+        </Field>
+
+        <Field
+          label="BUSINESS NAME"
+          hint={
+            business ? <Text style={st.ok}>✓ ABN {business.abn} · from the business register</Text>
+              : searching ? <Text style={st.hint}>Searching the business register…</Text>
+                : noMatches ? <Text style={st.hint}>Not on the register under that name — carry on, we'll sort it later</Text>
+                  : <Text style={st.hint}>Optional — helps us verify you faster</Text>
+          }
+        >
           <TextInput
             value={bizQuery}
             onChangeText={onBizQuery}
@@ -440,9 +459,7 @@ export default function Apply({ onBack }) {
             autoCorrect={false}
             style={st.input}
           />
-          {business ? (
-            <Text style={st.ok}>✓ ABN {business.abn} · from the business register</Text>
-          ) : matches.length ? (
+          {matches.length ? (
             <View style={st.matches}>
               {matches.slice(0, 5).map((m) => (
                 <Pressable key={m.abn + m.name} onPress={() => pickBusiness(m)} style={st.match}>
@@ -451,16 +468,10 @@ export default function Apply({ onBack }) {
                 </Pressable>
               ))}
             </View>
-          ) : searching ? (
-            <Text style={st.hint}>Searching the business register…</Text>
-          ) : noMatches ? (
-            <Text style={st.hint}>
-              Not on the register under that name — carry on, we'll sort it later
-            </Text>
-          ) : (
-            <Text style={st.hint}>Optional — helps us verify you faster</Text>
-          )}
-        </View>
+          ) : null}
+        </Field>
+
+        {notice ? <Text style={st.err}>{notice}</Text> : null}
 
         {busy
           ? <ActivityIndicator color={C.brand} style={{ marginTop: 22 }} />
@@ -490,8 +501,22 @@ const st = StyleSheet.create({
     color: C.ink,
     minHeight: S.touch,
   },
+  // A locked field should look settled, not broken. Same ink, quieter ground.
+  locked: { backgroundColor: C.bg, borderColor: C.line },
   hint: { ...T.small, fontSize: 11.5, marginTop: 5 },
+  ok: { ...T.small, fontSize: 11.5, marginTop: 5, color: C.earth },
+  warn: { ...T.small, fontSize: 11.5, marginTop: 5, color: C.warnChipInk },
   err: { ...T.small, fontSize: 11.5, marginTop: 5, color: C.activeLight },
+  matches: {
+    backgroundColor: C.panel,
+    borderColor: C.line,
+    borderWidth: 1,
+    borderRadius: R.card,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  match: { padding: 13, borderBottomColor: C.line, borderBottomWidth: 1 },
+  matchName: { ...T.body, fontSize: 14.5, fontWeight: "600" },
   code: { flexDirection: "row", gap: 6, marginBottom: 16 },
   cell: {
     flex: 1,
@@ -504,30 +529,6 @@ const st = StyleSheet.create({
   },
   cellText: { fontSize: 20, color: C.ink, fontVariant: ["tabular-nums"] },
   hidden: { position: "absolute", opacity: 0, height: 1, width: 1 },
-  pending: {
-    backgroundColor: C.infoChipBg,
-    borderColor: C.line,
-    borderWidth: 1,
-    borderRadius: R.card,
-    padding: 13,
-    gap: 4,
-  },
-  pendingTitle: { ...T.body, fontSize: 13.5, fontWeight: "700" },
-  conf: {
-    flexDirection: "row",
-    gap: 9,
-    backgroundColor: "rgba(47,158,87,.13)",
-    borderColor: C.line,
-    borderWidth: 1,
-    borderRadius: R.card,
-    padding: 12,
-    marginTop: 12,
-  },
-  tick: { color: C.earth, fontSize: 14 },
-  confTitle: { ...T.body, fontSize: 13, fontWeight: "700" },
-  foot: { ...T.small, fontSize: 11.5, textAlign: "center", marginTop: 16 },
-  ok: { ...T.small, fontSize: 11.5, marginTop: 5, color: C.earth },
-  warn: { ...T.small, fontSize: 11.5, marginTop: 5, color: C.warnChipInk },
   refer: {
     backgroundColor: C.warnChipBg,
     borderColor: C.line,
@@ -536,16 +537,7 @@ const st = StyleSheet.create({
     padding: 13,
     marginTop: 12,
   },
-  matches: {
-    backgroundColor: C.panel,
-    borderColor: C.line,
-    borderWidth: 1,
-    borderRadius: R.card,
-    marginTop: 6,
-    overflow: "hidden",
-  },
-  match: { padding: 13, borderBottomColor: C.line, borderBottomWidth: 1 },
-  matchName: { ...T.body, fontSize: 14.5, fontWeight: "600" },
+  foot: { ...T.small, fontSize: 11.5, textAlign: "center", marginTop: 16 },
   bigTick: { color: C.earth, fontSize: 44, textAlign: "center", marginBottom: 10 },
   bigTitle: { ...T.body, fontSize: 21, fontWeight: "700", textAlign: "center", marginBottom: 10 },
 });
