@@ -92,6 +92,8 @@ export default function Apply({ onBack }) {
   const [business, setBusiness] = useState(null);
   const [bizQuery, setBizQuery] = useState("");
   const [matches, setMatches] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [noMatches, setNoMatches] = useState(false);
   const [password, setPasswordValue] = useState("");
   const codeRef = useRef(null);
   const bizTimer = useRef(null);
@@ -109,9 +111,17 @@ export default function Apply({ onBack }) {
     setBizQuery(text);
     setBusiness(null);
     if (bizTimer.current) clearTimeout(bizTimer.current);
-    if (text.trim().length < 3) { setMatches([]); return; }
+    setNoMatches(false);
+    if (text.trim().length < 3) { setMatches([]); setSearching(false); return; }
+    // Searching starts the moment they type, not when the request fires, so
+    // the button is already disabled during the debounce. Otherwise there is a
+    // half-second where a fast thumb can submit with no business attached.
+    setSearching(true);
     bizTimer.current = setTimeout(async () => {
-      setMatches(await searchBusiness(text.trim()));
+      const found = await searchBusiness(text.trim());
+      setMatches(found);
+      setNoMatches(found.length === 0);
+      setSearching(false);
     }, 450);
   };
 
@@ -119,6 +129,8 @@ export default function Apply({ onBack }) {
     setBusiness(m);
     setBizQuery(m.name);
     setMatches([]);
+    setNoMatches(false);
+    setSearching(false);
     setErrors((e) => ({ ...e, business: undefined }));
   };
 
@@ -134,6 +146,13 @@ export default function Apply({ onBack }) {
       setBusy(false);
     }
   };
+
+  // Typed a business but not picked one yet? Wait. A name sitting in the box
+  // unchosen is not a business - it is a half-finished search, and letting it
+  // through loses the ABN silently. Nothing typed at all is fine: the business
+  // is optional and a sparky without his ABN to hand should not be stuck.
+  const waitingOnBusiness =
+    searching || (bizQuery.trim().length >= 3 && !business && !noMatches);
 
   const sendCode = async () => {
     const found = validate(values);
@@ -372,6 +391,12 @@ export default function Apply({ onBack }) {
                 </Pressable>
               ))}
             </View>
+          ) : searching ? (
+            <Text style={st.hint}>Searching the business register…</Text>
+          ) : noMatches ? (
+            <Text style={st.hint}>
+              Not on the register under that name — carry on, we'll sort it later
+            </Text>
           ) : (
             <Text style={st.hint}>Optional — helps us verify you faster</Text>
           )}
@@ -379,7 +404,7 @@ export default function Apply({ onBack }) {
 
         {busy
           ? <ActivityIndicator color={C.brand} style={{ marginTop: 22 }} />
-          : <Cta label="Send me a code" onPress={sendCode} />}
+          : <Cta label="Send me a code" onPress={sendCode} disabled={waitingOnBusiness} />}
 
         <Text style={st.foot}>
           A look around, not an application. No obligation either way.
