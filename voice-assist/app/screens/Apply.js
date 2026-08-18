@@ -142,7 +142,7 @@ export default function Apply({ onBack }) {
     setNotice("");
     try {
       const res = await startSignup({ ...values, business });
-      setLicence(res.licence?.verified ? res.licence : null);
+      setLicence(res.licence || null);
       setStep("code");
     } catch (e) {
       // The portal validates properly; anything it objects to by field is shown
@@ -201,7 +201,11 @@ export default function Apply({ onBack }) {
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Header title="Choose a password" />
+        {/* Back goes to the details, not to the code. Once the number is
+            verified the code screen is a dead end, and the reason someone
+            turns back from here is usually to change the email — which is
+            where the "already an account" message sends them. */}
+        <Header title="Choose a password" onBack={() => { setNotice(""); setStep("details"); }} />
         <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
           <Text style={st.blurb}>
             Your number is verified. Pick a password and you're in — you'll sign
@@ -290,7 +294,13 @@ export default function Apply({ onBack }) {
             </View>
           ) : null}
 
-          {licence ? (
+          {licence && !licence.verified ? (
+            <View style={st.refer}>
+              <Text style={T.small}>{licence.note}</Text>
+            </View>
+          ) : null}
+
+          {licence?.verified ? (
             <View style={st.conf}>
               <Text style={st.tick}>✓</Text>
               <View style={{ flex: 1 }}>
@@ -431,6 +441,14 @@ const st = StyleSheet.create({
   tick: { color: C.earth, fontSize: 14 },
   confTitle: { ...T.body, fontSize: 13, fontWeight: "700" },
   foot: { ...T.small, fontSize: 11.5, textAlign: "center", marginTop: 16 },
+  refer: {
+    backgroundColor: C.warnChipBg,
+    borderColor: C.line,
+    borderWidth: 1,
+    borderRadius: R.card,
+    padding: 13,
+    marginTop: 12,
+  },
   matches: {
     backgroundColor: C.panel,
     borderColor: C.line,
