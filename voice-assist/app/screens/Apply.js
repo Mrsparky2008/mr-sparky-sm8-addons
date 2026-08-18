@@ -102,6 +102,11 @@ export default function Apply({ onBack }) {
 
   // The name is only theirs to type when the register has not given us one.
   const nameFromRegister = Boolean(licCheck?.verified && licCheck.isPerson);
+  // A company contractor licence names the business. In NSW it must have a
+  // nominated qualified supervisor holding a personal licence, but the public
+  // register does not publish that link - so the company licence is taken as
+  // proof of the business and the person is asked for separately.
+  const companyLicence = Boolean(licCheck?.verified && !licCheck.isPerson);
 
   const runLicenceCheck = async (q) => {
     if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
@@ -119,6 +124,12 @@ export default function Apply({ onBack }) {
         preferred: v.preferred || firstName(res.licensee),
       }));
       setErrors((e) => ({ ...e, name: undefined }));
+    }
+    // A company licence has already told us the business - no point making
+    // them search a register for a name we were just handed.
+    if (res?.verified && !res.isPerson && !business) {
+      setBizQuery(res.licensee);
+      onBizQuery(res.licensee);
     }
   };
 
@@ -352,6 +363,8 @@ export default function Apply({ onBack }) {
           error={errors.licence}
           hint={
             licBusy ? <Text style={st.hint}>Checking the NSW register…</Text>
+              : companyLicence
+                ? <Text style={st.ok}>✓ {licCheck.licensee} · company licence · {licCheck.summary}</Text>
               : licCheck?.verified
                 ? <Text style={st.ok}>✓ {licCheck.licensee} · {licCheck.summary}</Text>
                 : licCheck
@@ -371,6 +384,16 @@ export default function Apply({ onBack }) {
             style={[st.input, errors.licence && { borderColor: C.active }]}
           />
         </Field>
+
+        {companyLicence ? (
+          <View style={st.refer}>
+            <Text style={T.small}>
+              That's the company licence. A company licence needs a nominated
+              qualified supervisor, so tell us your name and we'll match your
+              own licence when we talk.
+            </Text>
+          </View>
+        ) : null}
 
         <Field
           label={nameFromRegister ? "NAME ON YOUR LICENCE" : "YOUR NAME"}
