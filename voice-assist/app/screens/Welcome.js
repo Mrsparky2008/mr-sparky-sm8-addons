@@ -47,14 +47,14 @@ export default function Welcome({ onSignIn, onApply }) {
       </View>
 
       <Door
-        tone="brand"
         title="Contractor sign in"
         sub="Already with Mr Sparky"
         onPress={onSignIn}
       />
 
       <Door
-        title="Apply to join the network"
+        tone="brand"
+        title="Have a look around"
         sub="Licensed electricians"
         onPress={onApply}
       />
