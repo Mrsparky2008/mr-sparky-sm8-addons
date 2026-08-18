@@ -92,9 +92,11 @@ export function setPassword({ mobile, password }) {
  * visibly be checked — but a government service having a moment must not be
  * the reason a real electrician gives up.
  */
-export async function checkLicence(number) {
+export async function checkLicence(number, name) {
   try {
-    const res = await fetch(`${PORTAL}/api/demo/licence?number=${encodeURIComponent(number)}`);
+    const q = `number=${encodeURIComponent(number)}`
+      + (name ? `&name=${encodeURIComponent(name)}` : "");
+    const res = await fetch(`${PORTAL}/api/demo/licence?${q}`);
     if (!res.ok) return null;
     return await res.json();
   } catch {

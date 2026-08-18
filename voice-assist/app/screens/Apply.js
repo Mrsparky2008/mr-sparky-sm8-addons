@@ -106,6 +106,9 @@ export default function Apply({ onBack }) {
 
   const set = (key) => (text) => {
     setValues((v) => ({ ...v, [key]: text }));
+    // The licence verdict was judged against the name, so editing the name
+    // makes that verdict stale. Drop it and let the next blur ask again.
+    if (key === "name") { setLicCheck(null); licWanted.current = ""; }
     // Clearing on edit rather than on submit means the message goes the moment
     // they start fixing it, instead of nagging until they press again.
     setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
@@ -144,7 +147,7 @@ export default function Apply({ onBack }) {
     if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
     licWanted.current = q;
     setLicBusy(true);
-    const res = await checkLicence(q);
+    const res = await checkLicence(q, String(values.name || "").trim());
     if (licWanted.current !== q) return;   // an older answer, ignore it
     setLicCheck(res);
     setLicBusy(false);
@@ -438,7 +441,7 @@ export default function Apply({ onBack }) {
             style={st.input}
           />
           {business ? (
-            <Text style={st.hint}>✓ ABN {business.abn} · from the business register</Text>
+            <Text style={st.ok}>✓ ABN {business.abn} · from the business register</Text>
           ) : matches.length ? (
             <View style={st.matches}>
               {matches.slice(0, 5).map((m) => (
