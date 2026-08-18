@@ -34,6 +34,8 @@ import TabBar from "./components/TabBar";
 import AccountSheet from "./components/AccountSheet";
 import { Banner, Segment } from "./components/ui";
 import SignIn from "./screens/SignIn";
+import Welcome from "./screens/Welcome";
+import Apply from "./screens/Apply";
 import Jobs from "./screens/Jobs";
 import AllJobs from "./screens/AllJobs";
 import JobCard from "./screens/JobCard";
@@ -60,7 +62,7 @@ import BucketList from "./screens/admin/BucketList";
 import CrewList from "./screens/admin/CrewList";
 import CrewMember from "./screens/admin/CrewMember";
 import ApproveClaim from "./screens/admin/ApproveClaim";
-import { signOut } from "./lib/auth";
+import { signOut, hasStoredSession } from "./lib/auth";
 import * as portal from "./lib/portal";
 import * as VV from "./lib/vapiVoice";
 import { IS_DEV_APP } from "./lib/config";
@@ -78,6 +80,22 @@ export default function App() {
 
 function Shell() {
   const [email, setEmail] = useState(null);           // null = not signed in
+
+  // Which front door is showing before sign-in. null while we work out whether
+  // this phone has been here before — rendering nothing for that moment beats
+  // flashing Welcome at a returning contractor who is about to be let straight
+  // in by Face ID.
+  const [entry, setEntry] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let seen = false;
+      try { seen = await hasStoredSession(); } catch { seen = false; }
+      if (!cancelled) setEntry(seen ? "signin" : "welcome");
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const emailRef = useRef(null);                      // readable from listeners
   const [who, setWho] = useState(null);               // the portal's view of you
   const [tab, setTab] = useState("work");
@@ -228,10 +246,19 @@ function Shell() {
   }
 
   if (!email) {
+    // A phone that has signed in before skips the front door entirely — SignIn
+    // unlocks on Face ID, and a returning contractor should not have to pick
+    // "sign in" off a menu every morning. Only a fresh phone sees Welcome.
     return (
       <SafeAreaView style={s.root}>
         <StatusBar style="light" />
-        <SignIn onSignedIn={handleSignedIn} />
+        {entry === null ? null
+          : entry === "apply" ? <Apply onBack={() => setEntry("welcome")} />
+          : entry === "signin" ? <SignIn onSignedIn={handleSignedIn} />
+          : <Welcome
+              onSignIn={() => setEntry("signin")}
+              onApply={() => setEntry("apply")}
+            />}
       </SafeAreaView>
     );
   }
