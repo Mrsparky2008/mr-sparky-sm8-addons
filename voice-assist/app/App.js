@@ -62,7 +62,7 @@ import BucketList from "./screens/admin/BucketList";
 import CrewList from "./screens/admin/CrewList";
 import CrewMember from "./screens/admin/CrewMember";
 import ApproveClaim from "./screens/admin/ApproveClaim";
-import { signOut, hasStoredSession } from "./lib/auth";
+import { signOut } from "./lib/auth";
 import * as portal from "./lib/portal";
 import * as VV from "./lib/vapiVoice";
 import { IS_DEV_APP } from "./lib/config";
@@ -81,21 +81,11 @@ export default function App() {
 function Shell() {
   const [email, setEmail] = useState(null);           // null = not signed in
 
-  // Which front door is showing before sign-in. null while we work out whether
-  // this phone has been here before — rendering nothing for that moment beats
-  // flashing Welcome at a returning contractor who is about to be let straight
-  // in by Face ID.
-  const [entry, setEntry] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      let seen = false;
-      try { seen = await hasStoredSession(); } catch { seen = false; }
-      if (!cancelled) setEntry(seen ? "signin" : "welcome");
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  // Which front door is showing. Always starts on Welcome for now: Steven is
+  // reviewing both screens and wants to pick each time. The Face ID
+  // short-circuit for returning phones goes back in once the screens are
+  // settled - SignIn itself still unlocks on Face ID the moment it opens.
+  const [entry, setEntry] = useState("welcome");
   const emailRef = useRef(null);                      // readable from listeners
   const [who, setWho] = useState(null);               // the portal's view of you
   const [tab, setTab] = useState("work");
@@ -252,8 +242,7 @@ function Shell() {
     return (
       <SafeAreaView style={s.root}>
         <StatusBar style="light" />
-        {entry === null ? null
-          : entry === "apply" ? <Apply onBack={() => setEntry("welcome")} />
+        {entry === "apply" ? <Apply onBack={() => setEntry("welcome")} />
           : entry === "signin" ? <SignIn onSignedIn={handleSignedIn} />
           : <Welcome
               onSignIn={() => setEntry("signin")}
