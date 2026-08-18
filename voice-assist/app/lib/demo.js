@@ -83,3 +83,21 @@ export async function searchBusiness(q) {
 export function setPassword({ mobile, password }) {
   return post("/api/demo/password", { mobile, password });
 }
+
+/**
+ * Check a licence number against the live NSW register, while they type.
+ *
+ * Never throws and never rejects: an unreachable register returns a note, not
+ * a failure. The field claims to be checked against the register, so it has to
+ * visibly be checked — but a government service having a moment must not be
+ * the reason a real electrician gives up.
+ */
+export async function checkLicence(number) {
+  try {
+    const res = await fetch(`${PORTAL}/api/demo/licence?number=${encodeURIComponent(number)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}

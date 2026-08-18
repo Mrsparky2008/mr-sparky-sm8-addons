@@ -20,7 +20,7 @@ import {
   StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Cta, Header } from "../components/ui";
-import { startSignup, verifyCode, setPassword, searchBusiness, isFieldError } from "../lib/demo";
+import { startSignup, verifyCode, setPassword, searchBusiness, checkLicence, isFieldError } from "../lib/demo";
 import { C, R, S, T } from "../lib/theme";
 
 const MOBILE = /^0\d{9}$/;
@@ -99,6 +99,10 @@ export default function Apply({ onBack }) {
   const bizTimer = useRef(null);
   // The query a response must still match to be allowed on screen.
   const bizWanted = useRef("");
+  const [licCheck, setLicCheck] = useState(null);
+  const [licBusy, setLicBusy] = useState(false);
+  const licTimer = useRef(null);
+  const licWanted = useRef("");
 
   const set = (key) => (text) => {
     setValues((v) => ({ ...v, [key]: text }));
@@ -134,6 +138,38 @@ export default function Apply({ onBack }) {
       setNoMatches(found.length === 0);
       setSearching(false);
     }, 450);
+  };
+
+  const runLicenceCheck = async (q) => {
+    if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
+    licWanted.current = q;
+    setLicBusy(true);
+    const res = await checkLicence(q);
+    if (licWanted.current !== q) return;   // an older answer, ignore it
+    setLicCheck(res);
+    setLicBusy(false);
+  };
+
+  const onLicence = (text) => {
+    set("licence")(text);
+    setLicCheck(null);
+    if (licTimer.current) clearTimeout(licTimer.current);
+    const q = text.trim();
+    licWanted.current = q;
+    if (q.replace(/[^A-Za-z0-9]/g, "").length < 4) { setLicBusy(false); return; }
+    // Long, because this is a government register and not a search box. The
+    // blur below is what guarantees the check happens; this is only so someone
+    // who types and then sits there still gets an answer.
+    licTimer.current = setTimeout(() => runLicenceCheck(q), 900);
+  };
+
+  // Leaving the field is the natural moment to check, and the one that costs
+  // the register a single request instead of one per keystroke.
+  const onLicenceBlur = () => {
+    if (licTimer.current) clearTimeout(licTimer.current);
+    const q = String(values.licence || "").trim();
+    if (!q || licCheck || licBusy) return;
+    runLicenceCheck(q);
   };
 
   const pickBusiness = (m) => {
@@ -365,7 +401,8 @@ export default function Apply({ onBack }) {
             <Text style={T.label}>{f.label}</Text>
             <TextInput
               value={values[f.key] || ""}
-              onChangeText={set(f.key)}
+              onChangeText={f.key === "licence" ? onLicence : set(f.key)}
+              onBlur={f.key === "licence" ? onLicenceBlur : undefined}
               placeholder={f.placeholder}
               placeholderTextColor={C.muted}
               keyboardType={f.keyboardType || "default"}
@@ -374,9 +411,18 @@ export default function Apply({ onBack }) {
               autoCorrect={false}
               style={[st.input, errors[f.key] && { borderColor: C.active }]}
             />
-            {errors[f.key]
-              ? <Text style={st.err}>{errors[f.key]}</Text>
-              : f.hint ? <Text style={st.hint}>{f.hint}</Text> : null}
+            {errors[f.key] ? (
+              <Text style={st.err}>{errors[f.key]}</Text>
+            ) : f.key === "licence" ? (
+              licBusy ? <Text style={st.hint}>Checking the NSW register…</Text>
+                : licCheck?.verified
+                  ? <Text style={st.ok}>✓ {licCheck.licensee} · {licCheck.summary}</Text>
+                  : licCheck
+                    ? <Text style={st.warn}>{licCheck.note}</Text>
+                    : <Text style={st.hint}>{f.hint}</Text>
+            ) : f.hint ? (
+              <Text style={st.hint}>{f.hint}</Text>
+            ) : null}
           </View>
         ))}
 
@@ -477,6 +523,8 @@ const st = StyleSheet.create({
   tick: { color: C.earth, fontSize: 14 },
   confTitle: { ...T.body, fontSize: 13, fontWeight: "700" },
   foot: { ...T.small, fontSize: 11.5, textAlign: "center", marginTop: 16 },
+  ok: { ...T.small, fontSize: 11.5, marginTop: 5, color: C.earth },
+  warn: { ...T.small, fontSize: 11.5, marginTop: 5, color: C.warnChipInk },
   refer: {
     backgroundColor: C.warnChipBg,
     borderColor: C.line,
