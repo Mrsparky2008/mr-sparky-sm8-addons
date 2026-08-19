@@ -12,7 +12,11 @@ import pymupdf
 # "3.11.3.1  Category A underground wiring systems"
 HEADING = re.compile(r'^\s*(\d{1,2}(?:\.\d{1,3}){1,4})\s+(\S.{2,95})$')
 # Contents lines carry dot leaders and a trailing page number: "1.3 REFERENCED ..... 34"
-CONTENTS = re.compile(r'\.{4,}\s*\d+\s*$|\.\s\.\s\.\s')
+# Dot leaders anywhere on the line, not just before a trailing page number —
+# a contents entry that wrapped ("...2-16 2.10.1 UGOH...") slipped the stricter
+# test and landed inside a quoted clause body, which is exactly the kind of
+# rubbish that destroys trust in a verbatim quote.
+CONTENTS = re.compile(r'\.{4,}|\.\s\.\s\.\s')
 
 def page_lines(doc, i):
     return [l.rstrip() for l in doc[i].get_text().splitlines()]

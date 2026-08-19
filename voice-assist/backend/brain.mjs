@@ -6,6 +6,8 @@
 // Streaming: callers pass onDelta(text) — final-answer text streams out as it's generated
 // so TTS can start speaking the first sentence while the rest composes.
 
+import { readFileSync } from "node:fs";
+
 const SM8_BASE = "https://api.servicem8.com/api_1.0";
 const API_KEY = process.env.SM8_API_KEY;
 const CLAUDE_KEY = process.env.CLAUDE_API_KEY;
@@ -220,6 +222,24 @@ const tools = [
     },
   },
   {
+    name: "lookup_standard",
+    description:
+      "Look up what an Australian electrical standard actually says. Use this for ANY question " +
+      "about the Wiring Rules, cable selection, testing, service rules or compliance — never " +
+      "answer such a question from your own knowledge. Search by plain description " +
+      "('minimum depth for underground cable', 'RCD requirements for socket outlets') or fetch a " +
+      "clause by number. Returns clauses verbatim with their number, edition and whether that " +
+      "edition is still current.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What they want to know, in plain words" },
+        clause: { type: "string", description: "A specific clause number, e.g. 2.6.2 or 3.11.4.4" },
+        standard: { type: "string", description: "Optional: narrow to one standard, e.g. '3000' or 'NSW'" },
+      },
+    },
+  },
+  {
     name: "search_jobs",
     description:
       "Find a job WITHOUT its number — by address, suburb, customer name, or what the work is. " +
@@ -401,6 +421,26 @@ function fuzzyScore(heard, known) {
   const d = editDistance(heard, known);
   const tolerance = heard.length >= 7 ? 3 : heard.length >= 5 ? 2 : 1;
   return d <= tolerance ? 0.9 - d * 0.2 : 0;
+}
+
+
+// The standards library ships INSIDE the deployment zip rather than sitting in
+// S3: it is 1.5 MB, it changes only when a standard is replaced, and reading it
+// from S3 would put a network round trip on the critical path of a question
+// that is already the slowest thing Charlie does. Parsed once per container.
+let standardsCache = null;
+function standardsLibrary() {
+  if (standardsCache) return standardsCache;
+  try {
+    const raw = readFileSync(new URL("./standards.json", import.meta.url), "utf8");
+    const doc = JSON.parse(raw);
+    standardsCache = { documents: doc.documents || {}, clauses: doc.clauses || [] };
+    console.log(`voice: standards library loaded — ${standardsCache.clauses.length} clauses`);
+  } catch (err) {
+    console.error("standards library failed to load:", err.message);
+    standardsCache = { documents: {}, clauses: [] };
+  }
+  return standardsCache;
 }
 
 let jobCache = { at: 0, jobs: [] };
@@ -675,6 +715,68 @@ export async function executeTool(name, input) {
       console.error("memory write failed:", err.message);
       return { error: "Couldn't save that" };
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // STANDARDS
+  //
+  // The whole point of this tool is that Charlie QUOTES rather than
+  // paraphrases. A wrong job number is annoying; a wrong cable size is a
+  // fire. So it returns the clause verbatim with its number, edition and
+  // currency, and the prompt forbids answering without one.
+  //
+  // Two-stage on purpose: a keyword pass narrows ~1,900 clauses to a
+  // shortlist, then the model reads the shortlist and picks. Scoring the
+  // TITLE harder than the body matters — "underground depth" should surface
+  // "Minimum depth of cover", not every clause that mentions underground.
+  // ---------------------------------------------------------------------
+  if (name === "lookup_standard") {
+    const lib = standardsLibrary();
+    if (!lib.clauses.length) return { error: "The standards library isn't loaded." };
+
+    const wantClause = String(input.clause || "").trim();
+    const wantStd = String(input.standard || "").toLowerCase().trim();
+    const pool = wantStd
+      ? lib.clauses.filter((c) => c.std.toLowerCase().includes(wantStd))
+      : lib.clauses;
+
+    const dress = (c) => ({
+      standard: c.std, edition: c.ed, clause: c.cl, title: c.t, page: c.p,
+      currency: c.st, text: c.x,
+      currency_note: (lib.documents[c.std] || {}).detail || "",
+    });
+
+    // Asked for a clause by number: give that clause AND its children, which
+    // is what "what does 2.6.2 say" actually means when 2.6.2 is a parent
+    // whose whole body is its sub-clauses.
+    if (wantClause) {
+      const exact = pool.filter((c) => c.cl === wantClause);
+      const kids = pool.filter((c) => c.cl.startsWith(wantClause + "."));
+      const hits = [...exact, ...kids].slice(0, 12);
+      if (hits.length) return { results: hits.map(dress) };
+      return { error: `No clause ${wantClause} in the library.` };
+    }
+
+    const terms = tokens(input.query || "").filter((t) => t.length > 2);
+    if (!terms.length) return { error: "Nothing to look up" };
+    const scored = [];
+    for (const c of pool) {
+      const title = c.t.toLowerCase();
+      const body = c.x.toLowerCase();
+      let score = 0;
+      for (const t of terms) {
+        if (title.includes(t)) score += 3;
+        if (body.includes(t)) score += 1;
+      }
+      if (score > 0) scored.push({ c, score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.c.cl.localeCompare(b.c.cl));
+    const results = scored.slice(0, 12).map((h) => dress(h.c));
+    if (!results.length) {
+      return { results: [], nothing_found: true,
+               have: Object.entries(lib.documents).map(([k, v]) => k + " (" + v.status + ")") };
+    }
+    return { results };
   }
 
   if (name === "search_jobs") {
@@ -1127,6 +1229,16 @@ ONE THOUGHT IN, ONE ANSWER OUT — half a sentence is not a question:
 - THE LATEST WORDS WIN. If something he says contradicts, corrects or narrows what came a moment ago ("no, not that one", "actually make it four", "sorry, Earlwood not Ryde"), the new version replaces the old one completely. Don't point out that he changed his mind, don't ask which he meant, don't average the two, and never act on the version he just replaced. Just carry on with the corrected one.
 - If you have ALREADY started acting on a fragment and he keeps talking, treat what you did as a draft, not a commitment. Fold the rest in and answer once at the end.
 - The one exception is a genuine emergency of brevity: a bare "stop" or "hang on" is complete, and means stop talking.
+
+ELECTRICAL STANDARDS — QUOTE, NEVER PARAPHRASE:
+- You have a library of Australian standards. For ANY question about the Wiring Rules, cable sizing, testing, depths, clearances, RCDs, service rules or compliance, you call lookup_standard. You do NOT answer from your own knowledge, ever, not even when you are sure. A wrong job number is a nuisance; a wrong cable size or depth of cover is a fire or a fatality.
+- NEVER state a requirement without the clause number it came from. "Clause 3.11.4.4 says..." — if you cannot name the clause, you do not have the answer.
+- NEVER paraphrase a NUMBER. Sizes, ratings, depths, clearances, times, percentages get quoted word for word from the clause text or not given at all. Rewording prose is fine; rewording a measurement is not.
+- ALWAYS say which edition, and say it plainly when that edition is superseded: "that's clause 3.11.4.4 of the 2018 base issue — Amendments 1 to 3 aren't in my copy, so check it against a current one." The currency field on every result tells you. Never let a superseded quote pass as current.
+- If the lookup finds nothing useful: "Not in what I've got — you'll want to check the book." Never fill the gap with what you think it probably says. Offer to search different words instead.
+- CONVERSATION FIRST, THEN THE CLAUSE. Standards questions arrive vague ("what's the go with underground cable?"). Talk it out — depth? mechanical protection? which category? — until you know what they actually need, THEN look it up. One precise clause beats six vaguely related ones.
+- Reading a clause aloud in full is usually wrong: say the gist in one sentence, name the clause, and let them read the exact words on screen. Read the exact wording out only if they ask you to.
+- You are finding the clause, not interpreting it. If they ask what it means for their situation, give them the clause and say plainly that the call is theirs.
 
 SAY THE JOB ONCE. ONCE.
 - The commonest thing you get wrong is announcing a job, asking "that the one?", getting a yes, and then announcing the SAME job all over again before asking what they need. Steven heard it twice in one night and it makes you sound like you weren't listening. Read this transcript and never do it:
