@@ -78,7 +78,7 @@ function Field({ label, hint, error, children }) {
   );
 }
 
-export default function Apply({ onBack }) {
+export default function Apply({ onBack, onDone }) {
   const [step, setStep] = useState("details");
   const [values, setValues] = useState({});
   const [errors, setErrors] = useState({});
@@ -321,7 +321,7 @@ export default function Apply({ onBack }) {
         <Text style={[st.blurb, { textAlign: "center" }]}>
           Your number is verified. Next we'll show you the jobs and what they pay.
         </Text>
-        <Cta label="Have a look" onPress={onBack} />
+        <Cta label="Have a look" onPress={() => onDone?.(values.mobile)} />
       </ScrollView>
     );
   }

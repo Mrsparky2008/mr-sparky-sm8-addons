@@ -22,6 +22,21 @@ export class DemoError extends Error {
 /** True when the portal rejected individual fields rather than the whole call. */
 export const isFieldError = (err) => Boolean(err?.errors);
 
+async function get(path) {
+  let res;
+  try {
+    res = await fetch(`${PORTAL}${path}`);
+  } catch {
+    throw new DemoError("Can't reach Mr Sparky. Check your signal and try again.");
+  }
+  let data = {};
+  try { data = await res.json(); } catch { data = {}; }
+  if (!res.ok) {
+    throw new DemoError(data.error || "Something went wrong. Try again.", { status: res.status });
+  }
+  return data;
+}
+
 async function post(path, body) {
   let res;
   try {
@@ -102,4 +117,15 @@ export async function checkLicence(number, name) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Real jobs and what they paid, for someone who has verified a mobile.
+ *
+ * The portal strips every customer detail before this leaves it, and checks
+ * again on the way out. Nothing here needs to filter anything - if a customer's
+ * name ever reached this function, the mistake was made a long way upstairs.
+ */
+export async function getEarnings(mobile) {
+  return get(`/api/demo/earnings?mobile=${encodeURIComponent(mobile)}`);
 }

@@ -36,6 +36,7 @@ import { Banner, Segment } from "./components/ui";
 import SignIn from "./screens/SignIn";
 import Welcome from "./screens/Welcome";
 import Apply from "./screens/Apply";
+import Earnings from "./screens/Earnings";
 import Jobs from "./screens/Jobs";
 import AllJobs from "./screens/AllJobs";
 import JobCard from "./screens/JobCard";
@@ -86,6 +87,8 @@ function Shell() {
   // short-circuit for returning phones goes back in once the screens are
   // settled - SignIn itself still unlocks on Face ID the moment it opens.
   const [entry, setEntry] = useState("welcome");
+  // The verified mobile, which is how the demo asks the portal for its view.
+  const [demoMobile, setDemoMobile] = useState(null);
   const emailRef = useRef(null);                      // readable from listeners
   const [who, setWho] = useState(null);               // the portal's view of you
   const [tab, setTab] = useState("work");
@@ -242,7 +245,13 @@ function Shell() {
     return (
       <SafeAreaView style={s.root}>
         <StatusBar style="light" />
-        {entry === "apply" ? <Apply onBack={() => setEntry("welcome")} />
+        {entry === "demo" ? <Earnings mobile={demoMobile} onBack={() => setEntry("welcome")} />
+          : entry === "apply" ? (
+            <Apply
+              onBack={() => setEntry("welcome")}
+              onDone={(m) => { setDemoMobile(m); setEntry("demo"); }}
+            />
+          )
           : entry === "signin" ? <SignIn onSignedIn={handleSignedIn} />
           : <Welcome
               onSignIn={() => setEntry("signin")}
