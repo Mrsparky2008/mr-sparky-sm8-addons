@@ -16,7 +16,7 @@
 // while a call is live; that used to need a hidden absolutely-positioned
 // overlay, and now it is just what a tab bar does.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LogBox, SafeAreaView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, LogBox, SafeAreaView, StyleSheet, View } from "react-native";
 
 // Daily (Vapi's call layer) console.errors two things that are not faults,
 // and the dev build promotes any console.error to the full red screen:
@@ -91,6 +91,12 @@ function Shell() {
   const [demoMobile, setDemoMobile] = useState(null);
   const emailRef = useRef(null);                      // readable from listeners
   const [who, setWho] = useState(null);               // the portal's view of you
+  // A signed-in DEMO applicant: has a login, is not a contractor. They get the
+  // earnings screen, never the tabs. whoPending covers the beat while /api/me
+  // decides which they are - showing the tabs during that beat would flash an
+  // empty app at exactly the person (an App Store reviewer) it must not.
+  const [demoSignedIn, setDemoSignedIn] = useState(false);
+  const [whoPending, setWhoPending] = useState(false);
   const [tab, setTab] = useState("work");
   const [stacks, setStacks] = useState(ROOTS);
   const [workView, setWorkView] = useState("jobs");   // jobs | today
@@ -208,10 +214,22 @@ function Shell() {
     emailRef.current = signedInAs;
     setEmail(signedInAs);
 
-    // Who the portal thinks you are decides whether the Business tab exists.
-    // A failure here is not a failed sign-in — the app's own screens work
-    // without the portal — so it is swallowed and the Pay tab explains itself.
-    portal.me().then(setWho).catch(() => setWho(null));
+    // Who the portal thinks you are decides everything after this point: a
+    // contractor gets the tabs, a demo applicant gets the earnings screen. A
+    // failure that is neither is swallowed as before — the app's own screens
+    // work without the portal, and the Pay tab explains itself.
+    setWhoPending(true);
+    portal.me()
+      .then((me) => { setWho(me); setWhoPending(false); })
+      .catch((err) => {
+        if (err?.demo && err?.mobile) {
+          setDemoMobile(err.mobile);
+          setDemoSignedIn(true);
+        } else {
+          setWho(null);
+        }
+        setWhoPending(false);
+      });
 
     const held = pendingJob.current;
     if (held) {
@@ -234,6 +252,8 @@ function Shell() {
     setCharlieBorn(false);
     setWho(null);
     setWaiting(0);
+    setDemoSignedIn(false);
+    setWhoPending(false);
     emailRef.current = null;
     setEmail(null);
   }
@@ -257,6 +277,29 @@ function Shell() {
               onSignIn={() => setEntry("signin")}
               onApply={() => setEntry("apply")}
             />}
+      </SafeAreaView>
+    );
+  }
+
+  // The beat between sign-in and /api/me answering. Without this hold, the
+  // empty tabs flash up first for everyone, and stay up for a demo user.
+  if (whoPending) {
+    return (
+      <SafeAreaView style={[s.root, { alignItems: "center", justifyContent: "center" }]}>
+        <StatusBar style="light" />
+        <ActivityIndicator size="large" color={C.brand} />
+      </SafeAreaView>
+    );
+  }
+
+  // A signed-in demo applicant. The earnings screen is their whole app until
+  // Steven approves them; sign out is the honest way back, because there is
+  // nowhere else for them to go.
+  if (demoSignedIn) {
+    return (
+      <SafeAreaView style={s.root}>
+        <StatusBar style="light" />
+        <Earnings mobile={demoMobile} onBack={handleSignOut} />
       </SafeAreaView>
     );
   }

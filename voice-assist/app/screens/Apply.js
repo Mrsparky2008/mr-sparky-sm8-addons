@@ -18,12 +18,13 @@
 // failure.
 import { useRef, useState } from "react";
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView,
-  StyleSheet, Text, TextInput, View,
+  ActivityIndicator, KeyboardAvoidingView, Linking, Platform, Pressable,
+  ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { Cta, Header } from "../components/ui";
 import {
-  startSignup, verifyCode, setPassword, searchBusiness, checkLicence, isFieldError,
+  startSignup, verifyCode, setPassword, searchBusiness, businessDetails,
+  checkLicence, isFieldError, connectTelegram,
 } from "../lib/demo";
 import { C, R, S, T } from "../lib/theme";
 
@@ -80,6 +81,10 @@ function Field({ label, hint, error, children }) {
 
 export default function Apply({ onBack, onDone }) {
   const [step, setStep] = useState("details");
+  // Linking Telegram is optional and skippable. It is how job alerts find
+  // them later, not a step in signing up, so nothing here can block the
+  // Have a look button - a sparky who taps past it loses nothing today.
+  const [tgState, setTgState] = useState("idle");
   const [values, setValues] = useState({});
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -108,6 +113,11 @@ export default function Apply({ onBack, onDone }) {
 
   const [code, setCode] = useState("");
   const [password, setPasswordValue] = useState("");
+  // Confirm-and-show, because this password gets typed on a phone keyboard,
+  // possibly on a ute bonnet. A hidden field with no second chance is how a
+  // typo becomes a locked-out sparky ringing the office on day one.
+  const [password2, setPassword2] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const codeRef = useRef(null);
 
   const set = (key) => (text) => {
@@ -238,13 +248,27 @@ export default function Apply({ onBack, onDone }) {
     }, 450);
   };
 
-  const pickBusiness = (m) => {
+  const pickBusiness = async (m) => {
+    // Show the pick immediately - the details lookup is a round trip and the
+    // list should not sit there looking unresponsive.
     setBusiness(m);
     setBizQuery(m.name);
     setMatches([]);
     setNoMatches(false);
     setSearching(false);
     bizWanted.current = "";
+
+    // Then fetch what the register actually holds. What was tapped is a
+    // TRADING name; the legal entity behind it can be a different name
+    // entirely, and the legal one is what an invoice must carry.
+    const details = await businessDetails(m.abn);
+    if (details) {
+      setBusiness({
+        ...details,
+        // Keep what they recognised, for the portal's display-name field.
+        tradingName: m.name !== details.legalName ? m.name : null,
+      });
+    }
   };
 
   // A name typed but not picked is a half-finished search, and letting it
@@ -299,6 +323,13 @@ export default function Apply({ onBack, onDone }) {
   };
 
   const savePassword = async () => {
+    // Checked here, not while typing: flagging a mismatch before they have
+    // finished the second field just nags. When the fields are visible the
+    // person can see the match themselves, but the check still runs.
+    if (password !== password2) {
+      setNotice("The passwords don't match. Have another look.");
+      return;
+    }
     setBusy(true);
     setNotice("");
     try {
@@ -308,6 +339,19 @@ export default function Apply({ onBack, onDone }) {
       setNotice(e.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const linkTelegram = async () => {
+    setTgState("busy");
+    try {
+      const { url } = await connectTelegram(values.mobile);
+      // Telegram may not be installed. openURL rejects rather than hanging, so
+      // the catch below is the whole story - no capability check needed.
+      await Linking.openURL(url);
+      setTgState("opened");
+    } catch {
+      setTgState("failed");
     }
   };
 
@@ -322,6 +366,18 @@ export default function Apply({ onBack, onDone }) {
           Your number is verified. Next we'll show you the jobs and what they pay.
         </Text>
         <Cta label="Have a look" onPress={() => onDone?.(values.mobile)} />
+        <Cta
+          tone="ghost"
+          label={tgState === "busy" ? "Opening Telegram..." : "Connect Telegram"}
+          onPress={tgState === "busy" ? undefined : linkTelegram}
+          sub={
+            tgState === "failed"
+              ? "Couldn't open Telegram. You can do this later."
+              : tgState === "opened"
+                ? "Tap START in Telegram to finish."
+                : "So job alerts can reach you. You can do this later."
+          }
+        />
       </ScrollView>
     );
   }
@@ -342,16 +398,42 @@ export default function Apply({ onBack, onDone }) {
             label="PASSWORD"
             hint={<Text style={st.hint}>Needs 8 characters with a capital, a number and a symbol</Text>}
           >
+            <View>
+              <TextInput
+                value={password}
+                onChangeText={(t) => { setPasswordValue(t); setNotice(""); }}
+                placeholder="At least 8 characters"
+                placeholderTextColor={C.muted}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoComplete="new-password"
+                textContentType="newPassword"
+                autoFocus
+                style={[st.input, { paddingRight: 64 }, notice && { borderColor: C.active }]}
+              />
+              <Pressable
+                onPress={() => setShowPassword((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                hitSlop={10}
+                style={{ position: "absolute", right: 14, top: 0, bottom: 0, justifyContent: "center" }}
+              >
+                <Text style={{ color: C.muted, fontSize: 13, fontWeight: "700" }}>
+                  {showPassword ? "HIDE" : "SHOW"}
+                </Text>
+              </Pressable>
+            </View>
+          </Field>
+          <Field label="CONFIRM PASSWORD">
             <TextInput
-              value={password}
-              onChangeText={(t) => { setPasswordValue(t); setNotice(""); }}
-              placeholder="At least 8 characters"
+              value={password2}
+              onChangeText={(t) => { setPassword2(t); setNotice(""); }}
+              placeholder="Same again"
               placeholderTextColor={C.muted}
-              secureTextEntry
+              secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoComplete="new-password"
               textContentType="newPassword"
-              autoFocus
               style={[st.input, notice && { borderColor: C.active }]}
             />
           </Field>

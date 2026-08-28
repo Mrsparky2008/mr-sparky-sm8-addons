@@ -67,8 +67,13 @@ async function post(path, body) {
  * Send the four answers. The portal checks the licence, texts a code, and
  * returns what it found so the sparky can see his own licence read back.
  */
-export function startSignup({ name, mobile, email, licence, promoCode }) {
-  return post("/api/demo/signup", { name, mobile, email, licence, promoCode });
+// business is the record chosen off the ABR, not a typed name. It carries
+// the ABN, and the ABN is what ends up on an RCTI - so it travels with the
+// signup rather than being asked for again later.
+export function startSignup({ name, mobile, email, licence, promoCode, business }) {
+  return post("/api/demo/signup", {
+    name, mobile, email, licence, promoCode, business,
+  });
 }
 
 /** Hand back the code that arrived by text. */
@@ -83,6 +88,28 @@ export function verifyCode({ mobile, code }) {
  * portal soft-fails it deliberately, and a sparky should never be stopped
  * signing up because a government service is having a moment.
  */
+/**
+ * The full register record behind one ABN.
+ *
+ * The search list returns TRADING names - "MULTISKILL" is a trading name whose
+ * legal entity is someone else entirely. Storing the label off the search
+ * result put a trading name in the legal-name field and left the portal saying
+ * "not verified against the register" (28 Aug 2026). So a selection is always
+ * followed by a details lookup, and the ENTITY name is what travels.
+ *
+ * Returns null rather than throwing: a register having a bad morning must not
+ * stop someone signing up, and the portal re-verifies at approval anyway.
+ */
+export async function businessDetails(abn) {
+  try {
+    const res = await fetch(`${PORTAL}/api/demo/abr?q=${encodeURIComponent(abn)}`);
+    if (!res.ok) return null;
+    return (await res.json()).details || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function searchBusiness(q) {
   try {
     const res = await fetch(`${PORTAL}/api/demo/abr?q=${encodeURIComponent(q)}`);
@@ -92,6 +119,20 @@ export async function searchBusiness(q) {
   } catch {
     return [];
   }
+}
+
+/**
+ * Ask for a one-time link that connects their Telegram account.
+ *
+ * The link is what carries their identity, not anything they type. Opening it
+ * signs the account that opened it, so there is no username to mistype and no
+ * way to link the wrong person.
+ *
+ * Linking grants nothing on its own - job access still waits on Steven creating
+ * them in ServiceM8 by hand. This only makes the job alerts findable.
+ */
+export function connectTelegram(mobile) {
+  return post("/api/demo/telegram-link", { mobile });
 }
 
 /** Choose a password. This is what actually creates the login. */

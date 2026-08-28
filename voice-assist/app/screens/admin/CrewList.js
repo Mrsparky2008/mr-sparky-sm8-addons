@@ -23,8 +23,28 @@ export default function CrewList({ people = [], onOpenPerson, onBack }) {
                 style={[s.row, i === ordered.length - 1 && { borderBottomWidth: 0 }]}
               >
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.rowTitle}>{p.name}</Text>
-                  <Text style={s.rowSub}>{p.role}</Text>
+                  <View style={s.nameRow}>
+                    {/* A record that cannot be paid, or is still half-filled,
+                        says so HERE - in the list, before anyone opens it.
+                        Signup asks for four fields, so every contractor
+                        arrives incomplete, and nothing used to mention it
+                        until the day a claim could not be paid. */}
+                    {p.readiness ? (
+                      <Text style={[
+                        s.mark,
+                        p.readiness.state === "ready" ? s.markOk
+                          : p.readiness.state === "blocked" ? s.markBad : s.markWarn,
+                      ]}>
+                        {p.readiness.state === "ready" ? "✓" : "!"}
+                      </Text>
+                    ) : null}
+                    <Text style={s.rowTitle} numberOfLines={1}>{p.name}</Text>
+                  </View>
+                  <Text style={s.rowSub} numberOfLines={1}>
+                    {p.readiness && p.readiness.state !== "ready"
+                      ? p.readiness.summary
+                      : p.role}
+                  </Text>
                 </View>
                 {p.status && p.status !== "Active" ? <StatusChip status={p.status} /> : null}
                 <Text style={s.chev}>›</Text>
@@ -43,7 +63,15 @@ const s = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 9, minHeight: S.touch,
     paddingVertical: 10, borderBottomColor: C.line, borderBottomWidth: 1,
   },
-  rowTitle: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  mark: {
+    fontSize: 13, fontWeight: "800", width: 18, height: 18, lineHeight: 18,
+    textAlign: "center", borderRadius: 9, overflow: "hidden",
+  },
+  markOk: { color: "#0b2e1a", backgroundColor: "#3ddc84" },
+  markWarn: { color: "#412402", backgroundColor: "#feda00" },
+  markBad: { color: "#ffffff", backgroundColor: "#c4483a" },
+  rowTitle: { color: C.ink, fontSize: 14.5, fontWeight: "700", flexShrink: 1 },
   rowSub: { color: C.muted, fontSize: 11.5, marginTop: 1 },
   chev: { color: C.muted, fontSize: 20 },
 });

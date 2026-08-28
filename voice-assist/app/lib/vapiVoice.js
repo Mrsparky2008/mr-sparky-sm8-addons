@@ -6,6 +6,7 @@
 // echo are the transport's job here, not ours.
 import Vapi from "@vapi-ai/react-native";
 import { VAPI_PUBLIC_KEY, VAPI_ASSISTANT_ID } from "./config";
+import { getIdToken } from "./auth";
 import { recap } from "./thread";
 
 let vapi = null;
@@ -106,13 +107,20 @@ export async function start({ onEvent, job }) {
   // (proof he knows where he is); a call continuing a thread gets a nod, not
   // a recital — hearing the job number re-announced on every reconnect is
   // Charlie introducing himself to someone mid-sentence.
-  const overrides = (j?.job_number || priorTalk) ? {
+  // The signed login rides inside the call. The brain refuses app calls
+  // without it - the VAPI public key is extractable from the bundle (and sits
+  // in a public web page), so the key proves nothing about who is calling.
+  // The token does, because it is signed.
+  let idToken = "";
+  try { idToken = await getIdToken(); } catch {}
+  const overrides = (j?.job_number || priorTalk || idToken) ? {
     ...(priorTalk ? {
       firstMessage: "Righto — what do you need now?",
     } : j?.job_number ? {
       firstMessage: `Job ${j.job_number}${j.address ? `, ${String(j.address).split(",")[0]}` : ""}. What do you need?`,
     } : {}),
     variableValues: {
+      ...(idToken ? { idToken } : {}),
       ...(j?.job_number ? {
         jobNumber: String(j.job_number),
         jobAddress: j.address || "",

@@ -16,6 +16,7 @@ import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
 import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
+import { authorize, DENIED, SUBBIE_EMPTY_JOBS, subbieJobs } from "./authz.mjs";
 
 const polly = new PollyClient({});
 const transcribe = new TranscribeStreamingClient({});
@@ -146,6 +147,41 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       // public-facing (Henri's Text-us line). Only allowlisted callers get the
       // assistant; anyone else gets a polite redirect. Calls with no caller
       // number (dashboard/web tests) pass — they're already auth-gated above.
+      // App and web calls carry no customer.number, so the caller allowlist
+      // below never sees them. They must instead carry the user's SIGNED
+      // Cognito token in variableValues - VAPI passes those through untouched,
+      // and a signature cannot be forged, so verifying it here is real auth.
+      // Only admins get Charlie: the brain holds ServiceM8 write tools.
+      // (Phone calls keep the ALLOWED_CALLERS gate below, unchanged.)
+      const isPhoneCall = Boolean(body.call?.customer?.number);
+      if (!isPhoneCall) {
+        let voiceOk = false;
+        try {
+          const vt = body.call?.assistantOverrides?.variableValues?.idToken;
+          if (vt) {
+            const vwho = await verifyIdToken(vt);
+            voiceOk = (await authorize(vwho.email)).level === "admin";
+          }
+        } catch {}
+        if (!voiceOk) {
+          console.warn("llm bridge: REJECTED app/web call without an admin token");
+          const s3 = awslambda.HttpResponseStream.from(responseStream, {
+            statusCode: 200, headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+          });
+          const rid3 = "chatcmpl-" + Date.now().toString(36);
+          const rchunk3 = (delta, finish = null) => sse(s3, {
+            id: rid3, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000),
+            model: "ai-assist-brain", choices: [{ index: 0, delta, finish_reason: finish }],
+          });
+          rchunk3({ role: "assistant" });
+          rchunk3({ content: "Sorry - Charlie is only available to the Mr Sparky team. If you have just been approved, close the app and open it again." });
+          rchunk3({}, "stop");
+          s3.write("data: [DONE]\n\n");
+          s3.end();
+          return;
+        }
+      }
+
       const caller = String(body.call?.customer?.number || "").replace(/[\s()-]/g, "");
       const allowed = (process.env.ALLOWED_CALLERS || "").split(",").map((n) => n.trim()).filter(Boolean);
       if (caller && allowed.length && !allowed.includes(caller)) {
@@ -256,7 +292,13 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       // The app stopped carrying a PIN once it grew a real sign-in screen.
       let authed = Boolean(PIN) && headers["x-app-pin"] === PIN;
       if (!authed && bearer(headers)) {
-        try { await verifyIdToken(bearer(headers)); authed = true; } catch {}
+        // Charlie carries ServiceM8 write tools on the master key, so a token
+        // being genuine is not enough - it must belong to an admin. A subbie
+        // or a demo signup asking Charlie for "all jobs" was the leak.
+        try {
+          const who = await verifyIdToken(bearer(headers));
+          authed = (await authorize(who.email)).level === "admin";
+        } catch {}
       }
       if (!authed) {
         return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ ok: false, error: "bad pin" }));
@@ -347,6 +389,10 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       } catch {
         return jsonOut(401, { ok: false, error: "not signed in" });
       }
+      // Writes ride the master SM8 key, so only admins may make them.
+      if ((await authorize(who.email)).level !== "admin") {
+        return jsonOut(403, DENIED);
+      }
 
       // Everything the backend writes rides the one SM8 API key, so SM8
       // attributes it all to the bot account. The stamp puts the real author
@@ -432,7 +478,10 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       }, JSON.stringify(body));
 
       try {
-        await verifyIdToken(bearer(headers));
+        const who = await verifyIdToken(bearer(headers));
+        if ((await authorize(who.email)).level !== "admin") {
+          return jsonOut(403, DENIED);
+        }
       } catch {
         return jsonOut(401, { ok: false, error: "not signed in" });
       }
@@ -515,9 +564,23 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         return jsonOut(401, { ok: false, error: "not signed in" });
       }
 
+      // A genuine token says who they are; the portal's people list says what
+      // they may see. Every demo signup holds a genuine token, and one of them
+      // reading the whole job book is how this line got here (27 Aug 2026).
+      const az = await authorize(who.email);
+      if (az.level === "none") return jsonOut(403, DENIED);
+
       const q = event.queryStringParameters || {};
 
-      if (path === "/api/me") return jsonOut(200, { ok: true, ...who });
+      if (path === "/api/me") return jsonOut(200, { ok: true, ...who, level: az.level });
+
+      if (az.level === "subbie") {
+        // Their work tab is the jobs they ACCEPTED - read from the network's
+        // own jobs table, which stamps the accepter's Telegram ID at claim
+        // time. Everything else on this backend stays admin-only.
+        if (path === "/api/jobs") return jsonOut(200, await subbieJobs(az.telegramId));
+        return jsonOut(403, DENIED);
+      }
 
       // Who a note or a query can be handed to.
       if (path === "/api/staff") return jsonOut(200, { ok: true, staff: await staffList() });

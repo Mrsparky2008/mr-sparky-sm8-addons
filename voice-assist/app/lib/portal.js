@@ -18,11 +18,18 @@ import { getIdToken } from "./auth";
 import { PORTAL } from "./config";
 
 export class PortalError extends Error {
-  constructor(message, { status = 0, code = "" } = {}) {
+  constructor(message, { status = 0, code = "", demo = false, mobile = null, stage = null } = {}) {
     super(message);
     this.name = "PortalError";
     this.status = status;
     this.code = code;
+    // notSetUp with demo:true means a DEMO APPLICANT signed in: the portal does
+    // not know them as a contractor, but the earnings screen knows their
+    // mobile. Without carrying these fields through, a signed-in demo user
+    // lands on empty tabs — the exact thing an App Store review rejects.
+    this.demo = demo;
+    this.mobile = mobile;
+    this.stage = stage;
   }
 }
 
@@ -70,7 +77,8 @@ async function call(method, path, body) {
     // never fix it, so the screen must not offer that as the way out.
     if (res.status === 403 && json?.error === "notSetUp") {
       throw new PortalError(json.message || "You are not set up in the portal yet.",
-        { status: 403, code: "notSetUp" });
+        { status: 403, code: "notSetUp",
+          demo: json.demo === true, mobile: json.mobile || null, stage: json.stage || null });
     }
     throw new PortalError(json?.error || json?.message || `Portal error ${res.status}`,
       { status: res.status, code: json?.error || "" });
@@ -117,6 +125,14 @@ export const allClaims = () => get(`/api/claims${qs({ all: 1 })}`);
 
 /** The people an admin can look at. */
 export const contractors = () => get("/api/contractors");
+
+/**
+ * Set a contractor's agreed flat rate - the deal that overrides the ladder.
+ * percent is a whole number; reviewOn is optional and looks like 2026-11-27.
+ * Pass { personId, clear: true } to drop them back onto the ladder.
+ */
+export const setAgreedRate = ({ personId, percent, reviewOn, note, clear }) =>
+  post("/api/crew/agreed-rate", { personId, percent, reviewOn, note, clear });
 
 /**
  * Submit a claim. The request says WHICH jobs and nothing about what they are
