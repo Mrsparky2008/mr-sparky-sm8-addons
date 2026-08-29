@@ -51,6 +51,13 @@ def draw_tracked(draw, x, y, text, font, fill, track):
 img = Image.new("RGB", (SIZE, SIZE), NAVY)
 d = ImageDraw.Draw(img)
 
+# The yellow ring (Steven, 29 Aug 2026, from his mock-up). Drawn full-bleed
+# on navy - iOS masks its own corners, so the ring hugs the rounded edge
+# with no white showing.
+RING_INSET = round(SIZE * 0.018)
+RING_W = round(SIZE * 0.024)
+RING_RADIUS = round(SIZE * 0.21)
+
 f_ms = load(round(SIZE * 0.150 * SCALE))
 f_es = load(round(SIZE * 0.052 * SCALE))
 f_nw = load(round(SIZE * 0.112 * SCALE))
@@ -76,15 +83,21 @@ top = (SIZE - total) / 2
 y = top
 draw_tracked(d, (SIZE - ms_w) / 2, y - f_ms.getbbox("MR SPARKY")[1], "MR SPARKY", f_ms, WHITE, 0)
 
-# the yellow band, full width, with ELECTRICAL SERVICES tracked out inside it
+# the yellow band, ring to ring, with ELECTRICAL SERVICES tracked out inside
 y += ms_h + gap1
-d.rectangle([0, y, SIZE, y + band_h], fill=YELLOW)
+band_x = RING_INSET + RING_W
+d.rectangle([band_x, y, SIZE - band_x, y + band_h], fill=YELLOW)
 es_y = y + (band_h - es_h) / 2 - f_es.getbbox("ELECTRICAL SERVICES")[1]
 draw_tracked(d, (SIZE - ms_w) / 2, es_y, "ELECTRICAL SERVICES", f_es, NAVY, es_track)
 
 # NETWORK
 y += band_h + gap2
 draw_tracked(d, (SIZE - ms_w) / 2, y - f_nw.getbbox("NETWORK")[1], "NETWORK", f_nw, YELLOW, nw_track)
+
+# ring last, over the band ends, so the border reads as one clean line
+d.rounded_rectangle(
+    [RING_INSET, RING_INSET, SIZE - 1 - RING_INSET, SIZE - 1 - RING_INSET],
+    radius=RING_RADIUS, outline=YELLOW, width=RING_W)
 
 img.save(OUT + "/icon.png")
 
