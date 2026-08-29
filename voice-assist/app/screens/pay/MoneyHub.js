@@ -9,7 +9,7 @@
 // Every figure arrives worked out — the hub renders one statement payload and
 // hands slices of it to the screens behind the tiles.
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../../components/ui";
 import Icon from "../../components/icons";
 import { C, R, S, T, mono, money } from "../../lib/theme";
@@ -124,10 +124,12 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
             sub={rateSub}
             onPress={() => onOpen("rate", data)}
           />
+          {/* Insurance lives on the portal (camera capture, OCR, history) -
+              this tile is the one-tap road there. Same login as the app. */}
           <HubTile
-            icon="idcard" label="My documents"
-            sub="being set up"
-            onPress={() => onOpen("docs", data)}
+            icon="idcard" label="Insurance"
+            sub="certificates of currency"
+            onPress={() => Linking.openURL("https://portal.mrsparky.com.au")}
           />
         </View>
 
