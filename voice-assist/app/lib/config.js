@@ -27,7 +27,7 @@ export const PORTAL = "https://portal.mrsparky.com.au";
 // of tonight's five updates am I actually on".
 import * as Updates from "expo-updates";
 
-const build = Constants.nativeBuildVersion ? ` build ${Constants.nativeBuildVersion}` : "";
+const build = Constants.nativeBuildVersion ? ` (${Constants.nativeBuildVersion})` : "";
 const ota = Updates.createdAt
   ? ` · update ${new Date(Updates.createdAt).toLocaleDateString("en-AU")} ${new Date(Updates.createdAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}`
   : " · embedded";
