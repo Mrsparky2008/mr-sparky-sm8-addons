@@ -10,7 +10,7 @@
 // deploy, so no counts are shown yet — a small number here would be a lie.
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet,
+  ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, StyleSheet,
   Text, TextInput, View,
 } from "react-native";
 import { Card, Empty, Header, StatusChip, Tile, TileGrid } from "../components/ui";
@@ -24,6 +24,23 @@ const BUCKETS = [
   { key: "Work Order", label: "Work Order" },
   { key: "Completed", label: "Completed" },
 ];
+
+// The general offsider - Charlie's old seat, now Claude's. No job attached:
+// standards, regs, calcs, product questions, whatever the day throws up.
+// (The job card's own button stays "AI Assist quote" - that one carries the
+// quoting prompt for its job.)
+function openAssist() {
+  const primer = [
+    "Mr Sparky offsider.",
+    "You are the on-the-tools offsider for a licensed electrician on the Mr Sparky "
+      + "Network in Sydney. Help with whatever the day throws up: AS/NZS 3000 and other "
+      + "standards, NSW regs and compliance, cable sizing and calcs, product and fault "
+      + "questions, safe work method thinking. Short, practical, tradie-plain. If it is "
+      + "about a specific job, ask for the job number and use the Mr Sparky tools.",
+    'Do NOTHING yet - reply with exactly one line, "Ready when you are.", and wait for me to speak.',
+  ].join("\n\n");
+  Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(primer));
+}
 
 export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut, onAccount, email }) {
   const [q, setQ] = useState("");
@@ -146,8 +163,9 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
           hidden behind two grey words. */}
       <View style={s.dock}>
         <TileGrid>
-          {/* Charlie retired 30 Aug 2026 - the AI Assist quote helper on the
-              job card (Claude, via the connector) does the talking now. */}
+          {/* Claude's starburst in Claude's own orange - the one deliberate
+              break from white-line icons, because this button IS Claude. */}
+          <Tile icon={<Icon name="claude" size={22} color="#D97757" />} label="AI Assist" onPress={openAssist} />
           <Tile icon={<Icon name="board" size={22} color={C.ink} />} label="My day" onPress={onDiary} />
         </TileGrid>
         <Pressable onPress={onSignOut} hitSlop={8} style={s.signOutWrap}>
