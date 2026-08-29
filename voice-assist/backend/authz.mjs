@@ -63,14 +63,20 @@ const adminEnv = () => String(process.env.ADMIN_EMAILS || "")
 export async function authorize(email) {
   const wanted = String(email || "").trim().toLowerCase();
   if (!wanted) return { level: "none" };
-  if (adminEnv().includes(wanted)) return { level: "admin", name: wanted };
 
   const match = (await people()).find(
     (p) => String(p?.email || "").trim().toLowerCase() === wanted
       && p?.status !== "blocked",
   );
+  // An admin carries their Telegram id too: the Work tab defaults to THEIR
+  // OWN accepted jobs (Steven, 30 Aug: "completed by Jason - why is it on
+  // my list?"), with everyone's a toggle away.
+  const telegramId = match?.telegramId ? String(match.telegramId) : null;
+  if (adminEnv().includes(wanted)) {
+    return { level: "admin", name: match?.name || wanted, telegramId };
+  }
   if (!match) return { level: "none" };
-  if (ADMIN_ROLES.has(match.role)) return { level: "admin", name: match.name };
+  if (ADMIN_ROLES.has(match.role)) return { level: "admin", name: match.name, telegramId };
   if (match.role === "Subbie" && match.status === "Active") {
     return {
       level: "subbie",

@@ -587,6 +587,14 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
 
       if (path === "/api/jobs") {
         const query = String(q.q || "").trim();
+        // The Work tab is a TECH view for everyone, admin included: browsing
+        // shows the jobs YOU accepted, exactly like a subbie's (Steven,
+        // 30 Aug: "completed by Jason - why is it on my list?"). Searching
+        // still reaches the whole business - finding a job is an admin move,
+        // browsing is a tech move.
+        if (!query && az.telegramId) {
+          return jsonOut(200, await subbieJobs(az.telegramId));
+        }
         if (!query) {
           // The app buckets these under ServiceM8's own names, so send the
           // most recent of EACH bucket rather than the most recent overall.
