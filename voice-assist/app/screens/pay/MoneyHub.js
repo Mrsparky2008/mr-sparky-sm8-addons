@@ -124,11 +124,12 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
             sub={rateSub}
             onPress={() => onOpen("rate", data)}
           />
-          {/* Insurance lives on the portal (camera capture, OCR, history) -
-              this tile is the one-tap road there. Same login as the app. */}
+          {/* The document shelf lives on the portal - insurance capture
+              today (camera, OCR, history); the signed contract and licence
+              join it there. One tap, same login as the app. */}
           <HubTile
-            icon="idcard" label="Insurance"
-            sub="certificates of currency"
+            icon="idcard" label="My documents"
+            sub="insurance & certificates"
             onPress={() => Linking.openURL("https://portal.mrsparky.com.au")}
           />
         </View>
