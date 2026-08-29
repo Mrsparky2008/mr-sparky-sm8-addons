@@ -84,6 +84,9 @@ const SHAPES = {
     <Path key="b" d="M5.5 9.5v8a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-8" />,
     <Path key="c" d="M10 13h4" />,
   ],
+  spark: [
+    <Path key="a" d="M13 2.5 5.5 13.5h5L11 21.5l7.5-11h-5z" />,
+  ],
   people: [
     <Circle key="a" cx="9" cy="9" r="2.8" />,
     <Path key="b" d="M3.8 18.5c.6-3 9.8-3 10.4 0" />,

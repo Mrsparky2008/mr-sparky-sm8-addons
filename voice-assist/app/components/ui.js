@@ -200,8 +200,11 @@ const s = StyleSheet.create({
   rowIcon: { fontSize: 16, width: 22, textAlign: "center" },
   rowIconBox: { width: 22, alignItems: "center" },
   tileIconBox: { height: 24, justifyContent: "center" },
+  // The value is flexible too, or a long company name squeezes the label
+  // into a one-letter-per-line column (seen live on My Details, 29 Aug 2026).
+  // Long values wrap right-aligned; the label always keeps its share.
   rowLabel: { flex: 1, color: C.ink, fontSize: 15 },
-  rowValue: { color: C.muted, fontSize: 15 },
+  rowValue: { flex: 1.6, color: C.muted, fontSize: 15, textAlign: "right" },
   chevron: { color: C.muted, fontSize: 22, lineHeight: 24, marginLeft: 2 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
