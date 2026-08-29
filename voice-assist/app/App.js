@@ -304,7 +304,10 @@ function Shell() {
     );
   }
 
-  const tabs = ["work", "charlie", "pay", ...(who?.isAdmin ? ["admin"] : [])];
+  // Charlie retired 30 Aug 2026 - AI Assist (Claude via the connector) does
+  // the talking from the job card. The tab goes; the machinery stays dormant
+  // underneath until a proper code cleanout.
+  const tabs = ["work", "pay", ...(who?.isAdmin ? ["admin"] : [])];
 
   return (
     <SafeAreaView style={s.root}>

@@ -222,9 +222,7 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], timeOnS
       </ScrollView>
       </KeyboardAvoidingView>
 
-      <View style={s.dock}>
-        <Cta label="🎙  Talk about this job" onPress={onTalk} />
-      </View>
+      {/* Charlie retired 30 Aug 2026 - AI Assist lives on the job card. */}
 
       {writing ? <KeyboardToggle inputRef={noteRef} /> : null}
     </View>

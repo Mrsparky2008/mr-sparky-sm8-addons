@@ -87,6 +87,11 @@ const SHAPES = {
   spark: [
     <Path key="a" d="M13 2.5 5.5 13.5h5L11 21.5l7.5-11h-5z" />,
   ],
+  // Claude's starburst, in the app's line-work language.
+  claude: [
+    <Path key="a" d="M12 2.5v6M12 15.5v6M2.5 12h6M15.5 12h6" />,
+    <Path key="b" d="M5.3 5.3l4.2 4.2M14.5 14.5l4.2 4.2M18.7 5.3l-4.2 4.2M9.5 14.5l-4.2 4.2" />,
+  ],
   people: [
     <Circle key="a" cx="9" cy="9" r="2.8" />,
     <Path key="b" d="M3.8 18.5c.6-3 9.8-3 10.4 0" />,

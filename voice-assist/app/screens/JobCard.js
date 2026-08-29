@@ -154,25 +154,23 @@ export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddRe
       </ScrollView>
 
       <View style={s.dock}>
-        <Cta
-          label="🎙  Talk about this job"
-          onPress={() => onTalk({ job_number: jobNumber, address: data?.job?.address || "" })}
-        />
-        {/* AI Assist v1 (29 Aug 2026): opens Claude on the tech's OWN seat,
-            already knowing THIS job - no numbers typed. Fresh chat per open,
-            so closing here and opening from another job starts on that job.
-            Write-back is paste-into-SM8 for now; the connector that reads and
-            writes the job directly (with whose-seat identity checks) is next. */}
-        <View style={{ marginTop: 8 }}>
-          <Cta
-            label="⚡  AI Assist quote"
-            onPress={() => {
+        {/* Charlie retired 30 Aug 2026; AI Assist is THE button. Opens Claude
+            on the tech's OWN seat, already knowing THIS job - fresh chat per
+            open, connector does the reading and writing with the seat's
+            identity checked on every call. */}
+        <Pressable
+          style={{
+            minHeight: S.touch, borderRadius: R.button, backgroundColor: C.brand,
+            alignItems: "center", justifyContent: "center", flexDirection: "row",
+            gap: 10, paddingHorizontal: 16, paddingVertical: 14,
+          }}
+          onPress={() => {
               const parts = [
-                // Job number FIRST and echoed back: Claude titles a chat off
-                // its opening words, so the history reads like a job list.
+                // Job number FIRST: Claude titles a chat off its opening
+                // words, so the history reads like a job list.
                 `Job ${jobNumber} - quote.`,
                 "You are the Mr Sparky quote helper, working with a licensed electrician on a "
-                  + `Mr Sparky Network job in Sydney. Start your first reply with "Job ${jobNumber} - quote".`,
+                  + "Mr Sparky Network job in Sydney.",
                 `The job: ${jobNumber}`
                   + (primary?.name ? ` for ${primary.name}` : "")
                   + (data?.job?.address ? ` at ${oneLine(data.job.address)}` : "")
@@ -181,16 +179,23 @@ export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddRe
                   ? "Billing lines already on the job: "
                     + lines.map((l) => `${l.name} x${Number(l.qty) > 0 ? l.qty : 1}`).join("; ") + "."
                   : "",
-                "Ask me what the customer wants and the site conditions, then work with me to a "
-                  + "scope of works, a materials list, labour hours and a sensible price including "
-                  + "GST. Talk like a tradie, not a consultant. When we have landed it, give me the "
-                  + "finished quote as one clean block I can paste straight into ServiceM8: scope, "
-                  + "inclusions, exclusions, price inc GST.",
+                // Stand at ease. The first send is a PRIMER, not a starting
+                // gun - Steven: "submit it, do nothing, wait for me to talk."
+                `Do NOTHING yet: no tools, no questions, no drafting. Reply with exactly one line - `
+                  + `"Job ${jobNumber} - quote. Ready when you are." - and wait for me to speak.`,
+                "When I do: work with me to a scope of works, materials, labour hours and a "
+                  + "sensible price including GST. Talk like a tradie, not a consultant. When we "
+                  + "have landed it and I confirm, save the quote text to the job as a note and "
+                  + "put the priced lines and headers into the billing section.",
               ].filter(Boolean);
               Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(parts.join("\n\n")));
             }}
-          />
-        </View>
+        >
+          <Icon name="claude" size={20} color="#fff" />
+          <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800", letterSpacing: 0.3 }}>
+            AI Assist quote
+          </Text>
+        </Pressable>
       </View>
     </View>
   );

@@ -159,9 +159,7 @@ export default function Diary({ onBack, onTalk, onOpenJob }) {
         )}
       </ScrollView>
 
-      <View style={s.dock}>
-        <Cta label="🎙  Ask Charlie about my day" onPress={() => onTalk(null)} />
-      </View>
+      {/* Charlie retired 30 Aug 2026 - the dock button went with him. */}
 
       {picking && shown ? (
         <MonthSheet

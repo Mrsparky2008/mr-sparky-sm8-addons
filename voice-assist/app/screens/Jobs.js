@@ -146,7 +146,8 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
           hidden behind two grey words. */}
       <View style={s.dock}>
         <TileGrid>
-          <Tile icon={<Icon name="mic" size={22} color={C.ink} />} label="Talk to Charlie" tone="brand" onPress={() => onTalk(null)} />
+          {/* Charlie retired 30 Aug 2026 - the AI Assist quote helper on the
+              job card (Claude, via the connector) does the talking now. */}
           <Tile icon={<Icon name="board" size={22} color={C.ink} />} label="My day" onPress={onDiary} />
         </TileGrid>
         <Pressable onPress={onSignOut} hitSlop={8} style={s.signOutWrap}>
