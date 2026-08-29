@@ -145,6 +145,22 @@ function Shell() {
   const asJob = (j) =>
     j && { job_number: j.job_number, address: j.address || "", suburb: suburb(j.address) };
 
+  // AI Assist in the bar: opens Claude on the tech's own seat as the general
+  // offsider - standards, regs, calcs - standing at ease until spoken to.
+  // (The job card's own button carries the per-job quoting prompt.)
+  const openAssist = useCallback(() => {
+    const primer = [
+      "Mr Sparky offsider.",
+      "You are the on-the-tools offsider for a licensed electrician on the Mr Sparky "
+        + "Network in Sydney. Help with whatever the day throws up: AS/NZS 3000 and other "
+        + "standards, NSW regs and compliance, cable sizing and calcs, product and fault "
+        + "questions, safe work method thinking. Short, practical, tradie-plain. If it is "
+        + "about a specific job, ask for the job number and use the Mr Sparky tools.",
+      'Do NOTHING yet - reply with exactly one line, "Ready when you are.", and wait for me to speak.',
+    ].join("\n\n");
+    Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(primer));
+  }, []);
+
   // Talking about a job is a tab change, not a push — Charlie is a place you go
   // back to, and the call has to survive going somewhere else and returning.
   const openCharlie = useCallback((job) => {
@@ -305,9 +321,9 @@ function Shell() {
   }
 
   // Charlie retired 30 Aug 2026 - AI Assist (Claude via the connector) does
-  // the talking from the job card. The tab goes; the machinery stays dormant
-  // underneath until a proper code cleanout.
-  const tabs = ["work", "pay", ...(who?.isAdmin ? ["admin"] : [])];
+  // the talking. The bar carries the everyday four: Work, AI Assist, My day,
+  // Money - plus Business for the admin.
+  const tabs = ["work", "assist", "day", "pay", ...(who?.isAdmin ? ["admin"] : [])];
 
   return (
     <SafeAreaView style={s.root}>
@@ -597,7 +613,13 @@ function Shell() {
       <TabBar
         tabs={tabs}
         value={tab}
-        onChange={(t) => { if (t === "charlie") setCharlieBorn(true); setTab(t); }}
+        onChange={(t) => {
+          // Two of these are ACTIONS, not places: AI Assist opens Claude and
+          // My day jumps to the Work tab's diary. Neither becomes "current".
+          if (t === "assist") { openAssist(); return; }
+          if (t === "day") { setTab("work"); setWorkView("today"); return; }
+          setTab(t);
+        }}
         badges={{ admin: waiting }}
       />
 

@@ -1,25 +1,25 @@
-// The four questions the app answers, one per tab.
+// The questions the app answers, one per slot.
 //
-//   Work      what am I doing
-//   Charlie   talk to it
-//   Money     what am I owed
-//   Business  how is the business  (admin only)
+//   Work       what am I doing
+//   AI Assist  ask Claude (an ACTION - opens Claude, never becomes "current")
+//   My day     where am I meant to be
+//   Money      what am I owed
+//   Business   how is the business  (admin only)
 //
-// Role-shaped: a subcontractor sees three tabs and never learns the fourth
-// exists. The portal already knows who is an admin, so the app asks it.
-//
-// Icons are white line-work (components/icons.js). The Mr Sparky yellow has
-// exactly one job on this bar: marking where you are. Making it wallpaper
-// would put branding above meaning, and orange already means "attention".
+// Role-shaped: a subcontractor never learns the admin slot exists. Icons are
+// white line-work; the Mr Sparky yellow marks where you are - except the
+// Claude starburst, which wears Claude orange because that button IS Claude
+// (Steven's call, 30 Aug 2026).
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Icon from "./icons";
 import { C, R, S, mono } from "../lib/theme";
 
 export const TABS = {
   work: { icon: "wrench", label: "Work" },
-  charlie: { icon: "mic", label: "Charlie" },
+  assist: { icon: "claude", label: "AI Assist", tint: "#D97757" },
+  day: { icon: "board", label: "My day" },
   pay: { icon: "dollar", label: "Money" },
-  admin: { icon: "board", label: "Business" },
+  admin: { icon: "chart", label: "Business" },
 };
 
 export default function TabBar({ tabs, value, onChange, badges = {} }) {
@@ -38,8 +38,8 @@ export default function TabBar({ tabs, value, onChange, badges = {} }) {
             accessibilityState={{ selected: on }}
             accessibilityLabel={t.label}
           >
-            <View style={!on && s.iconOff}>
-              <Icon name={t.icon} size={21} color={on ? C.yellow : C.muted} />
+            <View style={!on && !t.tint && s.iconOff}>
+              <Icon name={t.icon} size={21} color={t.tint || (on ? C.yellow : C.muted)} />
               {badge ? (
                 <View style={s.badge}>
                   <Text style={[s.badgeText, mono]}>{badge > 9 ? "9+" : badge}</Text>

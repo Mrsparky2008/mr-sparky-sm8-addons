@@ -135,7 +135,7 @@ export default function Diary({ onBack, onTalk, onOpenJob }) {
               <Text style={[s.rail, mono]}>{clockFromMins(r.from)}</Text>
               {r.kind === "gap" ? (
                 <View style={s.gap}>
-                  <Text style={s.gapText}>{hoursText(r.mins)} free — “Charlie, fill this?”</Text>
+                  <Text style={s.gapText}>{hoursText(r.mins)} free</Text>
                 </View>
               ) : (
                 <Pressable
