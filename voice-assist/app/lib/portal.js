@@ -198,6 +198,17 @@ export const abnLookup = (q) => get(`/api/abr${qs({ q })}`);
 /** A short-lived URL to look at a receipt; the bucket blocks public access. */
 export const receiptViewUrl = (key) => get(`/api/receipts/view${qs({ key })}`);
 
+/* ---- Insurance: the Certificate of Currency, same rails as receipts ------ */
+/** A short-lived URL to put a certificate photo straight into the bucket. */
+export const insuranceUploadUrl = ({ contentType, extension }) =>
+  post("/api/insurance/upload-url", { contentType, extension });
+/** Claude reads the certificate; a human confirms every field before saving. */
+export const insuranceRead = (imageKey) => post("/api/insurance/read", { imageKey });
+/** Append the confirmed policy to the record — history is never overwritten. */
+export const saveInsurance = (policy) => post("/api/insurance", policy);
+/** A short-lived URL to view a certificate already on file. */
+export const insuranceViewUrl = (key) => get(`/api/insurance/view${qs({ key })}`);
+
 /**
  * "Own material, no receipt" — van stock, declared on trust. Material bought
  * earlier in bulk has no per-job docket and never can, so it is declared

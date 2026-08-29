@@ -57,7 +57,7 @@ import Statement from "./screens/pay/Statement";
 import Retention from "./screens/pay/Retention";
 import MyRate from "./screens/pay/MyRate";
 import MyDetails from "./screens/pay/MyDetails";
-import DocumentsSoon from "./screens/pay/DocumentsSoon";
+import Documents from "./screens/pay/Documents";
 import BusinessHub from "./screens/admin/BusinessHub";
 import BucketList from "./screens/admin/BucketList";
 import CrewList from "./screens/admin/CrewList";
@@ -481,7 +481,7 @@ function Shell() {
             <View style={s.fill}><MyDetails data={top.data} onBack={pop} /></View>
           ) : null}
           {top?.name === "docs" ? (
-            <View style={s.fill}><DocumentsSoon onBack={pop} /></View>
+            <View style={s.fill}><Documents data={top.data} onBack={pop} onSaved={() => resetTab("pay")} /></View>
           ) : null}
           {top?.name === "claim" ? (
             <View style={s.fill}>
