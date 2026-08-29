@@ -22,7 +22,16 @@ export const PORTAL = "https://portal.mrsparky.com.au";
 // Read from the resolved app config rather than typed here. This used to be a
 // hand-written string and it drifted — it still said v2.0 while app.json had
 // moved to 2.1.0, so the app told you the wrong version about itself.
-export const VERSION = `app v${Constants.expoConfig?.version || "?"}`;
+// The native BUILD NUMBER rides along (Steven, 30 Aug: "build version would
+// be handy — app 2.1.0 build (xx)"), and the OTA update date answers "which
+// of tonight's five updates am I actually on".
+import * as Updates from "expo-updates";
+
+const build = Constants.nativeBuildVersion ? ` build ${Constants.nativeBuildVersion}` : "";
+const ota = Updates.createdAt
+  ? ` · update ${new Date(Updates.createdAt).toLocaleDateString("en-AU")} ${new Date(Updates.createdAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}`
+  : " · embedded";
+export const VERSION = `app v${Constants.expoConfig?.version || "?"}${build}${ota}`;
 
 // "dev" when this is the side-by-side test build (see app.config.js). Two
 // identical dark apps on one home screen is a mistake waiting to happen, and
