@@ -11,13 +11,14 @@ import {
   ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
+import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono } from "../../lib/theme";
 import * as portal from "../../lib/portal";
 
-const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic" };
+const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic", "application/pdf": "pdf" };
 const TYPES = [
   { key: "public_liability", label: "Public liability" },
   { key: "workers_comp", label: "Workers comp" },
@@ -72,6 +73,27 @@ export default function Documents({ data, onBack, onSaved }) {
     const asset = res.assets?.[0];
     if (!asset?.uri) return;
     const shot = { uri: asset.uri, mimeType: asset.mimeType || "image/jpeg" };
+    setPhoto(shot);
+    setSaved(false);
+    upload(shot);
+  }
+
+  // The Files app - where an emailed PDF certificate actually lives.
+  // (This is what earned build 28: the picker is a native module.)
+  async function pickFile() {
+    setError("");
+    const res = await DocumentPicker.getDocumentAsync({
+      type: ["application/pdf", "image/*"],
+      copyToCacheDirectory: true,
+    });
+    if (res.canceled) return;
+    const asset = res.assets?.[0];
+    if (!asset?.uri) return;
+    const shot = {
+      uri: asset.uri,
+      mimeType: asset.mimeType || (asset.name?.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
+      name: asset.name || "certificate",
+    };
     setPhoto(shot);
     setSaved(false);
     upload(shot);
@@ -184,9 +206,16 @@ export default function Documents({ data, onBack, onSaved }) {
           <SectionLabel>Add a certificate</SectionLabel>
           {photo ? (
             <>
-              <Pressable onPress={() => take(false)} disabled={reading}>
-                <Image source={{ uri: photo.uri }} style={s.preview} resizeMode="cover" />
-              </Pressable>
+              {photo.mimeType === "application/pdf" ? (
+                <View style={s.pdfCard}>
+                  <Text style={s.pdfIcon}>📄</Text>
+                  <Text style={T.small} numberOfLines={1}>{photo.name || "certificate.pdf"}</Text>
+                </View>
+              ) : (
+                <Pressable onPress={() => take(false)} disabled={reading}>
+                  <Image source={{ uri: photo.uri }} style={s.preview} resizeMode="cover" />
+                </Pressable>
+              )}
               {reading ? (
                 <View style={s.readingRow}>
                   <ActivityIndicator color={C.brand} size="small" />
@@ -199,6 +228,7 @@ export default function Documents({ data, onBack, onSaved }) {
           ) : (
             <View style={{ gap: 8 }}>
               <Cta label="📷 Photograph the certificate" onPress={() => take(false)} />
+              <Cta label="Upload a file" tone="ghost" onPress={pickFile} />
               <Cta label="Choose from photos" tone="ghost" onPress={() => take(true)} />
               <Text style={s.note}>
                 A renewal adds a new certificate; nothing is ever overwritten. It's read for
@@ -287,6 +317,11 @@ const s = StyleSheet.create({
   badgeOk: { color: "#6FD096" },
   badgeBad: { color: C.warnChipInk },
   preview: { width: "100%", height: 220, borderRadius: R.card, backgroundColor: C.panel },
+  pdfCard: {
+    borderRadius: R.card, backgroundColor: C.panel, borderWidth: 1, borderColor: C.line,
+    padding: 18, flexDirection: "row", alignItems: "center", gap: 12,
+  },
+  pdfIcon: { fontSize: 26 },
   note: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
   warn: { color: C.warnChipInk, fontSize: 12, lineHeight: 17, marginTop: 7 },
   savedNote: { color: "#6FD096", fontSize: 13, fontWeight: "700", textAlign: "center" },

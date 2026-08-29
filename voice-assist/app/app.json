@@ -3,7 +3,7 @@
     "name": "Mr Sparky",
     "slug": "mr-sparky-ai-assistant",
     "owner": "mr_sparky",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "scheme": "mrsparky-aiassist",
     "extra": {
       "eas": {
