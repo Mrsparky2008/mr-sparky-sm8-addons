@@ -68,10 +68,13 @@ export function suburb(address) {
 }
 
 // Status colours borrow the chip palette; only ServiceM8 truth is ever green.
+// Quote = ORANGE and Work Order = BLUE, matching ServiceM8 exactly - Steven,
+// 30 Aug 2026: "I switch apps and get lost looking for a WO in the blue
+// section." Two apps, one colour language.
 export function statusChip(status) {
   const s = String(status || "").toLowerCase();
   if (s === "completed") return { bg: "rgba(47,158,87,.16)", ink: "#6FD096" };
-  if (s === "work order") return { bg: C.warnChipBg, ink: C.warnChipInk };
-  if (s === "quote") return { bg: C.infoChipBg, ink: C.infoChipInk };
+  if (s === "work order") return { bg: C.infoChipBg, ink: C.infoChipInk };
+  if (s === "quote") return { bg: C.warnChipBg, ink: C.warnChipInk };
   return { bg: "rgba(141,160,188,.14)", ink: C.muted };
 }
