@@ -230,10 +230,17 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onTalk
                 // gun - Steven: "submit it, do nothing, wait for me to talk."
                 `Do NOTHING yet: no tools, no questions, no drafting. Reply with exactly one line - `
                   + `"Job ${jobNumber} - quote. Ready when you are." - and wait for me to speak.`,
+                // Two rules that used to contradict the tools, found 31 Aug
+                // 2026 when Steven checked his own quote-session prompt
+                // against the app: prices are EX GST (ServiceM8 adds the tax
+                // on the template, so an inc-GST line is a 10% overcharge),
+                // and no note unless he asks - "just add them to the billing
+                // section not the notes".
                 "When I do: work with me to a scope of works, materials, labour hours and a "
-                  + "sensible price including GST. Talk like a tradie, not a consultant. When we "
-                  + "have landed it and I confirm, save the quote text to the job as a note and "
-                  + "put the priced lines and headers into the billing section.",
+                  + "sensible price. Every price is EX GST - ServiceM8 adds the GST itself, so "
+                  + "never gross a line up. Talk like a tradie, not a consultant. Read the lines "
+                  + "back to me before you write anything. When I confirm, put the priced lines "
+                  + "and headers into the BILLING section only - no note unless I ask for one.",
               ].filter(Boolean);
               Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(parts.join("\n\n")));
             }}
