@@ -1,6 +1,6 @@
 // All jobs — the archive door.
 //
-// Opens with the last 10, and the search reaches every job ever by number,
+// Opens with the whole list, and the search reaches every job ever by number,
 // name, suburb or work keywords. Old jobs cost nothing until summoned: the
 // backend keeps a light index of everything and only loads a job's full data
 // when one is opened. (Searching by mobile number joins when the phone number
@@ -28,7 +28,9 @@ export default function AllJobs({ onOpenJob, onBack }) {
     setError("");
     try {
       const list = await fetchJobs(query);
-      if (mine === seq.current) setJobs(query ? list : list.slice(0, 10));
+      // No trim: the archive shows everything the backend hands over
+      // (Steven, 30 Aug 2026 - the last-10 cut hid his own job history).
+      if (mine === seq.current) setJobs(list);
     } catch (err) {
       if (mine === seq.current) setError(err.message || "Couldn't load jobs");
     } finally {
@@ -69,7 +71,9 @@ export default function AllJobs({ onOpenJob, onBack }) {
         keyboardDismissMode="on-drag"
         automaticallyAdjustKeyboardInsets
       >
-        <Text style={[T.label, { marginBottom: 10 }]}>{q.trim() ? "Matches" : "Latest"}</Text>
+        <Text style={[T.label, { marginBottom: 10 }]}>
+          {q.trim() ? "Matches" : `All jobs${jobs.length ? ` — ${jobs.length}` : ""}`}
+        </Text>
         {loading && jobs.length === 0 ? (
           <ActivityIndicator color={C.brand} style={{ marginTop: 30 }} />
         ) : error ? (

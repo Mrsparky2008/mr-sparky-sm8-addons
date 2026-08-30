@@ -1,9 +1,9 @@
 // Screen 2 — Jobs, bucketed the way ServiceM8 buckets them.
 //
 // Steven's spec (2026-08-06): same names SM8 uses — Quotes, Work Order,
-// Completed — so nothing has to be relearned. The list is for now; the
-// All jobs door is the archive: last 10 plus a search that reaches every
-// job ever. Searching from this screen still works and shows a flat list.
+// Completed — so nothing has to be relearned. Bands show three at rest and
+// open fully on tap; the All jobs door is the flat archive with search.
+// Searching from this screen still works and shows a flat list.
 //
 // Skin note: buckets group the recents the backend already serves. Full
 // per-bucket counts across all 1,600+ jobs arrive with the next backend
@@ -27,6 +27,7 @@ const BUCKETS = [
 
 export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut, onAccount, email }) {
   const [q, setQ] = useState("");
+  const [open, setOpen] = useState({});   // bucket key -> whole bucket shown
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -57,17 +58,20 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
 
   const searching = !!q.trim();
   const counts = jobs.counts || null;
-  // Three per band. The backend sends eight, but 593 quotes ate the screen
-  // before the other two bands were reachable — and the bands exist to show
-  // the SHAPE of the work at a glance. Search and All jobs are the real doors.
+  // Three per band at rest — the bands exist to show the SHAPE of the work
+  // at a glance. Tapping a band opens the whole bucket (Steven, 30 Aug 2026:
+  // "still not seeing the 12 work order jobs and the 112 quotes").
   const PER_BAND = 3;
   const grouped = searching
     ? null
-    : BUCKETS.map((b) => ({
-        ...b,
-        jobs: jobs.filter((j) => j.status === b.key).slice(0, PER_BAND),
-        total: counts?.[b.key],
-      })).filter((b) => b.jobs.length);
+    : BUCKETS.map((b) => {
+        const all = jobs.filter((j) => j.status === b.key);
+        return {
+          ...b,
+          jobs: open[b.key] ? all : all.slice(0, PER_BAND),
+          total: counts?.[b.key] ?? all.length,
+        };
+      }).filter((b) => b.jobs.length);
 
   return (
     <View style={s.screen}>
@@ -118,7 +122,8 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
                 <BucketBand
                   label={b.label}
                   status={b.key}
-                  count={b.total && b.total > b.jobs.length ? `${b.jobs.length} of ${b.total}` : b.total}
+                  count={b.total && b.total > b.jobs.length ? `${b.jobs.length} of ${b.total} — tap for all` : b.total}
+                  onPress={() => setOpen((o) => ({ ...o, [b.key]: !o[b.key] }))}
                 />
                 {b.jobs.map((j) => (
                   <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} hideStatus />
@@ -158,14 +163,16 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
  * chips, so the band's colour says which bucket you are in before the word
  * does — and Completed is green because Completed is real in ServiceM8.
  */
-function BucketBand({ label, status, count }) {
+function BucketBand({ label, status, count, onPress }) {
   const { bg, ink } = statusChip(status);
   return (
-    <View style={[s.band, { backgroundColor: bg }]}>
-      <View style={[s.bandEdge, { backgroundColor: ink }]} />
-      <Text style={[s.bandLabel, { color: ink }]}>{label}</Text>
-      {count ? <Text style={[s.bandCount, mono, { color: ink }]}>{count}</Text> : null}
-    </View>
+    <Pressable onPress={onPress}>
+      <View style={[s.band, { backgroundColor: bg }]}>
+        <View style={[s.bandEdge, { backgroundColor: ink }]} />
+        <Text style={[s.bandLabel, { color: ink }]}>{label}</Text>
+        {count ? <Text style={[s.bandCount, mono, { color: ink }]}>{count}</Text> : null}
+      </View>
+    </Pressable>
   );
 }
 
