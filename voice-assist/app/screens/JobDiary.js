@@ -1,17 +1,14 @@
-// The job's diary — matching ServiceM8's own (Steven, 30 Aug 2026: "the
-// diaries don't match"). Bookings, the FULL note history with who-and-when,
-// photo thumbnails and documents (quote PDFs, forms), all straight off the
-// job card. Photos come through the backend's /api/attachment proxy because
-// SM8's file endpoint needs the API key.
+// The job's diary — bookings, time on site, and the FULL note history with
+// who-and-when. Notes only, on purpose: photos and documents live in
+// ServiceM8 (Steven, 30 Aug 2026: "that's sm8 territory, no need to
+// duplicate — just the notes for simplicity").
 import { useEffect, useRef, useState } from "react";
-import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../components/ui";
 import Icon from "../components/icons";
 import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono, oneLine } from "../lib/theme";
 import { fetchStaff, postJobNote, postJobTask } from "../lib/api";
-import { BACKEND } from "../lib/config";
-import { getIdToken } from "../lib/auth";
 
 // "2026-08-04 08:30:00" -> "Mon 4 Aug · 8:30am", Sydney wall-clock, no Date
 // timezone games on the date part.
@@ -33,20 +30,8 @@ function hoursLabel(minutes) {
   return h ? `${h}h ${m % 60}m` : `${m}m`;
 }
 
-export default function JobDiary({ jobNumber, bookings = [], notes = [], noteFeed = [], attachments = [], timeOnSite, onAddReceipt, onTalk, onBack }) {
+export default function JobDiary({ jobNumber, bookings = [], notes = [], noteFeed = [], timeOnSite, onAddReceipt, onTalk, onBack }) {
   const ordered = [...bookings].sort((a, b) => String(b.start || "").localeCompare(String(a.start || "")));
-  // Photos and documents fetch through the signed-in backend proxy, so the
-  // Image component needs the same bearer token every API call carries.
-  const [token, setToken] = useState(null);
-  const [viewing, setViewing] = useState(null);     // attachment uuid fullscreen
-  useEffect(() => {
-    let alive = true;
-    getIdToken().then((t) => { if (alive) setToken(t); }).catch(() => {});
-    return () => { alive = false; };
-  }, []);
-  const photos = attachments.filter((a) => a.photo);
-  const docs = attachments.filter((a) => !a.photo);
-  const attSrc = (uuid) => ({ uri: `${BACKEND}/api/attachment/${uuid}`, headers: { Authorization: `Bearer ${token}` } });
   const [added, setAdded] = useState([]);          // notes written this visit
   const [writing, setWriting] = useState(false);
   const [draft, setDraft] = useState("");
@@ -199,41 +184,6 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], noteFee
           </View>
         ) : null}
 
-        {photos.length && token ? (
-          <View style={s.section}>
-            <SectionLabel>{photos.length === 1 ? "Photo" : `${photos.length} photos`}</SectionLabel>
-            <View style={s.photoGrid}>
-              {photos.map((a) => (
-                <Pressable key={a.uuid} onPress={() => setViewing(a.uuid)} style={s.photoCell}>
-                  <Image source={attSrc(a.uuid)} style={s.photo} resizeMode="cover" />
-                </Pressable>
-              ))}
-            </View>
-            {photos[0]?.by || photos[0]?.when ? (
-              <Text style={s.note}>
-                Latest by {photos[0].by || "unknown"}{photos[0].when ? ` · ${when(photos[0].when)}` : ""}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-
-        {docs.length ? (
-          <View style={s.section}>
-            <SectionLabel>Documents</SectionLabel>
-            <Card style={{ paddingVertical: 4 }}>
-              {docs.map((a, i) => (
-                <View key={a.uuid} style={[s.entry, i === docs.length - 1 && { borderBottomWidth: 0 }]}>
-                  <View style={s.entryIcon}><Icon name="receipt" size={18} color={C.ink} /></View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.entryTitle} numberOfLines={1}>{a.name || `Document${a.type ? ` (${a.type.replace(/^\./, "")})` : ""}`}</Text>
-                    <Text style={s.entrySub}>{[a.by, when(a.when)].filter(Boolean).join(" · ")}</Text>
-                  </View>
-                </View>
-              ))}
-            </Card>
-          </View>
-        ) : null}
-
         {(noteFeed.length ? true : noteList.length) ? (
           <View style={s.section}>
             <SectionLabel>Notes — latest first</SectionLabel>
@@ -268,19 +218,10 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], noteFee
           </View>
         ) : null}
 
-        {!ordered.length && !noteList.length && !noteFeed.length && !attachments.length ? (
+        {!ordered.length && !noteList.length && !noteFeed.length ? (
           <Empty>Nothing in the diary yet.</Empty>
         ) : null}
       </ScrollView>
-
-      {/* Full-screen photo viewer: tap a thumbnail, tap anywhere to close. */}
-      <Modal visible={!!viewing} transparent animationType="fade" onRequestClose={() => setViewing(null)}>
-        <Pressable style={s.viewer} onPress={() => setViewing(null)}>
-          {viewing && token ? (
-            <Image source={attSrc(viewing)} style={s.viewerImg} resizeMode="contain" />
-          ) : null}
-        </Pressable>
-      </Modal>
       </KeyboardAvoidingView>
 
       {/* Charlie retired 30 Aug 2026 - AI Assist lives on the job card. */}
@@ -322,11 +263,6 @@ const s = StyleSheet.create({
     borderRadius: R.card, padding: 12, color: C.ink, fontSize: 15, textAlignVertical: "top",
   },
   noteError: { color: C.warnChipInk, fontSize: 12.5, marginTop: 7 },
-  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  photoCell: { width: "31.5%", aspectRatio: 1, borderRadius: 10, overflow: "hidden", backgroundColor: C.panel },
-  photo: { width: "100%", height: "100%" },
-  viewer: { flex: 1, backgroundColor: "rgba(0,0,0,.92)", justifyContent: "center" },
-  viewerImg: { width: "100%", height: "85%" },
   dock: {
     paddingHorizontal: S.screen, paddingTop: 12, paddingBottom: 10,
     borderTopColor: C.line, borderTopWidth: 1,
