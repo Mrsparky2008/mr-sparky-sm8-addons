@@ -44,8 +44,15 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onTalk
   const nav = useRef({ prev, next, onSibling });
   nav.current = { prev, next, onSibling };
   const pan = useMemo(() => PanResponder.create({
-    // Claim horizontal drags only; vertical belongs to the ScrollView.
-    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+    // CAPTURE, not bubble: the ScrollView claims the gesture first otherwise
+    // and the swipe never reaches us - which is exactly what happened on the
+    // first cut ("can swipe instead of clicking next"). Horizontal drags
+    // only; anything vertical stays with the ScrollView, and taps are never
+    // intercepted at all.
+    onStartShouldSetPanResponderCapture: () => false,
+    onMoveShouldSetPanResponderCapture: (_e, g) =>
+      Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
     onPanResponderRelease: (_e, g) => {
       const { prev: p, next: n, onSibling: go } = nav.current;
       if (!go) return;

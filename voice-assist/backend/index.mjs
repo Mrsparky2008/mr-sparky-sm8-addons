@@ -655,11 +655,14 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         return respond(200, { "Content-Type": f.type, "Cache-Control": "private, max-age=86400" }, f.buf);
       }
 
-      const jobMatch = /^\/api\/job\/(\d+)$/.exec(path);
+      // Job ids are normally digits, but the claims table carries the odd
+      // hand-made row (TEST-001), and "no such route" is a useless thing to
+      // read on a job card. Accept anything id-shaped and answer honestly.
+      const jobMatch = /^\/api\/job\/([A-Za-z0-9_-]{1,40})$/.exec(path);
       if (jobMatch) {
         const index = await jobIndex();
         const job = index.find((j) => String(j.number) === jobMatch[1]);
-        if (!job) return jsonOut(404, { ok: false, error: "no such job" });
+        if (!job) return jsonOut(404, { ok: false, error: `Job ${jobMatch[1]} isn't in ServiceM8.` });
         const dossier = await buildDossier(job.uuid);
         return jsonOut(200, {
           ok: true,
