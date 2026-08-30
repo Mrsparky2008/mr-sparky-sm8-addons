@@ -70,6 +70,11 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
         return {
           ...b,
           jobs: open[b.key] ? all : all.slice(0, PER_BAND),
+          // The WHOLE category travels with a tapped job. How many rows the
+          // band happens to be showing is a display choice; once you are
+          // swiping you clearly want every job in that category, not the
+          // three that fit (Steven, 30 Aug 2026).
+          all,
           total: counts?.[b.key] ?? all.length,
         };
       }).filter((b) => b.jobs.length);
@@ -126,10 +131,8 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
                   count={b.total && b.total > b.jobs.length ? `${b.jobs.length} of ${b.total} — tap for all` : b.total}
                   onPress={() => setOpen((o) => ({ ...o, [b.key]: !o[b.key] }))}
                 />
-                {/* The whole category goes with the job, so the job card can
-                    swipe to the next one without coming back here. */}
                 {b.jobs.map((j) => (
-                  <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j, b.jobs)} hideStatus />
+                  <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j, b.all)} hideStatus />
                 ))}
               </View>
             ))}
