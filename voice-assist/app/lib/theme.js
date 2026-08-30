@@ -76,5 +76,6 @@ export function statusChip(status) {
   if (s === "completed") return { bg: "rgba(47,158,87,.16)", ink: "#6FD096" };
   if (s === "work order") return { bg: C.infoChipBg, ink: C.infoChipInk };
   if (s === "quote") return { bg: C.warnChipBg, ink: C.warnChipInk };
+  if (s === "unsuccessful") return { bg: "rgba(226,75,74,.16)", ink: "#F09595" };
   return { bg: "rgba(141,160,188,.14)", ink: C.muted };
 }

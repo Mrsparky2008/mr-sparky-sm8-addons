@@ -23,6 +23,7 @@ const BUCKETS = [
   { key: "Quote", label: "Quotes" },
   { key: "Work Order", label: "Work Order" },
   { key: "Completed", label: "Completed" },
+  { key: "Unsuccessful", label: "Unsuccessful" },
 ];
 
 export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut, onAccount, email }) {
@@ -132,17 +133,9 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
             ))}
             {jobs.length === 0 ? <Empty>No recent jobs.</Empty> : null}
 
-            <Pressable onPress={onAllJobs}>
-              <Card style={{ marginTop: 4 }}>
-                <View style={s.allRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.allTitle}>All jobs</Text>
-                    <Text style={T.small}>the archive — search finds anything, ever</Text>
-                  </View>
-                  <Text style={s.chev}>›</Text>
-                </View>
-              </Card>
-            </Pressable>
+            {/* The All jobs door retired 30 Aug 2026 (Steven: "we don't need
+                All jobs") — the bands ARE the archive now: tap one and the
+                whole category unfolds. Search reaches everything else. */}
           </>
         )}
       </ScrollView>
