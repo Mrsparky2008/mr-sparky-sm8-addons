@@ -18,6 +18,30 @@ import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readRece
 import { verifyIdToken, bearer } from "./auth.mjs";
 import { authorize, DENIED, SUBBIE_EMPTY_JOBS, subbieJobs } from "./authz.mjs";
 
+/**
+ * The claims table freezes a job's status at claim time, so a tech's
+ * Completed bucket sat empty for ever (Steven, 30 Aug 2026: "completed jobs
+ * are removed for steven.sukar"). Re-stamp each job with ServiceM8's CURRENT
+ * status off the job index; if the index is unavailable the frozen statuses
+ * stand rather than the list failing.
+ */
+async function freshStatuses(result) {
+  if (!result?.ok || !result.matches?.length) return result;
+  try {
+    const index = await jobIndex();
+    const statusOf = new Map(index.map((j) => [String(j.number), j.status]));
+    const counts = {};
+    const matches = result.matches.map((m) => {
+      const status = statusOf.get(String(m.job_number)) || m.status;
+      counts[status] = (counts[status] || 0) + 1;
+      return { ...m, status };
+    });
+    return { ...result, matches, counts };
+  } catch {
+    return result;
+  }
+}
+
 const polly = new PollyClient({});
 const transcribe = new TranscribeStreamingClient({});
 const PIN = process.env.APP_PIN || "";
@@ -578,7 +602,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         // Their work tab is the jobs they ACCEPTED - read from the network's
         // own jobs table, which stamps the accepter's Telegram ID at claim
         // time. Everything else on this backend stays admin-only.
-        if (path === "/api/jobs") return jsonOut(200, await subbieJobs(az.telegramId));
+        if (path === "/api/jobs") return jsonOut(200, await freshStatuses(await subbieJobs(az.telegramId)));
         return jsonOut(403, DENIED);
       }
 
@@ -593,7 +617,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         // still reaches the whole business - finding a job is an admin move,
         // browsing is a tech move.
         if (!query && az.telegramId) {
-          return jsonOut(200, await subbieJobs(az.telegramId));
+          return jsonOut(200, await freshStatuses(await subbieJobs(az.telegramId)));
         }
         if (!query) {
           // The app buckets these under ServiceM8's own names, so send the
