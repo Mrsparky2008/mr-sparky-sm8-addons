@@ -42,5 +42,11 @@ export default ({ config }) => ({
     // Two identical dark apps on one home screen is a mistake waiting to happen,
     // and the mistake would be approving a real claim from a test build.
     variant: IS_DEV ? "dev" : "production",
+    // The iOS build number for the current runtime. EAS numbers builds
+    // remotely, so the JS bundle cannot read it natively without
+    // expo-application (not in build 29). Kept honest by hand: runtime
+    // 2.2.0 = build 29. BUMP THIS whenever a new native build ships,
+    // in the same commit that bumps version/runtime in app.json.
+    iosBuild: "29",
   },
 });

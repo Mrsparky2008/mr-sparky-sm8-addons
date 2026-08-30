@@ -27,7 +27,11 @@ export const PORTAL = "https://portal.mrsparky.com.au";
 // of tonight's five updates am I actually on".
 import * as Updates from "expo-updates";
 
-const build = Constants.nativeBuildVersion ? ` (${Constants.nativeBuildVersion})` : "";
+// nativeBuildVersion comes back null on the shipped builds, so the number
+// is stamped into app.config.js extra per runtime (Steven, 30 Aug 2026:
+// "can we have the build no or maybe both").
+const buildNo = Constants.nativeBuildVersion || Constants.expoConfig?.extra?.iosBuild;
+const build = buildNo ? ` (${buildNo})` : "";
 const ota = Updates.createdAt
   ? ` · update ${new Date(Updates.createdAt).toLocaleDateString("en-AU")} ${new Date(Updates.createdAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}`
   : " · embedded";
