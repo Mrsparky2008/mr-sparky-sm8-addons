@@ -107,6 +107,16 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
   const declared = data?.ownMaterial?.[String(jobNumber)];
   const total = rows.reduce((s2, r) => s2 + (Number(r.amountIncGst) || 0), 0)
     + (Number(declared?.amountIncGst) || 0);
+  // Material bought on the MR SPARKY account, entered by the office in the
+  // expense sheet. It was always in the statement payload (meta) and always
+  // came off the job's gross — but this screen said "nothing filed", which
+  // read as pay docked by invisible costs (Steven, 30 Aug 2026: "where is
+  // it recorded?").
+  const meta = data?.meta?.[String(jobNumber)];
+  const sheetLines = meta?.materials || [];
+  const sheetTotal = sheetLines.length
+    ? sheetLines.reduce((s2, l) => s2 + (Number(l.amountIncGst) || 0), 0)
+    : (Number(meta?.expenseIncGst) || 0);
 
   return (
     <View style={{ flex: 1 }}>
@@ -163,14 +173,44 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
             </View>
           ) : null}
 
-          {!rows.length && !declared ? (
+          {sheetTotal > 0 ? (
+            <View>
+              <SectionLabel>Mr Sparky account — office sheet</SectionLabel>
+              <Card>
+                {sheetLines.length ? sheetLines.map((l, i) => (
+                  <View key={i} style={[s.row, i === sheetLines.length - 1 && s.rowLast]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.supplier} numberOfLines={1}>{l.supplier || "Supplier"}</Text>
+                      <Text style={s.sub}>{[l.date, l.invoice].filter(Boolean).join(" · ")}</Text>
+                    </View>
+                    <Text style={[s.amount, mono]}>{money(l.amountIncGst)}</Text>
+                  </View>
+                )) : (
+                  <View style={[s.row, s.rowLast]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.supplier}>Materials total</Text>
+                      <Text style={s.sub}>entered by the office, no line detail yet</Text>
+                    </View>
+                    <Text style={[s.amount, mono]}>{money(sheetTotal)}</Text>
+                  </View>
+                )}
+              </Card>
+              <Text style={s.sheetNote}>
+                Bought on the company account and entered by the office — comes off the
+                job's gross before your rate, not out of your pocket.
+              </Text>
+            </View>
+          ) : null}
+
+          {!rows.length && !declared && !(sheetTotal > 0) ? (
             <Empty>Nothing filed on this job yet.</Empty>
-          ) : (
+          ) : null}
+          {rows.length || declared ? (
             <View style={s.totalRow}>
-              <Text style={s.totalLabel}>Total material inc GST</Text>
+              <Text style={s.totalLabel}>Your material inc GST</Text>
               <Text style={[s.totalValue, mono]}>{money(total)}</Text>
             </View>
-          )}
+          ) : null}
         </ScrollView>
       )}
 
@@ -222,6 +262,7 @@ const s = StyleSheet.create({
   rowLast: { borderBottomWidth: 0 },
   supplier: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
   sub: { color: C.muted, fontSize: 11.5, marginTop: 2 },
+  sheetNote: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
   amount: { color: C.ink, fontSize: 15, fontWeight: "800" },
   totalRow: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4, marginTop: 2 },
   totalLabel: { ...T.small },
