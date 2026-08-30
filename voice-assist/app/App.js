@@ -137,6 +137,15 @@ function Shell() {
     });
   }, [tab]);
 
+  // Swap the screen you are on for a sibling - swiping from one job to the
+  // next must not stack up twenty screens for Back to unwind.
+  const replaceTop = useCallback((screen) => {
+    setStacks((s) => {
+      const cur = Array.isArray(s[tab]) ? s[tab] : [s[tab]];
+      return { ...s, [tab]: [...cur.slice(0, -1), screen] };
+    });
+  }, [tab]);
+
   const resetTab = useCallback((which) => {
     setStacks((s) => ({ ...s, [which]: [ROOTS[which]] }));
   }, []);
@@ -340,33 +349,41 @@ function Shell() {
       <View style={{ flex: 1 }}>
         {/* ---- Work ------------------------------------------------------ */}
         <View style={[s.fill, tab !== "work" && s.hidden]} pointerEvents={tab === "work" ? "auto" : "none"}>
-          {top?.name === "work" || tab !== "work" ? (
-            <View style={{ flex: 1 }}>
-              <View style={s.segment}>
-                <Segment
-                  options={[{ key: "jobs", label: "Jobs" }, { key: "today", label: "Today" }]}
-                  value={workView}
-                  onChange={setWorkView}
-                />
-              </View>
-              {workView === "jobs" ? (
-                <Jobs
-                  email={email}
-                  onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
-                  onTalk={openCharlie}
-                  onDiary={() => setWorkView("today")}
-                  onAllJobs={() => push({ name: "alljobs" })}
-                  onSignOut={handleSignOut}
-                  onAccount={() => setAccount(true)}
-                />
-              ) : (
-                <Diary
-                  onTalk={openCharlie}
-                  onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
-                />
-              )}
+          {/* Kept MOUNTED behind pushed screens, only hidden - so coming back
+              from a job lands on the same list, scrolled where you left it,
+              with the same category still open (Steven, 30 Aug 2026: "when I
+              click back it returns to home"). Unmounting threw all of that
+              away every time. */}
+          <View
+            style={[{ flex: 1 }, top?.name !== "work" && s.hidden]}
+            pointerEvents={top?.name === "work" ? "auto" : "none"}
+          >
+            <View style={s.segment}>
+              <Segment
+                options={[{ key: "jobs", label: "Jobs" }, { key: "today", label: "Today" }]}
+                value={workView}
+                onChange={setWorkView}
+              />
             </View>
-          ) : null}
+            {workView === "jobs" ? (
+              <Jobs
+                email={email}
+                onOpenJob={(j, siblings) => push({
+                  name: "job", job: asJob(j), siblings: (siblings || []).map(asJob).filter(Boolean),
+                })}
+                onTalk={openCharlie}
+                onDiary={() => setWorkView("today")}
+                onAllJobs={() => push({ name: "alljobs" })}
+                onSignOut={handleSignOut}
+                onAccount={() => setAccount(true)}
+              />
+            ) : (
+              <Diary
+                onTalk={openCharlie}
+                onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
+              />
+            )}
+          </View>
 
           {top?.name === "alljobs" ? (
             <View style={s.fill}>
@@ -378,6 +395,8 @@ function Shell() {
             <View style={s.fill}>
               <JobCard
                 jobNumber={top.job.job_number}
+                siblings={top.siblings}
+                onSibling={(j) => replaceTop({ name: "job", job: j, siblings: top.siblings })}
                 onBack={pop}
                 onTalk={openCharlie}
                 onJobDiary={(payload) => push({ name: "jobdiary", job: top.job, ...payload })}

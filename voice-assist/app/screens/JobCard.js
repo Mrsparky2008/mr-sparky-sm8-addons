@@ -2,8 +2,8 @@
 // at the top with the phone right there, then value rows you can drill into,
 // then labelled sections. Steven moves between the two apps all day; they
 // should read the same way even though this one is dark.
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Linking, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Empty, Header, Row, SectionLabel, StatusChip } from "../components/ui";
 import Icon from "../components/icons";
 import { C, R, S, T, money, mono, oneLine } from "../lib/theme";
@@ -27,10 +27,32 @@ function parseContacts(list) {
     .filter((c, i, all) => all.findIndex((o) => o.name === c.name && o.phone === c.phone) === i);
 }
 
-export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddReceipt, onMaterials }) {
+export default function JobCard({ jobNumber, siblings, onSibling, onBack, onTalk, onJobDiary, onAddReceipt, onMaterials }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [showBilling, setShowBilling] = useState(false);
+
+  // Swipe left/right through the category you came from, so working a list
+  // of quotes doesn't mean Back-tap-Back-tap (Steven, 30 Aug 2026). Arrows
+  // sit in the header too - a gesture nobody can see is a feature nobody uses.
+  const list = Array.isArray(siblings) ? siblings : [];
+  const at = list.findIndex((j) => String(j?.job_number) === String(jobNumber));
+  const prev = at > 0 ? list[at - 1] : null;
+  const next = at >= 0 && at < list.length - 1 ? list[at + 1] : null;
+  // The handlers are read through a ref so the responder, created once,
+  // never goes stale on the job it was born with.
+  const nav = useRef({ prev, next, onSibling });
+  nav.current = { prev, next, onSibling };
+  const pan = useMemo(() => PanResponder.create({
+    // Claim horizontal drags only; vertical belongs to the ScrollView.
+    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+    onPanResponderRelease: (_e, g) => {
+      const { prev: p, next: n, onSibling: go } = nav.current;
+      if (!go) return;
+      if (g.dx < -60 && n) go(n);
+      else if (g.dx > 60 && p) go(p);
+    },
+  }), []);
 
   useEffect(() => {
     let dead = false;
@@ -49,8 +71,19 @@ export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddRe
   const bookings = data?.bookings || [];
 
   return (
-    <View style={s.screen}>
+    <View style={s.screen} {...pan.panHandlers}>
       <Header title={`Job #${jobNumber}`} onBack={onBack} />
+      {list.length > 1 ? (
+        <View style={s.pager}>
+          <Pressable onPress={prev ? () => onSibling(prev) : undefined} hitSlop={10} style={s.pagerBtn}>
+            <Text style={[s.pagerText, !prev && s.pagerOff]}>‹ Previous</Text>
+          </Pressable>
+          <Text style={s.pagerCount}>{at + 1} of {list.length}</Text>
+          <Pressable onPress={next ? () => onSibling(next) : undefined} hitSlop={10} style={s.pagerBtn}>
+            <Text style={[s.pagerText, !next && s.pagerOff]}>Next ›</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={s.list}>
         {error ? (
           <Empty>{error}</Empty>
@@ -204,6 +237,14 @@ export default function JobCard({ jobNumber, onBack, onTalk, onJobDiary, onAddRe
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.bg },
   list: { paddingHorizontal: S.screen, paddingBottom: 20 },
+  pager: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: S.screen, paddingBottom: 10,
+  },
+  pagerBtn: { minHeight: 32, justifyContent: "center" },
+  pagerText: { color: C.brand, fontSize: 13.5, fontWeight: "700" },
+  pagerOff: { color: C.line },
+  pagerCount: { color: C.muted, fontSize: 11.5, fontWeight: "600" },
   card: { marginBottom: S.gap },
   topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   name: { color: C.ink, fontSize: 17, fontWeight: "800", flex: 1 },

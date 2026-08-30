@@ -113,7 +113,7 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
             {jobs.length === 0 ? (
               <Empty>Nothing matching “{q.trim()}”.</Empty>
             ) : (
-              jobs.map((j) => <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} />)
+              jobs.map((j) => <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j, jobs)} />)
             )}
           </>
         ) : (
@@ -126,8 +126,10 @@ export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut,
                   count={b.total && b.total > b.jobs.length ? `${b.jobs.length} of ${b.total} — tap for all` : b.total}
                   onPress={() => setOpen((o) => ({ ...o, [b.key]: !o[b.key] }))}
                 />
+                {/* The whole category goes with the job, so the job card can
+                    swipe to the next one without coming back here. */}
                 {b.jobs.map((j) => (
-                  <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j)} hideStatus />
+                  <JobRow key={j.job_uuid || j.job_number} job={j} onPress={() => onOpenJob(j, b.jobs)} hideStatus />
                 ))}
               </View>
             ))}
