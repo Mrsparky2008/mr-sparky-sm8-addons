@@ -393,6 +393,8 @@ function Shell() {
                 jobNumber={top.job.job_number}
                 bookings={top.bookings}
                 notes={top.notes}
+                noteFeed={top.noteFeed}
+                attachments={top.attachments}
                 timeOnSite={top.timeOnSite}
                 onAddReceipt={() => push({ name: "jobreceipt", jobNumber: top.job.job_number })}
                 onTalk={() => openCharlie(top.job)}

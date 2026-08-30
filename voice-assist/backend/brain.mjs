@@ -1135,13 +1135,14 @@ export async function staffList() {
 }
 
 export async function buildDossier(uuid) {
-  const [j, contacts, notes, acts, mats, staff] = await Promise.all([
+  const [j, contacts, notes, acts, mats, staff, atts] = await Promise.all([
     sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),
     sm8("GET", "/jobcontact.json"),
     sm8("GET", `/note.json?%24filter=related_object_uuid%20eq%20'${encodeURIComponent(uuid)}'`),
     sm8("GET", "/jobactivity.json?%24filter=active%20eq%20'1'"),
     sm8("GET", `/jobmaterial.json?%24filter=job_uuid%20eq%20'${encodeURIComponent(uuid)}'`),
     getStaff().catch(() => []),
+    sm8("GET", `/attachment.json?%24filter=related_object_uuid%20eq%20'${encodeURIComponent(uuid)}'`).catch(() => ({ body: [] })),
   ]);
   const job = j.body || {};
   return {
@@ -1171,6 +1172,44 @@ export async function buildDossier(uuid) {
     billing: toArray(mats.body).filter((m) => String(m.active) === "1" || m.active === 1)
       .map((m) => ({ name: m.name, qty: Number(m.quantity), price: Number(m.price) })),
     notes: toArray(notes.body).slice(-6).map((n) => String(n.note || "").replace(/\s+/g, " ").slice(0, 160)),
+    // The FULL note history with who-and-when, newest first — the app's
+    // diary matches ServiceM8's own now (Steven, 30 Aug 2026: "the diaries
+    // don't match"). `notes` above stays as-is: it feeds the LLM prompt.
+    noteFeed: toArray(notes.body)
+      .map((n) => ({
+        note: String(n.note || "").slice(0, 1200),
+        when: n.create_date || n.edit_date || "",
+        by: staffName(staff, n.created_by_staff_uuid || n.create_by_staff_uuid) || "",
+      }))
+      .sort((a, b) => String(b.when).localeCompare(String(a.when))),
+    // Every active attachment: photos render as thumbnails through
+    // GET /api/attachment/<uuid>, PDFs (quotes, forms) list by name.
+    attachments: toArray(atts.body)
+      .filter((a) => String(a.active) === "1" || a.active === 1)
+      .map((a) => {
+        const type = String(a.file_type || "").toLowerCase();
+        return {
+          uuid: a.uuid,
+          name: a.attachment_name || "",
+          type,
+          photo: /jpe?g|png|heic|heif|gif|webp/.test(type),
+          when: a.timestamp || a.edit_date || "",
+          by: staffName(staff, a.created_by_staff_uuid) || "",
+        };
+      })
+      .sort((a, b) => String(b.when).localeCompare(String(a.when))),
+  };
+}
+
+/** The raw bytes of one SM8 attachment, for the app to render. */
+export async function fetchAttachmentFile(uuid) {
+  const res = await fetch(`${SM8_BASE}/attachment/${encodeURIComponent(uuid)}.file`, {
+    headers: { "X-Api-Key": API_KEY },
+  });
+  if (!res.ok) return null;
+  return {
+    buf: Buffer.from(await res.arrayBuffer()),
+    type: res.headers.get("content-type") || "application/octet-stream",
   };
 }
 

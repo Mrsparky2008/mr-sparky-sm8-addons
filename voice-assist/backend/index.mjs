@@ -14,7 +14,7 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
-import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList } from "./brain.mjs";
+import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList, fetchAttachmentFile } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
 import { authorize, DENIED, SUBBIE_EMPTY_JOBS, subbieJobs } from "./authz.mjs";
 
@@ -644,6 +644,15 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         }
         const result = await executeTool("search_jobs", { query });
         return jsonOut(200, { ok: true, ...result });
+      }
+
+      // Diary photos and PDFs. SM8's file endpoint needs the API key, so the
+      // app fetches through here with its normal sign-in.
+      const attMatch = /^\/api\/attachment\/([0-9a-fA-F-]{10,})$/.exec(path);
+      if (attMatch) {
+        const f = await fetchAttachmentFile(attMatch[1]);
+        if (!f) return jsonOut(404, { ok: false, error: "no such attachment" });
+        return respond(200, { "Content-Type": f.type, "Cache-Control": "private, max-age=86400" }, f.buf);
       }
 
       const jobMatch = /^\/api\/job\/(\d+)$/.exec(path);
