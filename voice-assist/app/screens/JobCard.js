@@ -63,6 +63,13 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onTalk
 
   useEffect(() => {
     let dead = false;
+    // Swiping does NOT remount this screen, so last job's data would sit on
+    // screen under the new job's number until the fetch came back - reading
+    // as the wrong money against the wrong address (Steven, 30 Aug 2026:
+    // "when I swipe it keeps the previous data"). Clear first, always.
+    setData(null);
+    setError("");
+    setShowBilling(false);
     fetchJob(jobNumber)
       .then((d) => { if (!dead) setData(d); })
       .catch((e) => { if (!dead) setError(e.message || "Couldn't load this job"); });
