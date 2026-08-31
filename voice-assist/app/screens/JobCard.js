@@ -139,7 +139,12 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onTalk
                 <View style={s.billing}>
                   {lines.map((l, i) => (
                     <View key={i} style={s.billRow}>
-                      <Text style={s.billName} numberOfLines={2}>{l.name}</Text>
+                      {/* No line clamp. A billing line IS the quote wording -
+                          clamping it to two lines cut scope text mid-word at
+                          roughly 50 characters and read as ServiceM8 chopping
+                          the field (Steven, 31 Aug 2026). Nothing was ever
+                          lost: ServiceM8 stores these up to 1,000+ chars. */}
+                      <Text style={s.billName}>{l.name}</Text>
                       <Text style={[s.billPrice, mono]}>
                         {money((Number(l.qty) > 0 ? Number(l.qty) : 1) * (Number(l.price) || 0))}
                       </Text>
