@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "AI Assist",
+    "name": "Mr Sparky",
     "slug": "mr-sparky-ai-assistant",
     "owner": "mr_sparky",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "scheme": "mrsparky-aiassist",
     "extra": {
       "eas": {
@@ -55,7 +55,14 @@
         }
       ],
       "expo-asset",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "AI Assist uses the camera to photograph receipts and job photos.",
+          "photosPermission": "AI Assist can attach photos from your library to receipts and job cards."
+        }
+      ]
     ],
     "runtimeVersion": {
       "policy": "appVersion"

@@ -14,8 +14,33 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws-sdk/client-transcribe-streaming";
-import { runTurn, jobIndex, buildDossier, executeTool } from "./brain.mjs";
+import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList, fetchAttachmentFile } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
+import { authorize, DENIED, SUBBIE_EMPTY_JOBS, subbieJobs } from "./authz.mjs";
+
+/**
+ * The claims table freezes a job's status at claim time, so a tech's
+ * Completed bucket sat empty for ever (Steven, 30 Aug 2026: "completed jobs
+ * are removed for steven.sukar"). Re-stamp each job with ServiceM8's CURRENT
+ * status off the job index; if the index is unavailable the frozen statuses
+ * stand rather than the list failing.
+ */
+async function freshStatuses(result) {
+  if (!result?.ok || !result.matches?.length) return result;
+  try {
+    const index = await jobIndex();
+    const statusOf = new Map(index.map((j) => [String(j.number), j.status]));
+    const counts = {};
+    const matches = result.matches.map((m) => {
+      const status = statusOf.get(String(m.job_number)) || m.status;
+      counts[status] = (counts[status] || 0) + 1;
+      return { ...m, status };
+    });
+    return { ...result, matches, counts };
+  } catch {
+    return result;
+  }
+}
 
 const polly = new PollyClient({});
 const transcribe = new TranscribeStreamingClient({});
@@ -127,17 +152,60 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
     if (method === "POST" && path === "/llm/chat/completions") {
       const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
       if (!LLM_TOKEN || headers["authorization"] !== `Bearer ${LLM_TOKEN}`) {
+        // Silent before. If this token ever drifts out of step with the Vapi
+        // credential, every turn 401s and the call simply goes quiet — the
+        // exact symptom, with nothing anywhere saying so.
+        console.warn(`llm bridge: REJECTED — ${LLM_TOKEN ? "token mismatch" : "LLM_TOKEN not set"}`);
         return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ error: "unauthorized" }));
       }
       let body = {};
       try {
         body = JSON.parse(event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf-8") : event.body || "{}");
       } catch {}
+      // A successful turn used to log NOTHING, so "Charlie isn't answering" and
+      // "Charlie was never asked" looked identical from CloudWatch. That cost
+      // an evening on a fault that turned out not to be in this Lambda at all.
+      console.log(`llm bridge: turn in — ${(body.messages || []).length} messages, call ${body.call?.id || "(none)"}`);
 
       // Caller gate: this brain can WRITE to ServiceM8, and the phone number is
       // public-facing (Henri's Text-us line). Only allowlisted callers get the
       // assistant; anyone else gets a polite redirect. Calls with no caller
       // number (dashboard/web tests) pass — they're already auth-gated above.
+      // App and web calls carry no customer.number, so the caller allowlist
+      // below never sees them. They must instead carry the user's SIGNED
+      // Cognito token in variableValues - VAPI passes those through untouched,
+      // and a signature cannot be forged, so verifying it here is real auth.
+      // Only admins get Charlie: the brain holds ServiceM8 write tools.
+      // (Phone calls keep the ALLOWED_CALLERS gate below, unchanged.)
+      const isPhoneCall = Boolean(body.call?.customer?.number);
+      if (!isPhoneCall) {
+        let voiceOk = false;
+        try {
+          const vt = body.call?.assistantOverrides?.variableValues?.idToken;
+          if (vt) {
+            const vwho = await verifyIdToken(vt);
+            voiceOk = (await authorize(vwho.email)).level === "admin";
+          }
+        } catch {}
+        if (!voiceOk) {
+          console.warn("llm bridge: REJECTED app/web call without an admin token");
+          const s3 = awslambda.HttpResponseStream.from(responseStream, {
+            statusCode: 200, headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+          });
+          const rid3 = "chatcmpl-" + Date.now().toString(36);
+          const rchunk3 = (delta, finish = null) => sse(s3, {
+            id: rid3, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000),
+            model: "ai-assist-brain", choices: [{ index: 0, delta, finish_reason: finish }],
+          });
+          rchunk3({ role: "assistant" });
+          rchunk3({ content: "Sorry - Charlie is only available to the Mr Sparky team. If you have just been approved, close the app and open it again." });
+          rchunk3({}, "stop");
+          s3.write("data: [DONE]\n\n");
+          s3.end();
+          return;
+        }
+      }
+
       const caller = String(body.call?.customer?.number || "").replace(/[\s()-]/g, "");
       const allowed = (process.env.ALLOWED_CALLERS || "").split(",").map((n) => n.trim()).filter(Boolean);
       if (caller && allowed.length && !allowed.includes(caller)) {
@@ -160,14 +228,22 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
 
       const rawMessages = Array.isArray(body.messages) ? body.messages : [];
 
-      // The app pre-anchors: when Charlie is opened from a job card it injects
-      // a system line naming the job, so the conversation starts where the user
-      // already is instead of asking which job we're on.
-      const appJob = rawMessages
-        .filter((m) => m.role === "system" && typeof m.content === "string" && m.content.startsWith("APP_CONTEXT:"))
-        .map((m) => /job\s+(\d+)/i.exec(m.content)?.[1])
-        .filter(Boolean)
-        .pop();
+      // The app pre-anchors: when Charlie is opened from a job card the job
+      // number arrives as a variableValue on the call — Vapi passes those
+      // straight through to this bridge with no validation of its own. (An
+      // earlier version put an APP_CONTEXT system line in a model override;
+      // Vapi 400s any model override without a provider from its list, which
+      // killed the whole call. The message-scan stays as a fallback.)
+      const appJob = body.call?.assistantOverrides?.variableValues?.jobNumber
+        || rawMessages
+          .filter((m) => m.role === "system" && typeof m.content === "string" && m.content.startsWith("APP_CONTEXT:"))
+          .map((m) => /job\s+(\d+)/i.exec(m.content)?.[1])
+          .filter(Boolean)
+          .pop();
+      // One conversation, two mouths: what was said by dictation before this
+      // call started rides in the same way the job does, and runTurn treats
+      // it as the same conversation — because it is.
+      const recap = body.call?.assistantOverrides?.variableValues?.recap || null;
 
       // Vapi speaks OpenAI chat format; the brain wants {role, text} pairs and
       // supplies its own system prompt, so system messages are dropped.
@@ -203,7 +279,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
             if (found?.job?.uuid) anchorIn = { ...found.job };
           } catch (err) { console.error("app pre-anchor failed:", err); }
         }
-        const { anchor } = await runTurn(messages, async (delta) => chunk({ content: delta }), { anchor: anchorIn });
+        const { anchor } = await runTurn(messages, async (delta) => chunk({ content: delta }), { anchor: anchorIn, recap });
         rememberAnchor(callId, anchor);
         chunk({}, "stop");
       } catch (err) {
@@ -240,7 +316,13 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       // The app stopped carrying a PIN once it grew a real sign-in screen.
       let authed = Boolean(PIN) && headers["x-app-pin"] === PIN;
       if (!authed && bearer(headers)) {
-        try { await verifyIdToken(bearer(headers)); authed = true; } catch {}
+        // Charlie carries ServiceM8 write tools on the master key, so a token
+        // being genuine is not enough - it must belong to an admin. A subbie
+        // or a demo signup asking Charlie for "all jobs" was the leak.
+        try {
+          const who = await verifyIdToken(bearer(headers));
+          authed = (await authorize(who.email)).level === "admin";
+        } catch {}
       }
       if (!authed) {
         return respond(401, { "Content-Type": "application/json" }, JSON.stringify({ ok: false, error: "bad pin" }));
@@ -251,6 +333,20 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       } catch {}
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const wantAudio = body.audio !== false;
+
+      // Dictation opened from a job card sends the job number along — same
+      // pre-anchor the voice bridge does, so Charlie never asks "which job?"
+      // about the job whose chip is on screen. (Found live, 9 Aug: the chip
+      // said #167598 and Charlie said no job was open — this route never got
+      // told.)
+      let anchorIn = null;
+      const appJob = String(body.jobNumber || "").trim();
+      if (appJob) {
+        try {
+          const found = await executeTool("find_job", { job_number: appJob });
+          if (found?.job?.uuid) anchorIn = { ...found.job };
+        } catch (err) { console.error("chat pre-anchor failed:", err); }
+      }
 
       const stream = awslambda.HttpResponseStream.from(responseStream, {
         statusCode: 200,
@@ -283,6 +379,12 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
           sentenceBuf += delta;
           // Flush on sentence end (or long clause) — keeps latency low.
           if (/[.!?]["')\]]?\s$/.test(sentenceBuf) || /\n/.test(sentenceBuf) || sentenceBuf.length > 180) flush(true);
+        }, {
+          anchor: anchorIn,
+          // Quote lines go down the same pipe as the words, tagged, so the
+          // dictation screen can render the draft instead of being told it
+          // is already showing.
+          onDraft: (lines) => sse(stream, { t: "draft", lines }),
         });
         flush(true);
         await audioChain;
@@ -294,6 +396,177 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       stream.end();
       return;
     }
+    // ---- Native app writes ------------------------------------------------
+    // Two, and deliberately only two — Steven's scope line (2026-08-06): the
+    // app is Charlie's cockpit plus the money loop, not an SM8 replacement.
+    // Both write INTO ServiceM8 itself; the app never keeps its own truth.
+    if (method === "POST" && path.startsWith("/api/job/")) {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const jsonOut = (status, body) => respond(status, {
+        "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      }, JSON.stringify(body));
+
+      let who;
+      try {
+        who = await verifyIdToken(bearer(headers));
+      } catch {
+        return jsonOut(401, { ok: false, error: "not signed in" });
+      }
+      // Writes ride the master SM8 key, so only admins may make them.
+      if ((await authorize(who.email)).level !== "admin") {
+        return jsonOut(403, DENIED);
+      }
+
+      // Everything the backend writes rides the one SM8 API key, so SM8
+      // attributes it all to the bot account. The stamp puts the real author
+      // on the record — from the VERIFIED token, not from anything the app
+      // sends, so it can't be forged by a client.
+      const stamp = `Mr Sparky App (${who.name || who.email.split("@")[0]})`;
+
+      const m = /^\/api\/job\/(\d+)\/(note|receipt-copy|task)$/.exec(path);
+      if (!m) return jsonOut(404, { ok: false, error: "no such route" });
+
+      const index = await jobIndex();
+      const job = index.find((j) => String(j.number) === m[1]);
+      if (!job) return jsonOut(404, { ok: false, error: "no such job" });
+
+      let payload = {};
+      try {
+        payload = JSON.parse(event.isBase64Encoded
+          ? Buffer.from(event.body || "", "base64").toString("utf8")
+          : event.body || "{}");
+      } catch {
+        return jsonOut(400, { ok: false, error: "bad request body" });
+      }
+
+      // A task, because a note nobody is assigned to is a note nobody reads.
+      // The three notes ever flagged action_required in this account date back
+      // to October 2025 and none has been completed; every job queue has no
+      // subscribed staff. A task has an owner and a tick box.
+      if (m[2] === "task") {
+        const title = String(payload.name || "").trim();
+        if (!title) return jsonOut(400, { ok: false, error: "The task needs a title." });
+        const r = await createTask({
+          job_uuid: job.uuid,
+          name: title,
+          details: `${payload.details ? `${String(payload.details).trim()}\n\n` : ""}Raised by ${stamp}.`,
+          assigneeName: payload.assignee,
+          dueDate: payload.dueDate,
+        });
+        if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+        return jsonOut(200, { ok: true, task_uuid: r.task_uuid, assignedTo: r.assignedTo });
+      }
+
+      if (m[2] === "note") {
+        const note = String(payload.note || "").trim();
+        if (!note) return jsonOut(400, { ok: false, error: "The note is empty." });
+        const r = await executeTool("add_note", { job_uuid: job.uuid, note: `${stamp}: ${note}` });
+        if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+        return jsonOut(200, { ok: true });
+      }
+
+      // Receipt record-copy: the portal keeps the working copy that gets
+      // reimbursed; this puts the same photo on the SM8 job card as the
+      // paper trail. Caption becomes the attachment name.
+      const bytes = Buffer.from(String(payload.imageB64 || ""), "base64");
+      if (!bytes.length) return jsonOut(400, { ok: false, error: "No image supplied." });
+      if (bytes.length > 5 * 1024 * 1024) return jsonOut(413, { ok: false, error: "Photo too large." });
+      // SM8 caps the attachment name at 120. Trim the CAPTION to fit, never
+      // the stamp — the stamp is the record-keeping half, and a long supplier
+      // name was quietly eating it off the end.
+      const room = Math.max(12, 120 - stamp.length - 3);
+      const caption = String(payload.caption || "Receipt").slice(0, room);
+      const r = await attachFileToJob({
+        job_uuid: job.uuid,
+        name: `${caption} — ${stamp}`,
+        fileType: payload.fileType === ".png" ? ".png" : ".jpg",
+        contentType: payload.fileType === ".png" ? "image/png" : "image/jpeg",
+        bytes,
+      });
+      if (r?.error) return jsonOut(502, { ok: false, error: r.error });
+      return jsonOut(200, { ok: true, attachment_uuid: r.attachment_uuid });
+    }
+
+    // ---- Read a receipt ----------------------------------------------------
+    // The photo goes to Claude, the fields come back, the human confirms them.
+    // Nothing is filed here: this route writes to nothing and returns only what
+    // was legible on the paper, plus — if the docket quotes a job number — what
+    // ServiceM8 says that job actually is, so the app can flag a mismatch with
+    // the job the receipt is being filed against.
+    if (method === "POST" && path === "/api/receipt/read") {
+      const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      const jsonOut = (status, body) => respond(status, {
+        "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      }, JSON.stringify(body));
+
+      try {
+        const who = await verifyIdToken(bearer(headers));
+        if ((await authorize(who.email)).level !== "admin") {
+          return jsonOut(403, DENIED);
+        }
+      } catch {
+        return jsonOut(401, { ok: false, error: "not signed in" });
+      }
+
+      let payload = {};
+      try {
+        payload = JSON.parse(event.isBase64Encoded
+          ? Buffer.from(event.body || "", "base64").toString("utf8")
+          : event.body || "{}");
+      } catch {
+        return jsonOut(400, { ok: false, error: "bad request body" });
+      }
+
+      const imageB64 = String(payload.imageB64 || "");
+      if (!imageB64) return jsonOut(400, { ok: false, error: "No photo supplied." });
+      // base64 is 4 chars per 3 bytes; the Messages API caps an image at 5MB.
+      if (imageB64.length > 7 * 1024 * 1024) {
+        return jsonOut(413, { ok: false, error: "That photo is too big to read." });
+      }
+      const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+      const contentType = ALLOWED.has(payload.contentType) ? payload.contentType : "image/jpeg";
+
+      let read;
+      try {
+        read = await readReceipt({ imageB64, contentType });
+      } catch (err) {
+        console.error("receipt read failed:", err);
+        return jsonOut(502, { ok: false, error: "Couldn't read that one — type it in." });
+      }
+
+      // A number printed on a docket is a claim, not a fact. Check it against
+      // ServiceM8 before the app shows it, so an OCR misread of an account
+      // number can't masquerade as somebody else's job.
+      let docket = null;
+      if (read.jobNumber) {
+        const index = await jobIndex().catch(() => []);
+        const job = index.find((j) => String(j.number) === read.jobNumber);
+        docket = {
+          jobNumber: read.jobNumber,
+          label: read.jobNumberLabel,
+          known: !!job,
+          address: job?.address || null,
+          contact: job?.contact || null,
+          status: job?.status || null,
+        };
+      }
+
+      return jsonOut(200, {
+        ok: true,
+        receipt: {
+          supplier: read.supplier,
+          amountIncGst: read.amountIncGst,
+          date: read.date,
+          invoiceNumber: read.invoiceNumber,
+          abn: read.abn,
+        },
+        docket,
+        unreadable: read.unreadable,
+      });
+    }
+
     // ---- Native app data routes -------------------------------------------
     // The voice loop is Charlie's; these are for the screens around him — the
     // jobs list, the day diary, a job card. Signed in with the SAME Cognito
@@ -315,31 +588,81 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         return jsonOut(401, { ok: false, error: "not signed in" });
       }
 
+      // A genuine token says who they are; the portal's people list says what
+      // they may see. Every demo signup holds a genuine token, and one of them
+      // reading the whole job book is how this line got here (27 Aug 2026).
+      const az = await authorize(who.email);
+      if (az.level === "none") return jsonOut(403, DENIED);
+
       const q = event.queryStringParameters || {};
 
-      if (path === "/api/me") return jsonOut(200, { ok: true, ...who });
+      if (path === "/api/me") return jsonOut(200, { ok: true, ...who, level: az.level });
+
+      if (az.level === "subbie") {
+        // Their work tab is the jobs they ACCEPTED - read from the network's
+        // own jobs table, which stamps the accepter's Telegram ID at claim
+        // time. Everything else on this backend stays admin-only.
+        if (path === "/api/jobs") return jsonOut(200, await freshStatuses(await subbieJobs(az.telegramId)));
+        return jsonOut(403, DENIED);
+      }
+
+      // Who a note or a query can be handed to.
+      if (path === "/api/staff") return jsonOut(200, { ok: true, staff: await staffList() });
 
       if (path === "/api/jobs") {
         const query = String(q.q || "").trim();
+        // The Work tab is a TECH view for everyone, admin included: browsing
+        // shows the jobs YOU accepted, exactly like a subbie's (Steven,
+        // 30 Aug: "completed by Jason - why is it on my list?"). Searching
+        // still reaches the whole business - finding a job is an admin move,
+        // browsing is a tech move.
+        if (!query && az.telegramId) {
+          return jsonOut(200, await freshStatuses(await subbieJobs(az.telegramId)));
+        }
         if (!query) {
-          // No search yet: the most recent jobs, which is what "recents" means
-          // on a phone that has just been opened. Job numbers climb over time.
+          // The app buckets these under ServiceM8's own names, so send the
+          // most recent of EACH bucket rather than the most recent overall.
+          // Taking the top 12 by number returned almost nothing but Quotes —
+          // new enquiries arrive as quotes, so they own the high numbers, and
+          // Work Order and Completed were left empty below a long scroll.
           const index = await jobIndex();
-          const recent = [...index]
-            .sort((a, b) => Number(b.number) - Number(a.number))
-            .slice(0, 12)
-            .map((j) => ({ job_uuid: j.uuid, job_number: j.number, status: j.status, address: j.address, contact: j.contact || undefined, work: j.description ? j.description.slice(0, 90) : undefined }));
-          return jsonOut(200, { ok: true, matches: recent });
+          const BUCKETS = ["Quote", "Work Order", "Completed"];
+          const PER_BUCKET = 8;
+          const newestFirst = [...index].sort((a, b) => Number(b.number) - Number(a.number));
+          const counts = {};
+          const picked = [];
+          for (const j of newestFirst) {
+            const bucket = BUCKETS.find((b) => b === j.status);
+            if (!bucket) continue;
+            counts[bucket] = (counts[bucket] || 0) + 1;
+            if (counts[bucket] <= PER_BUCKET) picked.push(j);
+          }
+          const recent = picked.map((j) => ({ job_uuid: j.uuid, job_number: j.number, status: j.status, address: j.address, contact: j.contact || undefined, work: j.description ? j.description.slice(0, 90) : undefined }));
+          // Full totals so the bucket headers can say how many there really
+          // are — the phone counts what it was sent, which is not the truth.
+          return jsonOut(200, { ok: true, matches: recent, counts });
         }
         const result = await executeTool("search_jobs", { query });
         return jsonOut(200, { ok: true, ...result });
       }
 
-      const jobMatch = /^\/api\/job\/(\d+)$/.exec(path);
+      // Diary photos and PDFs. SM8's file endpoint needs the API key, so the
+      // app fetches through here with its normal sign-in.
+      const attMatch = /^\/api\/attachment\/([0-9a-fA-F-]{10,})$/.exec(path);
+      if (attMatch) {
+        const f = await fetchAttachmentFile(attMatch[1]);
+        if (!f) return jsonOut(404, { ok: false, error: "no such attachment" });
+        return respond(200, { "Content-Type": f.type, "Cache-Control": "private, max-age=86400" }, f.buf);
+      }
+
+      // Job ids are normally digits, but the claims table carries the odd
+      // hand-made row (TEST-001), and "no such route" is a useless thing to
+      // read on a job card. Accept anything id-shaped and answer honestly.
+      const jobMatch = /^\/api\/job\/([A-Za-z0-9_-]{1,40})$/.exec(path);
       if (jobMatch) {
         const index = await jobIndex();
         const job = index.find((j) => String(j.number) === jobMatch[1]);
-        if (!job) return jsonOut(404, { ok: false, error: "no such job" });
+        if (!job) return jsonOut(404, { ok: false, error: `Job ${jobMatch[1]} isn't in ServiceM8.` });
         const dossier = await buildDossier(job.uuid);
         return jsonOut(200, {
           ok: true,

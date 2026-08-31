@@ -6,6 +6,8 @@
 // Streaming: callers pass onDelta(text) — final-answer text streams out as it's generated
 // so TTS can start speaking the first sentence while the rest composes.
 
+import { readFileSync } from "node:fs";
+
 const SM8_BASE = "https://api.servicem8.com/api_1.0";
 const API_KEY = process.env.SM8_API_KEY;
 const CLAUDE_KEY = process.env.CLAUDE_API_KEY;
@@ -220,6 +222,24 @@ const tools = [
     },
   },
   {
+    name: "lookup_standard",
+    description:
+      "Look up what an Australian electrical standard actually says. Use this for ANY question " +
+      "about the Wiring Rules, cable selection, testing, service rules or compliance — never " +
+      "answer such a question from your own knowledge. Search by plain description " +
+      "('minimum depth for underground cable', 'RCD requirements for socket outlets') or fetch a " +
+      "clause by number. Returns clauses verbatim with their number, edition and whether that " +
+      "edition is still current.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What they want to know, in plain words" },
+        clause: { type: "string", description: "A specific clause number, e.g. 2.6.2 or 3.11.4.4" },
+        standard: { type: "string", description: "Optional: narrow to one standard, e.g. '3000' or 'NSW'" },
+      },
+    },
+  },
+  {
     name: "search_jobs",
     description:
       "Find a job WITHOUT its number — by address, suburb, customer name, or what the work is. " +
@@ -403,9 +423,49 @@ function fuzzyScore(heard, known) {
   return d <= tolerance ? 0.9 - d * 0.2 : 0;
 }
 
+
+// The standards library ships INSIDE the deployment zip rather than sitting in
+// S3: it is 1.5 MB, it changes only when a standard is replaced, and reading it
+// from S3 would put a network round trip on the critical path of a question
+// that is already the slowest thing Charlie does. Parsed once per container.
+let standardsCache = null;
+function standardsLibrary() {
+  if (standardsCache) return standardsCache;
+  try {
+    const raw = readFileSync(new URL("./standards.json", import.meta.url), "utf8");
+    const doc = JSON.parse(raw);
+    standardsCache = { documents: doc.documents || {}, clauses: doc.clauses || [] };
+    console.log(`voice: standards library loaded — ${standardsCache.clauses.length} clauses`);
+  } catch (err) {
+    console.error("standards library failed to load:", err.message);
+    standardsCache = { documents: {}, clauses: [] };
+  }
+  return standardsCache;
+}
+
 let jobCache = { at: 0, jobs: [] };
-export async function jobIndex() {
-  if (Date.now() - jobCache.at < 10 * 60 * 1000 && jobCache.jobs.length) return jobCache.jobs;
+let indexInflight = null;
+
+// ServiceM8 cannot search jobs by description, so we download every job and
+// every contact and search them ourselves. That download is expensive — ~1,800
+// jobs plus contacts — and it used to sit ON THE CRITICAL PATH: the cache
+// expired after 10 minutes and whoever asked the next question paid for the
+// rebuild while standing there waiting. Steven wore it mid-conversation on
+// 14 Aug; the log line "job index built — 1671 jobs" is stamped between his
+// question and the answer.
+//
+// Now: serve what we have and refresh behind it. FRESH is served outright,
+// USABLE is served immediately with a rebuild kicked off in the background,
+// and only a genuinely cold or ancient index makes anyone wait.
+const INDEX_FRESH_MS = 10 * 60 * 1000;      // serve, don't even think about it
+const INDEX_USABLE_MS = 6 * 60 * 60 * 1000; // serve stale, refresh behind it
+
+// Honest caveat: Lambda freezes the container once a response is returned, so
+// a background rebuild may not finish on this invocation. It resumes when the
+// container is next used, which is exactly when it is wanted. Worst case the
+// index stays stale a little longer — and searchJobs forces a rebuild when a
+// search comes back empty, so a brand-new job is never permanently invisible.
+async function buildJobIndex() {
   const [jobsRes, contactsRes] = await Promise.all([
     sm8("GET", "/job.json"),
     sm8("GET", "/jobcontact.json"),
@@ -424,18 +484,50 @@ export async function jobIndex() {
     const address = String(j.job_address || "").replace(/\s+/g, " ").trim();
     const description = String(j.job_description || "").replace(/\s+/g, " ").trim();
     const contact = contactByJob.get(j.uuid) || "";
-    const haystack = `${address} ${contact} ${description}`.toLowerCase();
+    // The job NUMBER belongs in the searchable text. It was left out, so typing
+    // a job number into the app's search fuzzy-matched those digits against
+    // street names and work descriptions, scored nothing, and answered "did you
+    // mean Mortlake?" — for a job that was sitting right there. Found on 167590.
+    const num = String(j.generated_job_id || "");
+    const haystack = `${num} ${address} ${contact} ${description}`.toLowerCase();
     jobs.push({
       uuid: j.uuid,
       number: j.generated_job_id,
       status: j.status,
       address, contact, description, haystack,
-      tokens: new Set(tokens(`${address} ${contact} ${description}`)),
+      tokens: new Set(tokens(`${num} ${address} ${contact} ${description}`)),
     });
   }
   jobCache = { at: Date.now(), jobs };
   console.log(`voice: job index built — ${jobs.length} jobs`);
   return jobs;
+}
+
+/** Kick a rebuild, at most one at a time. Callers may or may not await it. */
+function refreshIndex() {
+  if (!indexInflight) {
+    indexInflight = buildJobIndex()
+      .catch((err) => { console.error("job index refresh failed:", err.message); return jobCache.jobs; })
+      .finally(() => { indexInflight = null; });
+  }
+  return indexInflight;
+}
+
+export async function jobIndex() {
+  const age = Date.now() - jobCache.at;
+  const have = jobCache.jobs.length > 0;
+  if (have && age < INDEX_FRESH_MS) return jobCache.jobs;
+  if (have && age < INDEX_USABLE_MS) {
+    refreshIndex();          // deliberately not awaited — nobody waits for this
+    return jobCache.jobs;
+  }
+  return refreshIndex();     // cold or ancient: this one has to be waited for
+}
+
+/** Force a rebuild and wait. Used when a search finds nothing on a stale index. */
+export function rebuildJobIndex() {
+  jobCache = { at: 0, jobs: jobCache.jobs };
+  return refreshIndex();
 }
 
 const WRITE_TOOLS = new Set([
@@ -601,7 +693,9 @@ export async function executeTool(name, input) {
     );
     if (dupe) return { ok: true, skipped: "identical line already on the job" };
     const r = await sm8("POST", "/jobmaterial.json", {
-      job_uuid: jobU, name: String(input.name || "").slice(0, 500),
+      // 2,000 to match the portal's writer - ServiceM8 stores names well
+      // past 1,000 characters, so a lower cap only eats quote wording.
+      job_uuid: jobU, name: String(input.name || "").slice(0, 2000),
       quantity: qty.toFixed(2), price: price.toFixed(2), displayed_amount: price.toFixed(2), active: 1,
     });
     if (r.status < 200 || r.status >= 300) {
@@ -625,11 +719,95 @@ export async function executeTool(name, input) {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // STANDARDS
+  //
+  // The whole point of this tool is that Charlie QUOTES rather than
+  // paraphrases. A wrong job number is annoying; a wrong cable size is a
+  // fire. So it returns the clause verbatim with its number, edition and
+  // currency, and the prompt forbids answering without one.
+  //
+  // Two-stage on purpose: a keyword pass narrows ~1,900 clauses to a
+  // shortlist, then the model reads the shortlist and picks. Scoring the
+  // TITLE harder than the body matters — "underground depth" should surface
+  // "Minimum depth of cover", not every clause that mentions underground.
+  // ---------------------------------------------------------------------
+  if (name === "lookup_standard") {
+    const lib = standardsLibrary();
+    if (!lib.clauses.length) return { error: "The standards library isn't loaded." };
+
+    const wantClause = String(input.clause || "").trim();
+    const wantStd = String(input.standard || "").toLowerCase().trim();
+    const pool = wantStd
+      ? lib.clauses.filter((c) => c.std.toLowerCase().includes(wantStd))
+      : lib.clauses;
+
+    const dress = (c) => ({
+      standard: c.std, edition: c.ed, clause: c.cl, title: c.t, page: c.p,
+      currency: c.st, text: c.x,
+      currency_note: (lib.documents[c.std] || {}).detail || "",
+    });
+
+    // Asked for a clause by number: give that clause AND its children, which
+    // is what "what does 2.6.2 say" actually means when 2.6.2 is a parent
+    // whose whole body is its sub-clauses.
+    if (wantClause) {
+      const exact = pool.filter((c) => c.cl === wantClause);
+      const kids = pool.filter((c) => c.cl.startsWith(wantClause + "."));
+      const hits = [...exact, ...kids].slice(0, 12);
+      if (hits.length) return { results: hits.map(dress) };
+      return { error: `No clause ${wantClause} in the library.` };
+    }
+
+    const terms = tokens(input.query || "").filter((t) => t.length > 2);
+    if (!terms.length) return { error: "Nothing to look up" };
+    const scored = [];
+    for (const c of pool) {
+      const title = c.t.toLowerCase();
+      const body = c.x.toLowerCase();
+      let score = 0;
+      for (const t of terms) {
+        if (title.includes(t)) score += 3;
+        if (body.includes(t)) score += 1;
+      }
+      if (score > 0) scored.push({ c, score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.c.cl.localeCompare(b.c.cl));
+    const results = scored.slice(0, 12).map((h) => dress(h.c));
+    if (!results.length) {
+      return { results: [], nothing_found: true,
+               have: Object.entries(lib.documents).map(([k, v]) => k + " (" + v.status + ")") };
+    }
+    return { results };
+  }
+
   if (name === "search_jobs") {
     const index = await jobIndex();
     const q = tokens(input.query);
     const rawQ = String(input.query || "").toLowerCase();
     if (!q.length) return { error: "Nothing to search for" };
+
+    // A number typed on its own is a job number, not a word to fuzzy-match.
+    // Exact first, then the tail ("ending 590"), because that is how everyone
+    // actually says them. Fuzzy scoring on digits is meaningless — every job
+    // number in the account is six digits and within an edit or two of the next.
+    const digits = rawQ.replace(/\D/g, "");
+    if (digits && /^\d+$/.test(rawQ.trim())) {
+      const exact = index.filter((j) => String(j.number) === digits);
+      const tail = exact.length ? [] : index.filter((j) => String(j.number).endsWith(digits));
+      const hits = (exact.length ? exact : tail)
+        .sort((a, b) => Number(b.number) - Number(a.number))
+        .slice(0, 6);
+      if (hits.length) {
+        return {
+          matches: hits.map((j) => ({
+            job_uuid: j.uuid, job_number: j.number, status: j.status,
+            address: j.address, contact: j.contact || undefined,
+            work: j.description ? j.description.slice(0, 90) : undefined,
+          })),
+        };
+      }
+    }
     // Also try adjacent words glued together — "Moj Lake" is one word misheard.
     const terms = [...q];
     for (let i = 0; i < q.length - 1; i++) terms.push(q[i] + q[i + 1]);
@@ -663,6 +841,14 @@ export async function executeTool(name, input) {
       contact: j.contact || undefined,
       work: j.description ? j.description.slice(0, 90) : undefined,
     }));
+    // Before telling him it isn't there, make sure we didn't just search a
+    // stale copy. A job booked this morning would be missing from an index
+    // built before it existed, and a wrong "can't find it" sends him hunting
+    // for a job number — the exact dead end this tool exists to avoid.
+    if (!matches.length && !input._retried && Date.now() - jobCache.at > INDEX_FRESH_MS) {
+      await rebuildJobIndex();
+      return executeTool("search_jobs", { ...input, _retried: true });
+    }
     if (!matches.length) {
       // Nothing matched: offer the closest real suburbs/streets we do have, so
       // the reply is "did you mean Mortlake?" instead of "spell it for me".
@@ -773,14 +959,192 @@ export async function executeTool(name, input) {
 
 // Everything about the anchored job, fetched ONCE and carried in the prompt so
 // the assistant answers from what it already knows instead of narrating lookups.
+/**
+ * Attach a file to a job so it shows in ServiceM8's own job diary.
+ *
+ * Two-step per SM8's docs: create the Attachment record (uuid comes back in
+ * x-record-uuid), then POST the bytes as multipart to Attachment/{uuid}.file.
+ * Used for receipt record-copies — the portal keeps the working copy that gets
+ * reimbursed; this is the paper trail on the job card.
+ */
+export async function attachFileToJob({ job_uuid, name, fileType, bytes, contentType }) {
+  const rec = await sm8("POST", "/attachment.json", {
+    related_object: "job",
+    related_object_uuid: job_uuid,
+    attachment_name: String(name || "attachment").slice(0, 120),
+    file_type: fileType || ".jpg",
+    active: true,
+  });
+  if (rec.status < 200 || rec.status >= 300) {
+    return { error: `Attachment record failed: ${rec.status}` };
+  }
+  const uuid = rec.headers.get("x-record-uuid");
+  if (!uuid) return { error: "Attachment record came back without a uuid" };
+
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: contentType || "image/jpeg" }), `upload${fileType || ".jpg"}`);
+  const up = await fetch(`${SM8_BASE}/Attachment/${encodeURIComponent(uuid)}.file`, {
+    method: "POST",
+    headers: { "X-Api-Key": API_KEY, Accept: "application/json" },
+    body: form,
+  });
+  if (!up.ok) return { error: `File upload failed: ${up.status}` };
+  return { ok: true, attachment_uuid: uuid };
+}
+
+/**
+ * Read a photographed supplier docket.
+ *
+ * Steven's spec (2026-08-06): "AI can read the receipt, fill in all the
+ * details. If it doesn't have a job number, ask for it. If it has the wrong
+ * job number, flag it."
+ *
+ * So this READS and it does not decide. It returns only what is legibly on the
+ * paper, leaves anything it can't read out entirely rather than guessing, and
+ * says which words a job number came from so the app can show its working. The
+ * phone puts the values in editable fields and the human presses save — the
+ * model never files anything by itself.
+ *
+ * Forced tool call rather than free prose: the shape comes back schema-clean,
+ * so a chatty model can't turn "$182.60" into a sentence the app has to parse.
+ */
+const RECEIPT_TOOL = {
+  name: "receipt",
+  description: "Record what is legibly printed on this supplier receipt.",
+  input_schema: {
+    type: "object",
+    properties: {
+      supplier: { type: "string", description: "Trading name of the supplier, as printed. e.g. Middy's, Lawrence & Hanson, Bunnings." },
+      amountIncGst: { type: "number", description: "The TOTAL amount payable including GST — the final total, not a subtotal, not the GST line." },
+      date: { type: "string", description: "Date of the receipt as YYYY-MM-DD. Australian dockets are DAY first: 04/08/2026 is 4 August 2026." },
+      invoiceNumber: { type: "string", description: "Invoice, docket or tax invoice number as printed." },
+      abn: { type: "string", description: "The SUPPLIER's ABN — 11 digits, usually near their trading name at the top. NOT the customer's ABN: an account invoice made out to the buyer prints theirs too, and taking the wrong one is worse than taking none." },
+      jobNumber: { type: "string", description: "A job/order/site reference ONLY if the docket explicitly labels one (Job, Order, PO, Ref, Site). Never infer it from an invoice or account number." },
+      jobNumberLabel: { type: "string", description: "The exact printed words the job number was taken from, e.g. 'Order No: 4821'." },
+      unreadable: { type: "boolean", description: "True if the photo is too blurred, cropped or dark to read the totals." },
+    },
+    required: [],
+  },
+};
+
+export async function readReceipt({ imageB64, contentType = "image/jpeg" }) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": CLAUDE_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 1024,
+      tools: [RECEIPT_TOOL],
+      tool_choice: { type: "tool", name: "receipt" },
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: contentType, data: imageB64 } },
+          {
+            type: "text",
+            text: [
+              "This is a photo of a supplier receipt for an Australian electrical contractor.",
+              "Record only what you can actually READ on the paper.",
+              "Omit any field you cannot read — an omitted field is correct, a guessed one is a false record someone signs off on.",
+              "The amount is the final total INCLUDING GST.",
+              "The ABN is the SUPPLIER's — the business issuing the invoice, printed with their name and logo.",
+              "If the docket is an account invoice addressed to a customer, that customer's ABN also appears; do not report that one.",
+            ].join(" "),
+          },
+        ],
+      }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const body = await res.json();
+  const call = (body.content || []).find((b) => b.type === "tool_use" && b.name === "receipt");
+  const out = call?.input || {};
+
+  // Tidy, never invent. Anything that doesn't survive these checks is dropped
+  // so the field arrives empty and the human fills it in.
+  const amount = Number(out.amountIncGst);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date || "")) ? out.date : null;
+  return {
+    supplier: String(out.supplier || "").trim().slice(0, 80) || null,
+    amountIncGst: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : null,
+    date,
+    invoiceNumber: String(out.invoiceNumber || "").trim().slice(0, 40) || null,
+    // Eleven digits or nothing. The portal re-checks the mod-89 checksum and
+    // drops anything that fails it, so a misread never becomes an identity.
+    abn: (String(out.abn || "").replace(/[^0-9]/g, "").match(/^\d{11}$/) || [null])[0],
+    jobNumber: (String(out.jobNumber || "").match(/\d{3,7}/) || [null])[0],
+    jobNumberLabel: String(out.jobNumberLabel || "").trim().slice(0, 60) || null,
+    unreadable: out.unreadable === true,
+  };
+}
+
+/**
+ * Put a real task on somebody's list.
+ *
+ * Steven, on being offered a note: "a note on SM8 is actually useless unless
+ * it's addressed to someone... it would just sit there and the office wouldn't
+ * notice it." He is right, and checking the data proved it twice over — the
+ * three notes ever flagged action_required go back to October 2025 and not one
+ * has been completed, and every job queue has an empty subscribed_staff.
+ *
+ * @mentions are not an option either. A note posted from the ServiceM8 app
+ * stores "@marites" as plain characters with no staff uuid anywhere on the
+ * record: the app parses the @ as you type and fires the notification itself.
+ * Written through the API it would LOOK like a mention and notify nobody,
+ * which is worse than saying nothing — it would look handled.
+ *
+ * A task carries assigned_to_staff_uuid, a due date, and task_complete. It
+ * lands on a person and it can be seen to have been dealt with.
+ */
+export async function createTask({ job_uuid, name, details, assigneeName, dueDate }) {
+  const staff = await getStaff().catch(() => []);
+  const wanted = String(assigneeName || process.env.TASK_ASSIGNEE || "Marites").toLowerCase().trim();
+  const hit = staff.find((x) => x.name.toLowerCase().includes(wanted))
+    || staff.find((x) => wanted.includes(x.name.toLowerCase().split(" ")[0]));
+
+  const r = await sm8("POST", "/task.json", {
+    related_object: "job",
+    related_object_uuid: job_uuid,
+    name: String(name || "Task").slice(0, 120),
+    task_details: String(details || "").slice(0, 2000),
+    // Unassigned rather than assigned to the wrong person: a task on nobody's
+    // list is visible on the job; a task on the wrong list is invisible AND
+    // looks handled.
+    assigned_to_staff_uuid: hit?.uuid || "",
+    due_date: dueDate || tomorrowInTz(),
+    active: true,
+  });
+  if (r.status < 200 || r.status >= 300) return { error: `Task failed: ${r.status}` };
+  return { ok: true, task_uuid: r.headers.get("x-record-uuid"), assignedTo: hit?.name || null };
+}
+
+/** Due tomorrow, Sydney — a query raised on site is a next-morning job. */
+function tomorrowInTz() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** Active staff, for "who should look at this". */
+export async function staffList() {
+  return (await getStaff().catch(() => [])).map((s) => ({ uuid: s.uuid, name: s.name }));
+}
+
 export async function buildDossier(uuid) {
-  const [j, contacts, notes, acts, mats, staff] = await Promise.all([
+  const [j, contacts, notes, acts, mats, staff, atts] = await Promise.all([
     sm8("GET", `/job/${encodeURIComponent(uuid)}.json`),
     sm8("GET", "/jobcontact.json"),
     sm8("GET", `/note.json?%24filter=related_object_uuid%20eq%20'${encodeURIComponent(uuid)}'`),
     sm8("GET", "/jobactivity.json?%24filter=active%20eq%20'1'"),
     sm8("GET", `/jobmaterial.json?%24filter=job_uuid%20eq%20'${encodeURIComponent(uuid)}'`),
     getStaff().catch(() => []),
+    sm8("GET", `/attachment.json?%24filter=related_object_uuid%20eq%20'${encodeURIComponent(uuid)}'`).catch(() => ({ body: [] })),
   ]);
   const job = j.body || {};
   return {
@@ -788,11 +1152,66 @@ export async function buildDossier(uuid) {
     description: String(job.job_description || "").slice(0, 700),
     contacts: toArray(contacts.body).filter((c) => c.job_uuid === uuid)
       .map((c) => `${c.type}: ${`${c.first || ""} ${c.last || ""}`.trim()}${c.mobile ? ` ${c.mobile}` : ""}`),
-    bookings: toArray(acts.body).filter((a) => a.job_uuid === uuid)
+    // ServiceM8 keeps two different things in jobactivity, and showing both as
+    // "bookings" is what put eight entries on job 167595 — one of them 32
+    // seconds long. A SCHEDULED activity is a diary booking somebody made. A
+    // RECORDED one is the job timer running while the app had the job open, so
+    // they overlap, they stack up through a day, and they are not appointments.
+    bookings: toArray(acts.body).filter((a) => a.job_uuid === uuid && Number(a.activity_was_scheduled) === 1)
       .map((a) => ({ activity_uuid: a.uuid, staff: staffName(staff, a.staff_uuid), start: a.start_date, end: a.end_date })),
+    // Time actually clocked on the job. Summed here rather than on the phone,
+    // and only where both ends exist — a timer still running has no duration
+    // yet, and inventing one would overstate labour.
+    timeOnSite: (() => {
+      const rows = toArray(acts.body).filter((a) => a.job_uuid === uuid
+        && Number(a.activity_was_recorded) === 1 && a.start_date && a.end_date);
+      const minutes = rows.reduce((sum, a) => {
+        const ms = new Date(String(a.end_date).replace(" ", "T")) - new Date(String(a.start_date).replace(" ", "T"));
+        return sum + (ms > 0 ? ms / 60000 : 0);
+      }, 0);
+      return { entries: rows.length, minutes: Math.round(minutes) };
+    })(),
     billing: toArray(mats.body).filter((m) => String(m.active) === "1" || m.active === 1)
       .map((m) => ({ name: m.name, qty: Number(m.quantity), price: Number(m.price) })),
     notes: toArray(notes.body).slice(-6).map((n) => String(n.note || "").replace(/\s+/g, " ").slice(0, 160)),
+    // The FULL note history with who-and-when, newest first — the app's
+    // diary matches ServiceM8's own now (Steven, 30 Aug 2026: "the diaries
+    // don't match"). `notes` above stays as-is: it feeds the LLM prompt.
+    noteFeed: toArray(notes.body)
+      .map((n) => ({
+        note: String(n.note || "").slice(0, 1200),
+        when: n.create_date || n.edit_date || "",
+        by: staffName(staff, n.created_by_staff_uuid || n.create_by_staff_uuid) || "",
+      }))
+      .sort((a, b) => String(b.when).localeCompare(String(a.when))),
+    // Every active attachment: photos render as thumbnails through
+    // GET /api/attachment/<uuid>, PDFs (quotes, forms) list by name.
+    attachments: toArray(atts.body)
+      .filter((a) => String(a.active) === "1" || a.active === 1)
+      .map((a) => {
+        const type = String(a.file_type || "").toLowerCase();
+        return {
+          uuid: a.uuid,
+          name: a.attachment_name || "",
+          type,
+          photo: /jpe?g|png|heic|heif|gif|webp/.test(type),
+          when: a.timestamp || a.edit_date || "",
+          by: staffName(staff, a.created_by_staff_uuid) || "",
+        };
+      })
+      .sort((a, b) => String(b.when).localeCompare(String(a.when))),
+  };
+}
+
+/** The raw bytes of one SM8 attachment, for the app to render. */
+export async function fetchAttachmentFile(uuid) {
+  const res = await fetch(`${SM8_BASE}/attachment/${encodeURIComponent(uuid)}.file`, {
+    headers: { "X-Api-Key": API_KEY },
+  });
+  if (!res.ok) return null;
+  return {
+    buf: Buffer.from(await res.arrayBuffer()),
+    type: res.headers.get("content-type") || "application/octet-stream",
   };
 }
 
@@ -844,6 +1263,34 @@ THINK LIKE A COLLEAGUE, NOT A FORM (this matters as much as brevity):
 - ASSUME MISHEARING, NOT MYSTERY. Voice transcription mangles names, suburbs and numbers constantly ("Mortlake" arrives as "Morelake", "Moj Lake", "Mote like"). When a search comes back empty, do NOT ask them to spell it or "check the suburb" — that's the dumbest thing you can do. Use the sounds_like suggestions and offer the closest real one as a quick question ("Mortlake?"), or search again with your own best guess at what they actually said. Only after two failed attempts ask for the job number.
 - IGNORE NOISE: filler like "mhmm", "uh huh", coughs, or a stream of repeated syllables is the microphone picking up room noise, not an instruction. Say nothing and keep waiting.
 
+ONE THOUGHT IN, ONE ANSWER OUT — half a sentence is not a question:
+- The listener sometimes decides he's finished when he has only paused for breath, so a single thought can reach you split across two, three or four turns. Answering the first piece while he's still talking is the single most annoying thing you can do. Don't.
+- BEFORE REPLYING, ASK YOURSELF: is this a complete thought? A turn that trails off, ends mid-clause, ends on a joining word ("and", "so", "but", "with", "then", "because"), names a thing without saying what about it ("the switchboard one"), or asks nothing and instructs nothing — that is an unfinished sentence, not a request. Say NOTHING and wait for the rest. The next turn will almost always complete it.
+- When the rest arrives, READ THE PIECES AS ONE SENTENCE and answer once. Never answer each fragment separately — that is how you end up holding two half-conversations at the same time.
+- THE LATEST WORDS WIN. If something he says contradicts, corrects or narrows what came a moment ago ("no, not that one", "actually make it four", "sorry, Earlwood not Ryde"), the new version replaces the old one completely. Don't point out that he changed his mind, don't ask which he meant, don't average the two, and never act on the version he just replaced. Just carry on with the corrected one.
+- If you have ALREADY started acting on a fragment and he keeps talking, treat what you did as a draft, not a commitment. Fold the rest in and answer once at the end.
+- The one exception is a genuine emergency of brevity: a bare "stop" or "hang on" is complete, and means stop talking.
+
+ELECTRICAL STANDARDS — QUOTE, NEVER PARAPHRASE:
+- You have a library of Australian standards. For ANY question about the Wiring Rules, cable sizing, testing, depths, clearances, RCDs, service rules or compliance, you call lookup_standard. You do NOT answer from your own knowledge, ever, not even when you are sure. A wrong job number is a nuisance; a wrong cable size or depth of cover is a fire or a fatality.
+- NEVER state a requirement without the clause number it came from. "Clause 3.11.4.4 says..." — if you cannot name the clause, you do not have the answer.
+- NEVER paraphrase a NUMBER. Sizes, ratings, depths, clearances, times, percentages get quoted word for word from the clause text or not given at all. Rewording prose is fine; rewording a measurement is not.
+- ALWAYS say which edition, and say it plainly when that edition is superseded: "that's clause 3.11.4.4 of the 2018 base issue — Amendments 1 to 3 aren't in my copy, so check it against a current one." The currency field on every result tells you. Never let a superseded quote pass as current.
+- If the lookup finds nothing useful: "Not in what I've got — you'll want to check the book." Never fill the gap with what you think it probably says. Offer to search different words instead.
+- CONVERSATION FIRST, THEN THE CLAUSE. Standards questions arrive vague ("what's the go with underground cable?"). Talk it out — depth? mechanical protection? which category? — until you know what they actually need, THEN look it up. One precise clause beats six vaguely related ones.
+- Reading a clause aloud in full is usually wrong: say the gist in one sentence, name the clause, and let them read the exact words on screen. Read the exact wording out only if they ask you to.
+- You are finding the clause, not interpreting it. If they ask what it means for their situation, give them the clause and say plainly that the call is theirs.
+
+SAY THE JOB ONCE. ONCE.
+- The commonest thing you get wrong is announcing a job, asking "that the one?", getting a yes, and then announcing the SAME job all over again before asking what they need. Steven heard it twice in one night and it makes you sound like you weren't listening. Read this transcript and never do it:
+    YOU: "Job ending 6 10. Switchboard upgrade at 221 Dennison Street, Newtown. That the 1?"
+    HIM: "Yeah."
+    YOU: "Job ending 6 10 switchboard upgrade at 221 Dennison Street, Newtown for Troy. What do you need on it?"   <- BANNED. He just said yes.
+- When one job clearly matches: name it ONCE, in the same breath as getting on with it. No confirmation question.
+- When two or more genuinely match: name only what TELLS THEM APART ("Dennison Street or Sussex Street?"), never the full details of each.
+- After ANY yes, nod and move: "Righto — what do you need?". Not one word of the job repeated. They know which job it is; they just told you.
+- Same rule for the rest of the call: address, contact and description get said once, when you anchor. After that it is "the job" or "job ending 610".
+
 ANCHORING: your first move is to know which job this is about. If they DESCRIBE it instead of numbering it ("the Haymarket one", "Taku's job", "that switchboard job in Earlwood"), call search_jobs — never make them dig out a number. If they give a number, call find_job and just start working on it, naming it once so they know you got it right ("Righto — job ending 430, Darling Drive."). Do NOT ask them to confirm it. Only if two jobs genuinely match do you ask which one. Keep using that uuid until they name a different job.
 
 QUOTE BUILDING (your main purpose) — draft on screen, then commit:
@@ -868,13 +1315,38 @@ HONESTY: if something fails, say what failed in plain words and what you'll try 
  */
 // context.anchor: job carried across turns of one call (the transcript alone
 // loses tool results, which made every turn re-run find_job).
+// Spoken while the tools run. Short, varied so it does not become a tic, and
+// deliberately the kind of thing a mate says over his shoulder — not a status
+// report. "NEVER narrate what you are about to do" still holds for the model;
+// this is different, it is filling a five-second silence he cannot avoid.
+const HOLD_LINES = [
+  "Hang on, pulling it up.",
+  "Righto, gimme a sec.",
+  "Two ticks.",
+  "Let me have a look.",
+  "Onto it.",
+];
+let holdTurn = 0;
+
 export async function runTurn(messages, onDelta, context = {}) {
+  let saidHold = false;
   const apiMessages = messages
     .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.text)
     .map((m) => ({ role: m.role, content: String(m.text).slice(0, 6000) }))
     .slice(-40);
   while (apiMessages.length && apiMessages[0].role !== "user") apiMessages.shift();
   if (!apiMessages.length) throw new Error("No user message");
+
+  // One conversation, two mouths: when a voice call starts after a dictation
+  // exchange (or vice versa via /chat's full history), the other channel's
+  // recent turns arrive as a recap. It rides ahead of the first user message
+  // so the model treats it as the same conversation, because it is.
+  if (context.recap) {
+    apiMessages.unshift(
+      { role: "user", content: `(Recap of this same conversation so far, from the other input mode — text/voice. Continue it; do not re-introduce yourself or re-ask what's answered here.)\n${String(context.recap).slice(0, 2000)}` },
+      { role: "assistant", content: "Got it — same conversation, continuing." },
+    );
+  }
 
   let anchor = context.anchor || null;
   let fullReply = "";
@@ -943,6 +1415,28 @@ export async function runTurn(messages, onDelta, context = {}) {
 
     if (stopReason !== "tool_use") return { reply: fullReply, anchor };
 
+    // Say something before disappearing to do the work.
+    //
+    // A ServiceM8 lookup plus another Claude pass is five to eight seconds, and
+    // until now that was pure silence — Steven's "the gap from finishing to
+    // Charlie responding is long". We cannot make the lookup fast, but dead air
+    // is a different complaint from slow, and this fixes the dead air: the
+    // words stream out and get spoken WHILE the tools run underneath.
+    //
+    // Only on the FIRST round, only when he has not already said something
+    // this turn, and never before an instant tool — nobody needs "hang on"
+    // before an answer that was already on screen.
+    if (!saidHold && !fullReply.trim()) {
+      const instant = new Set(["show_quote_draft", "remember"]);
+      const slow = content.some((b) => b.type === "tool_use" && !instant.has(b.name));
+      if (slow) {
+        saidHold = true;
+        const line = HOLD_LINES[holdTurn++ % HOLD_LINES.length];
+        fullReply += line;
+        if (onDelta) onDelta(line);
+      }
+    }
+
     const toolResults = [];
     for (const block of content) {
       if (block.type !== "tool_use") continue;
@@ -952,6 +1446,14 @@ export async function runTurn(messages, onDelta, context = {}) {
       } catch (err) {
         console.error(`voice tool ${block.name} failed:`, err);
         result = { error: `${block.name} failed: ${err.message}` };
+      }
+      // The quote draft is RENDERED, not spoken. Vapi carries the tool call
+      // to the app itself; the /chat route (dictation) has no such channel,
+      // so the caller gets a hook — without it Charlie says "that's on your
+      // screen" about a screen that never received anything.
+      if (block.name === "show_quote_draft" && context.onDraft) {
+        try { await context.onDraft(Array.isArray(block.input?.lines) ? block.input.lines : []); }
+        catch (err) { console.error("onDraft hook failed:", err.message); }
       }
       if (block.name === "find_job" && result?.job?.uuid) anchor = { ...result.job };
       // One clear search hit anchors just as well as a number.

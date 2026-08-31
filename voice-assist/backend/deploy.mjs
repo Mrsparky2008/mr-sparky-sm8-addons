@@ -11,7 +11,12 @@ const REGION = "ap-southeast-2";
 const ZIP = "function.zip";
 // Every .mjs in this directory — a forgotten entry here ships a Lambda that
 // cannot even import itself, which takes the phone line down with it.
-const FILES = fs.readdirSync(".").filter((f) => f.endsWith(".mjs") && f !== "deploy.mjs").sort();
+// Every .mjs, plus the standards index — a forgotten entry here ships a
+// Lambda that cannot even import itself, which takes the phone line down
+// with it. standards.json is data, not code, so it needs naming explicitly.
+const FILES = fs.readdirSync(".")
+  .filter((f) => (f.endsWith(".mjs") && f !== "deploy.mjs") || f === "standards.json")
+  .sort();
 
 // Pre-flight: the app page's inline <script> lives in a template literal that
 // node --check never parses — parse it for real (lesson from Henri's dashboard).
