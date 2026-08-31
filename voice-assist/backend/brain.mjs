@@ -693,9 +693,9 @@ export async function executeTool(name, input) {
     );
     if (dupe) return { ok: true, skipped: "identical line already on the job" };
     const r = await sm8("POST", "/jobmaterial.json", {
-      // 2,000 to match the portal's writer - ServiceM8 stores names well
-      // past 1,000 characters, so a lower cap only eats quote wording.
-      job_uuid: jobU, name: String(input.name || "").slice(0, 2000),
+      // No length cap, matching the portal's writer: truncating silently
+      // cost real quote wording, and ServiceM8 has no limit to respect.
+      job_uuid: jobU, name: String(input.name || ""),
       quantity: qty.toFixed(2), price: price.toFixed(2), displayed_amount: price.toFixed(2), active: 1,
     });
     if (r.status < 200 || r.status >= 300) {
