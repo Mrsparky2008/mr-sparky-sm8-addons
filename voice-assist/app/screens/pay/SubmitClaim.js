@@ -16,6 +16,15 @@ import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
 
+// ISO stamp -> "1:47 pm today" / "1:47 pm, 31 Aug" in the phone's local time.
+function when(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "recently";
+  const t = d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay ? `${t} today` : `${t}, ${d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
+}
+
 export default function SubmitClaim({ data, onBack, onSubmitted }) {
   const claimable = data?.claimable;
   const meta = data?.meta || {};
@@ -148,7 +157,14 @@ export default function SubmitClaim({ data, onBack, onSubmitted }) {
           tone="earth"
           disabled={busy || !accepted || chosen.size + (helping && helperCount ? 1 : 0) === 0}
           onPress={submit}
-          sub="Once submitted the figures are frozen. Later changes are corrected on a following claim, never backwards."
+          sub={
+            // Steven, 1 Sep 2026: say when the last check happened, so a
+            // figure that moves between looking and submitting reads as
+            // timing, never as being ripped off.
+            (data?.dataAsOf ? `Figures last checked against ServiceM8 and the expense sheet at ${when(data.dataAsOf)}. `
+              + "Anything entered since may shift the final amount. " : "")
+            + "Once submitted the figures are frozen. Later changes are corrected on a following claim, never backwards."
+          }
         />
       </ScrollView>
     </View>
