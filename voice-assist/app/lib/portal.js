@@ -99,6 +99,19 @@ const qs = (params) => {
 export const me = () => get("/api/me");
 
 /**
+ * Close your own account: the Cognito login and the application behind it.
+ *
+ * Apple requires this of any app that offers signup (Guideline 5.1.1(v)) and
+ * asks to see it in the review recording. Who gets deleted comes from the
+ * token at the other end, never from anything sent here — there is deliberately
+ * nothing to pass.
+ *
+ * Contractors are refused with code "contactOffice": there are claims and
+ * payment history behind a real staff record, so closing one is an office job.
+ */
+export const deleteAccount = () => post("/api/account/delete");
+
+/**
  * Everything the Pay tab shows for one person: jobs, what each is worth, what
  * is ready to claim, what is held and why, claims with their frozen figures and
  * their approval checks, receipts, retention, the ladder. One call.

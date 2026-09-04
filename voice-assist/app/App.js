@@ -320,11 +320,31 @@ function Shell() {
   // A signed-in demo applicant. The earnings screen is their whole app until
   // Steven approves them; sign out is the honest way back, because there is
   // nowhere else for them to go.
+  //
+  // The account sheet rides along because this branch has no tab bar to hang it
+  // off, and without it a demo applicant could neither sign out from here nor
+  // delete their account — the flow Apple asks to see (Guideline 5.1.1(v)).
+  // Deleting takes the login with it, so afterwards there is nothing to sign
+  // out OF: handleSignOut is still right, it just tidies up locally.
   if (demoSignedIn) {
     return (
       <SafeAreaView style={s.root}>
         <StatusBar style="light" />
-        <Earnings mobile={demoMobile} onBack={handleSignOut} />
+        <Earnings
+          mobile={demoMobile}
+          onBack={handleSignOut}
+          meta={email}
+          onMeta={() => setAccount(true)}
+        />
+        <AccountSheet
+          visible={account}
+          email={email}
+          who={null}
+          demo
+          onClose={() => setAccount(false)}
+          onSignOut={() => { setAccount(false); handleSignOut(); }}
+          onDeleted={() => { setAccount(false); handleSignOut(); }}
+        />
       </SafeAreaView>
     );
   }
@@ -650,6 +670,7 @@ function Shell() {
         who={who}
         onClose={() => setAccount(false)}
         onSignOut={() => { setAccount(false); handleSignOut(); }}
+        onDeleted={() => { setAccount(false); handleSignOut(); }}
       />
     </SafeAreaView>
   );

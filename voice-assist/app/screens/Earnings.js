@@ -23,7 +23,10 @@ const shortDate = (iso) => {
   return y && m && d ? `${Number(d)} ${MONTHS[Number(m) - 1]}` : "";
 };
 
-export default function Earnings({ mobile, onBack }) {
+// meta/onMeta are how a signed-in demo applicant reaches the account sheet.
+// This screen is their whole app, so without it there is no route to signing
+// out or deleting the account — which Apple asks to see (Guideline 5.1.1(v)).
+export default function Earnings({ mobile, onBack, meta, onMeta }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
@@ -46,7 +49,7 @@ export default function Earnings({ mobile, onBack }) {
   if (busy) {
     return (
       <View style={{ flex: 1 }}>
-        <Header title="What you'd have earned" onBack={onBack} />
+        <Header title="What you'd have earned" onBack={onBack} meta={meta} onMeta={onMeta} />
         <ActivityIndicator color={C.brand} style={{ marginTop: 60 }} />
       </View>
     );
@@ -55,7 +58,7 @@ export default function Earnings({ mobile, onBack }) {
   if (error || !data) {
     return (
       <View style={{ flex: 1 }}>
-        <Header title="What you'd have earned" onBack={onBack} />
+        <Header title="What you'd have earned" onBack={onBack} meta={meta} onMeta={onMeta} />
         <ScrollView contentContainerStyle={st.wrap}>
           <Text style={st.blurb}>{error || "Nothing to show just yet."}</Text>
           <Cta label="Back" onPress={onBack} tone="ghost" />
@@ -68,7 +71,7 @@ export default function Earnings({ mobile, onBack }) {
 
   return (
     <View style={{ flex: 1 }}>
-      <Header title="What you'd have earned" onBack={onBack} />
+      <Header title="What you'd have earned" onBack={onBack} meta={meta} onMeta={onMeta} />
       <ScrollView contentContainerStyle={st.wrap}>
 
         {/* The headline first. Everything under it is the evidence. */}
