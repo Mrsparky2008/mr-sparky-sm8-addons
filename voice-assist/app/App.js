@@ -330,9 +330,13 @@ function Shell() {
     return (
       <SafeAreaView style={s.root}>
         <StatusBar style="light" />
+        {/* No onBack here on purpose. A back arrow on the only screen you
+            have has nowhere honest to go, and wiring it to sign-out is what
+            Apple tripped over: the "what's next?" button ran the same handler
+            and threw the reviewer out to the login screen. Signing out and
+            deleting both live in the account sheet, behind the email. */}
         <Earnings
           mobile={demoMobile}
-          onBack={handleSignOut}
           meta={email}
           onMeta={() => setAccount(true)}
         />

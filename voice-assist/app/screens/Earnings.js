@@ -14,6 +14,7 @@ import {
 import { Cta, Header } from "../components/ui";
 import { getEarnings } from "../lib/demo";
 import { C, R, S, T, money } from "../lib/theme";
+import WhatsNext from "./WhatsNext";
 
 /** "2026-08-14" -> "14 Aug". The year is noise on a list of recent work. */
 const shortDate = (iso) => {
@@ -30,6 +31,7 @@ export default function Earnings({ mobile, onBack, meta, onMeta }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
+  const [next, setNext] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +48,13 @@ export default function Earnings({ mobile, onBack, meta, onMeta }) {
     return () => { cancelled = true; };
   }, [mobile]);
 
+  // Held here rather than in App: both ways into this screen — signed in, and
+  // straight off the end of Apply — ask the same question and deserve the same
+  // answer, and neither of them has a nav stack to push onto.
+  if (next) {
+    return <WhatsNext onBack={() => setNext(false)} meta={meta} onMeta={onMeta} />;
+  }
+
   if (busy) {
     return (
       <View style={{ flex: 1 }}>
@@ -61,7 +70,7 @@ export default function Earnings({ mobile, onBack, meta, onMeta }) {
         <Header title="What you'd have earned" onBack={onBack} meta={meta} onMeta={onMeta} />
         <ScrollView contentContainerStyle={st.wrap}>
           <Text style={st.blurb}>{error || "Nothing to show just yet."}</Text>
-          <Cta label="Back" onPress={onBack} tone="ghost" />
+          {onBack ? <Cta label="Back" onPress={onBack} tone="ghost" /> : null}
         </ScrollView>
       </View>
     );
@@ -106,7 +115,7 @@ export default function Earnings({ mobile, onBack, meta, onMeta }) {
           the customer for money.
         </Text>
 
-        <Cta label="Sounds good — what's next?" onPress={onBack} />
+        <Cta label="Sounds good — what's next?" onPress={() => setNext(true)} />
       </ScrollView>
     </View>
   );
