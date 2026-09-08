@@ -17,7 +17,7 @@ import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws
 import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList, fetchAttachmentFile } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
 import { authorize, DENIED, SUBBIE_EMPTY_JOBS, subbieJobs } from "./authz.mjs";
-import { sandboxJobList, sandboxDossier, sandboxDiary } from "./reviewsandbox.mjs";
+import { SANDBOX_JOBS, sandboxJobList, sandboxDossier, sandboxDiary } from "./reviewsandbox.mjs";
 
 /**
  * The claims table freezes a job's status at claim time, so a tech's
@@ -510,6 +510,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         "Access-Control-Allow-Origin": "*",
       }, JSON.stringify(body));
 
+      let sandboxed = false;
       try {
         const who = await verifyIdToken(bearer(headers));
         const az = await authorize(who.email);
@@ -520,6 +521,7 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         if (az.level !== "admin" && !az.sandbox) {
           return jsonOut(403, DENIED);
         }
+        sandboxed = !!az.sandbox;
       } catch {
         return jsonOut(401, { ok: false, error: "not signed in" });
       }
@@ -553,9 +555,15 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       // A number printed on a docket is a claim, not a fact. Check it against
       // ServiceM8 before the app shows it, so an OCR misread of an account
       // number can't masquerade as somebody else's job.
+      //
+      // The sandbox checks against ITS jobs, never the live book: a real
+      // order number on a real docket resolved to a real customer's address
+      // on the review account (Steven's first test, 9 Sep 2026).
       let docket = null;
       if (read.jobNumber) {
-        const index = await jobIndex().catch(() => []);
+        const index = sandboxed
+          ? SANDBOX_JOBS.map((j) => ({ number: j.job_number, address: j.address, contact: "Sample Customer", status: j.status }))
+          : await jobIndex().catch(() => []);
         const job = index.find((j) => String(j.number) === read.jobNumber);
         docket = {
           jobNumber: read.jobNumber,
