@@ -17,6 +17,7 @@ import { TranscribeStreamingClient, StartStreamTranscriptionCommand } from "@aws
 import { runTurn, jobIndex, buildDossier, executeTool, attachFileToJob, readReceipt, createTask, staffList, fetchAttachmentFile } from "./brain.mjs";
 import { verifyIdToken, bearer } from "./auth.mjs";
 import { authorize, DENIED, SUBBIE_EMPTY_JOBS, subbieJobs } from "./authz.mjs";
+import { sandboxJobList, sandboxDossier, sandboxDiary } from "./reviewsandbox.mjs";
 
 /**
  * The claims table freezes a job's status at claim time, so a tech's
@@ -414,7 +415,15 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
         return jsonOut(401, { ok: false, error: "not signed in" });
       }
       // Writes ride the master SM8 key, so only admins may make them.
-      if ((await authorize(who.email)).level !== "admin") {
+      const az = await authorize(who.email);
+      if (az.level !== "admin") {
+        // The reviewer's sandbox may "write" - a note, a task, a receipt copy
+        // - and nothing happens. Their jobs do not exist in ServiceM8, so
+        // there is nowhere for it to go, and a denial on a job that is
+        // sitting in their list would read as a fault.
+        if (az.sandbox && /^\/api\/job\/99000\d\/(note|receipt-copy|task)$/.test(path)) {
+          return jsonOut(200, { ok: true, sandbox: true });
+        }
         return jsonOut(403, DENIED);
       }
 
@@ -503,7 +512,12 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
 
       try {
         const who = await verifyIdToken(bearer(headers));
-        if ((await authorize(who.email)).level !== "admin") {
+        const az = await authorize(who.email);
+        if (az.level !== "admin") {
+          // The reviewer's sandbox: the docket "could not be read", so the
+          // form opens blank for them to type into. Honest, and no LLM call
+          // on a photo from an account that owns no real jobs.
+          if (az.sandbox) return jsonOut(200, { ok: true, receipt: null, docket: null, unreadable: true });
           return jsonOut(403, DENIED);
         }
       } catch {
@@ -599,6 +613,22 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       if (path === "/api/me") return jsonOut(200, { ok: true, ...who, level: az.level });
 
       if (az.level === "subbie") {
+        // The reviewer's sandbox: three invented jobs, a job card for each,
+        // and a booking in today's diary. Nothing here touches ServiceM8.
+        if (az.sandbox) {
+          if (path === "/api/jobs") return jsonOut(200, sandboxJobList());
+          const sb = /^\/api\/job\/([A-Za-z0-9_-]{1,40})$/.exec(path);
+          if (sb) {
+            const d = sandboxDossier(sb[1]);
+            return d ? jsonOut(200, d) : jsonOut(404, { ok: false, error: `Job ${sb[1]} isn't in ServiceM8.` });
+          }
+          if (path === "/api/diary") {
+            const today = todayInSydney();
+            const date = /^\d{4}-\d{2}-\d{2}$/.test(String(q.date || "")) ? q.date : today;
+            return jsonOut(200, sandboxDiary(date, today));
+          }
+          return jsonOut(403, DENIED);
+        }
         // Their work tab is the jobs they ACCEPTED - read from the network's
         // own jobs table, which stamps the accepter's Telegram ID at claim
         // time. Everything else on this backend stays admin-only.

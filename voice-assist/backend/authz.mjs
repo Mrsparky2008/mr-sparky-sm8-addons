@@ -82,6 +82,11 @@ export async function authorize(email) {
       level: "subbie",
       name: match.name,
       personId: match.id,
+      // The App Store reviewer's account. Same level as a subbie, but every
+      // job route answers from reviewsandbox.mjs instead of the live tables,
+      // and writes go nowhere. Steven, 8 Sep 2026: "Simulate it, I don't
+      // want them on my system."
+      sandbox: match.reviewSandbox === true,
       // How their accepted jobs are found: ACCEPT stamps the network jobs
       // table with the accepter's Telegram ID.
       telegramId: match.telegramId ? String(match.telegramId) : null,
