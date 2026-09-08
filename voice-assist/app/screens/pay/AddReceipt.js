@@ -403,7 +403,7 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
           <Field
             onUse={(r) => (lastField.current = r.current)}
             value={supplier}
-            onChangeText={(v) => { mark("supplier"); setSupplier(v); setReadAs(""); }}
+            onChangeText={(v) => { mark("supplier"); setSupplier(v); }}
             placeholder="Middy's, Lawrence & Hanson…"
           />
         </View>
