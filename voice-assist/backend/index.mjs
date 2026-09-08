@@ -513,11 +513,11 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
       try {
         const who = await verifyIdToken(bearer(headers));
         const az = await authorize(who.email);
-        if (az.level !== "admin") {
-          // The reviewer's sandbox: the docket "could not be read", so the
-          // form opens blank for them to type into. Honest, and no LLM call
-          // on a photo from an account that owns no real jobs.
-          if (az.sandbox) return jsonOut(200, { ok: true, receipt: null, docket: null, unreadable: true });
+        // The reviewer's sandbox reads dockets for real. Reading is a photo
+        // to the model and a job-number lookup, nothing written - and a
+        // stub that said "too blurred" to every docket read as the feature
+        // not working (Steven, 9 Sep 2026).
+        if (az.level !== "admin" && !az.sandbox) {
           return jsonOut(403, DENIED);
         }
       } catch {
