@@ -451,7 +451,12 @@ export default function AddReceipt({
             <Text style={s.warn}>
               {docket?.jobNumber
                 ? `The docket says #${docket.jobNumber}, which isn't a job in ServiceM8 — pick the right one.`
-                : "Nothing on the docket says which job this is. Choose it before saving."}
+                // A photo that could not be read cannot be said to have
+                // nothing on it (Steven, 9 Sep 2026: "if it's too blurry you
+                // couldn't say the job number's not there").
+                : readError || !read
+                  ? "Choose the job this receipt is for."
+                  : "Nothing on the docket says which job this is. Choose it before saving."}
             </Text>
           ) : null}
           {mismatch && ackDocket ? (
@@ -576,9 +581,19 @@ export default function AddReceipt({
           tone="earth"
           disabled={busy || !ready}
           onPress={save}
-          sub={read
-            ? "Read off the photo — check every line; you're the one signing for it."
-            : "Checked against what was declared on Form 001 before it is reimbursed."}
+          // A grey button with no reason is a locked door. Name what is
+          // missing, in the order the form asks for it.
+          sub={!ready && !busy
+            ? `Still needed: ${[
+                !photo && "a photo",
+                !jobNumber && "the job",
+                !supplier.trim() && "the supplier",
+                !amount.trim() && "the amount",
+                !date && "the date",
+              ].filter(Boolean).join(", ")}.`
+            : read
+              ? "Read off the photo — check every line; you're the one signing for it."
+              : "Checked against what was declared on Form 001 before it is reimbursed."}
         />
         {/* A way out that doesn't need the back arrow: nothing here is saved
             until the button above is pressed, so this simply drops it. */}
