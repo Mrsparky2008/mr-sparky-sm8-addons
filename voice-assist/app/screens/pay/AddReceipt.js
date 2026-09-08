@@ -49,7 +49,57 @@ function todayLocal() {
 
 const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic" };
 
-export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack, onSaved, onOwnMaterial }) {
+// "PTY LTD" is on every docket and identifies nobody; an apostrophe is a coin
+// toss. The same rule the portal uses to match a docket to a supplier.
+const normalise = (text) => String(text || "")
+  .toLowerCase()
+  .replace(/(pty|ltd|limited|inc|incorporated|group|australia|au|co|company|the)/g, " ")
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim();
+
+const prettyAbn = (abn) => {
+  const d = String(abn || "").replace(/[^0-9]/g, "");
+  return d.length === 11 ? `${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : d;
+};
+
+/**
+ * Who this could be, from what has been typed so far. Two sources: the
+ * office's supplier list (name, aliases, ABN, legal name), and this
+ * contractor's own past receipts - a supplier they have filed before comes
+ * back with the ABN they filed it under (Steven, 9 Sep 2026: "pull up the
+ * full name and ABN from the db if available"). Never a fuzzy guess: the text
+ * has to appear in the name or the name in the text.
+ */
+function suggestSuppliers(text, suppliers, pastReceipts) {
+  const hay = normalise(text);
+  if (hay.length < 2) return [];
+  const out = [];
+  const seen = new Set();
+  const add = (row) => {
+    const key = `${row.abn || ""}|${normalise(row.name)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(row);
+  };
+  for (const sup of suppliers || []) {
+    const names = [sup.name, ...(sup.aliases || [])].map(normalise).filter((n) => n.length >= 2);
+    if (names.some((n) => n.includes(hay) || hay.includes(n))) {
+      add({ name: sup.name, abn: sup.abn || "", legalName: sup.legalName || "", from: "list" });
+    }
+  }
+  for (const r of pastReceipts || []) {
+    const n = normalise(r.supplier);
+    if (n.length >= 2 && (n.includes(hay) || hay.includes(n))) {
+      add({ name: r.supplier, abn: r.abn || "", legalName: "", from: "past" });
+    }
+  }
+  return out.slice(0, 5);
+}
+
+export default function AddReceipt({
+  jobNumbers = [], jobNumber: initial, onBack, onSaved, onOwnMaterial,
+  suppliers = [], pastReceipts = [],
+}) {
   const anchored = initial ? String(initial) : "";
   const chips = jobNumbers.map(String);
   const [jobNumber, setJobNumber] = useState(
@@ -76,6 +126,19 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
 
   // The supplier's ABN — the docket's real identity.
   const [abn, setAbn] = useState("");
+  // A supplier picked off the suggestions closes the list; typing reopens it.
+  const [picked, setPicked] = useState(false);
+  const suggestions = picked ? [] : suggestSuppliers(supplier, suppliers, pastReceipts);
+  const pickSupplier = (row) => {
+    mark("supplier"); setSupplier(row.name); setPicked(true);
+    if (row.abn) {
+      mark("abn"); setAbn(row.abn); setAbnError("");
+      setAbnName(row.legalName || "");
+      // Their own past filing carries the ABN but not the register's name;
+      // ask it, so the confirmation line reads the same either way.
+      if (!row.legalName) lookupAbn(row.abn);
+    }
+  };
   const [abnName, setAbnName] = useState("");     // what the register calls them
   const [abnBusy, setAbnBusy] = useState(false);
   const [abnError, setAbnError] = useState("");
@@ -403,9 +466,21 @@ export default function AddReceipt({ jobNumbers = [], jobNumber: initial, onBack
           <Field
             onUse={(r) => (lastField.current = r.current)}
             value={supplier}
-            onChangeText={(v) => { mark("supplier"); setSupplier(v); }}
+            onChangeText={(v) => { mark("supplier"); setSupplier(v); setPicked(false); }}
             placeholder="Middy's, Lawrence & Hanson…"
           />
+          {suggestions.length ? (
+            <View style={[s.chips, { marginTop: 8 }]}>
+              {suggestions.map((row) => (
+                <Pressable key={`${row.abn}|${row.name}`} onPress={() => pickSupplier(row)} style={s.chip}>
+                  <Text style={s.chipText}>
+                    {row.name}
+                    {row.abn ? <Text style={[s.chipAbn, mono]}>  {prettyAbn(row.abn)}</Text> : null}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View>
@@ -552,6 +627,7 @@ const s = StyleSheet.create({
   },
   chipOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
   chipText: { color: C.muted, fontSize: 13.5, fontWeight: "700" },
+  chipAbn: { color: C.muted, fontSize: 11.5, fontWeight: "400" },
   jobRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   jobNumber: { color: C.ink, fontSize: 16, fontWeight: "800" },
   flagTitle: { color: C.warnChipInk, fontSize: 14, fontWeight: "800" },

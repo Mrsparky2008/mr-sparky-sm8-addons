@@ -452,6 +452,7 @@ function Shell() {
                 jobNumbers={[top.jobNumber]} jobNumber={top.jobNumber}
                 onBack={pop} onSaved={pop}
                 onOwnMaterial={(jobNumber) => push({ name: "ownmaterial", jobNumber })}
+                suppliers={who?.suppliers || []}
               />
             </View>
           ) : null}
@@ -565,6 +566,10 @@ function Shell() {
                 onBack={pop}
                 onSaved={() => resetTab("pay")}
                 onOwnMaterial={(jobNumber) => push({ name: "ownmaterial", jobNumber })}
+                suppliers={who?.suppliers || []}
+                // Their own filings, so a supplier they have used before comes
+                // back with the ABN they filed it under.
+                pastReceipts={Object.values(top.data?.receipts || {}).flatMap((r) => r?.rows || [])}
               />
             </View>
           ) : null}
