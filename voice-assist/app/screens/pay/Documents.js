@@ -54,7 +54,7 @@ export default function Documents({ data, onBack, onSaved }) {
       const { url } = await portal.insuranceViewUrl(key);
       // A PDF needs a reader, and iOS already has a good one. A photograph
       // opens in the app, where it belongs — most certificates are photographed.
-      if (/.pdf($|?)/i.test(key)) await Linking.openURL(url);
+      if (String(key).toLowerCase().endsWith(".pdf")) await Linking.openURL(url);
       else setViewing({ uri: url });
     } catch (e) {
       setOpenError(e?.message || "That certificate wouldn't open.");
