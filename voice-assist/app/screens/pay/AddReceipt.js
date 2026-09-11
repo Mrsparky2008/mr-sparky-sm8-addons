@@ -25,7 +25,7 @@
 //     ServiceM8 says that job is, and the choice is yours. If nothing anchors
 //     the receipt to a job, it asks — a receipt on the wrong job is worse than
 //     a receipt typed in by hand.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -96,12 +96,36 @@ function suggestSuppliers(text, suppliers, pastReceipts) {
   return out.slice(0, 5);
 }
 
+// How many job chips to show before asking someone to search. Five covers
+// "the job I was just on" without turning the screen into a phone book.
+const RECENT_JOBS = 5;
+
 export default function AddReceipt({
   jobNumbers = [], jobNumber: initial, onBack, onSaved, onOwnMaterial,
   suppliers = [], pastReceipts = [],
 }) {
   const anchored = initial ? String(initial) : "";
   const chips = jobNumbers.map(String);
+  // Steven, 12 Sep 2026: "the job numbers pile on". Every job he has ever been
+  // paid for was a chip — sixty of them, three screens before the camera button
+  // scrolled off. A receipt almost always belongs to work done this week, so
+  // the recent handful are the whole answer and the rest need finding, not
+  // listing.
+  //
+  // Most recent means highest: ServiceM8 job numbers run up, and the statement
+  // hands us numbers with no dates attached.
+  const [jobQuery, setJobQuery] = useState("");
+  const recent = useMemo(
+    () => [...chips].sort((a, b) => Number(b) - Number(a)).slice(0, RECENT_JOBS),
+    [chips.join(",")],
+  );
+  const digits = jobQuery.replace(/D/g, "");
+  const matches = useMemo(() => (
+    digits
+      ? chips.filter((n) => n.includes(digits))
+          .sort((a, b) => Number(b) - Number(a)).slice(0, 12)
+      : []
+  ), [chips.join(","), digits]);
   const [jobNumber, setJobNumber] = useState(
     anchored || (chips.length === 1 ? chips[0] : ""),
   );
@@ -420,13 +444,44 @@ export default function AddReceipt({
         <View>
           <SectionLabel>Job{needsJob && photo ? " — which one?" : ""}</SectionLabel>
           {chips.length > 1 ? (
-            <View style={s.chips}>
-              {chips.map((n) => (
-                <Pressable key={n} onPress={() => setJobNumber(n)} style={[s.chip, n === jobNumber && s.chipOn]}>
-                  <Text style={[s.chipText, mono, n === jobNumber && { color: C.ink }]}>#{n}</Text>
-                </Pressable>
-              ))}
-            </View>
+            <>
+              {/* Whatever is on show, the job already chosen stays on show with
+                  it — otherwise picking an old one by searching makes it vanish
+                  the moment the box is cleared. */}
+              <View style={s.chips}>
+                {(digits
+                  ? matches
+                  : (jobNumber && !recent.includes(jobNumber)
+                      ? [jobNumber, ...recent]
+                      : recent)
+                ).map((n) => (
+                  <Pressable key={n} onPress={() => setJobNumber(n)} style={[s.chip, n === jobNumber && s.chipOn]}>
+                    <Text style={[s.chipText, mono, n === jobNumber && { color: C.ink }]}>#{n}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {chips.length > RECENT_JOBS ? (
+                <>
+                  <View style={{ height: 8 }} />
+                  <Field
+                    onUse={(r) => (lastField.current = r.current)}
+                    value={jobQuery}
+                    onChangeText={setJobQuery}
+                    placeholder={`Search ${chips.length} jobs`}
+                    keyboardType="number-pad"
+                    returnKeyType="done"
+                    mono
+                  />
+                  <Text style={s.note}>
+                    {digits
+                      ? (matches.length
+                          ? `${matches.length} job${matches.length === 1 ? "" : "s"} with ${digits} in the number.`
+                          : `No job of yours has ${digits} in its number.`)
+                      : `Your ${RECENT_JOBS} most recent. Search for an older one.`}
+                  </Text>
+                </>
+              ) : null}
+            </>
           ) : anchored || chips.length === 1 ? (
             <View style={s.jobRow}>
               <Text style={[s.jobNumber, mono]}>#{jobNumber || anchored}</Text>
