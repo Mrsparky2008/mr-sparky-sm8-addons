@@ -8,8 +8,8 @@
 // 2026 policy underneath.
 import { useRef, useState } from "react";
 import {
-  ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable,
-  ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Image, KeyboardAvoidingView, Linking, Modal, Platform,
+  Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
@@ -34,6 +34,34 @@ export default function Documents({ data, onBack, onSaved }) {
   const ins = data?.insurance || {};
   const policies = (ins.policies || []).filter((p) => !p.voided);
   const today = todayLocal();
+
+  // Opening what is already on file. Steven, 12 Sep 2026: the cards listed the
+  // insurer, the number and the dates but there was no way to see the actual
+  // certificate — the one thing a broker or a builder asks him to produce.
+  //
+  // The key is already on every policy row and /api/insurance/view already
+  // signs it; nothing here needed building, only wiring. The signed link lasts
+  // five minutes, so it is fetched on the tap rather than up front.
+  const [viewing, setViewing] = useState(null);   // { uri } for a photographed one
+  const [opening, setOpening] = useState("");     // the key being fetched
+  const [openError, setOpenError] = useState("");
+
+  async function openCertificate(key) {
+    if (!key || opening) return;
+    setOpening(key);
+    setOpenError("");
+    try {
+      const { url } = await portal.insuranceViewUrl(key);
+      // A PDF needs a reader, and iOS already has a good one. A photograph
+      // opens in the app, where it belongs — most certificates are photographed.
+      if (/.pdf($|?)/i.test(key)) await Linking.openURL(url);
+      else setViewing({ uri: url });
+    } catch (e) {
+      setOpenError(e?.message || "That certificate wouldn't open.");
+    } finally {
+      setOpening("");
+    }
+  }
 
   const [photo, setPhoto] = useState(null);
   const [imageKey, setImageKey] = useState(null);
@@ -180,7 +208,12 @@ export default function Documents({ data, onBack, onSaved }) {
           {policies.length ? policies.map((p, i) => {
             const expired = p.to < today;
             return (
-              <Card key={i} style={s.polCard}>
+              <Pressable
+                key={i}
+                onPress={p.imageKey ? () => openCertificate(p.imageKey) : undefined}
+                style={({ pressed }) => (pressed && p.imageKey ? { opacity: 0.75 } : null)}
+              >
+              <Card style={s.polCard}>
                 <View style={s.polTop}>
                   <Text style={s.polType}>
                     {p.type === "workers_comp" ? "Workers comp" : "Public liability"}
@@ -194,12 +227,29 @@ export default function Documents({ data, onBack, onSaved }) {
                   {p.coverAmount != null ? ` · $${Number(p.coverAmount).toLocaleString()}` : " · statutory cover"}
                 </Text>
                 <Text style={[T.small, mono]}>{p.from} → {p.to}</Text>
+                {p.imageKey ? (
+                  <Text style={s.viewLine}>
+                    {opening === p.imageKey ? "Opening…" : "View the certificate ›"}
+                  </Text>
+                ) : null}
               </Card>
+              </Pressable>
             );
           }) : (
             <Text style={s.note}>Nothing on file yet — the contract needs a current public liability certificate.</Text>
           )}
+          {openError ? <Text style={s.warn}>{openError}</Text> : null}
         </View>
+
+        {/* The certificate itself, full screen. Tap anywhere to come back. */}
+        <Modal visible={!!viewing} transparent animationType="fade" onRequestClose={() => setViewing(null)}>
+          <Pressable style={s.viewerVeil} onPress={() => setViewing(null)}>
+            {viewing ? (
+              <Image source={{ uri: viewing.uri }} style={s.viewerImage} resizeMode="contain" />
+            ) : null}
+            <Text style={s.viewerHint}>Tap anywhere to close</Text>
+          </Pressable>
+        </Modal>
 
         {/* ---- Add a certificate ---------------------------------------- */}
         <View>
@@ -309,6 +359,13 @@ function Field({ label, monoFont, ...props }) {
 }
 
 const s = StyleSheet.create({
+  viewLine: { color: C.brand, fontSize: 12.5, fontWeight: "700", marginTop: 8 },
+  viewerVeil: {
+    flex: 1, backgroundColor: "rgba(4,10,18,.94)",
+    alignItems: "center", justifyContent: "center", padding: 12,
+  },
+  viewerImage: { width: "100%", height: "86%" },
+  viewerHint: { color: C.muted, fontSize: 12.5, marginTop: 14 },
   body: { padding: S.screen, paddingTop: 0, gap: S.gap, paddingBottom: 40 },
   polCard: { marginBottom: 8, gap: 3 },
   polTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
