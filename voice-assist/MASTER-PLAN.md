@@ -52,6 +52,17 @@ One brain, many faces. Nothing here replaces anything already built.
   delivered. See DESIGN.md "BUILT" for where everything lives. Voice still runs through
   Vapi in-app; the Apple-ears/no-per-minute stack below is still the eventual target.
   Not yet built: the entitlement gate.
+- **STATUS 2026-08-05: the PORTAL MODULE is built** — the "grand plan" below,
+  brought forward. Steven chose NATIVE over embedding the web portal ("native is
+  the clear winner, we never shy from hard work"). Pay tab = earnings, claims,
+  submit, receipts w/ camera, RCTI. Business tab = a LITE admin: the claims
+  waiting on a decision, approve/reject/issue/mark-paid, admin-only. Governed by
+  one rule: the phone renders, the portal calculates — no arithmetic on the
+  device, ever. Analytics/settings/ladder stay on the web by choice.
+  BLOCKED ON two env vars off mr-sparky-portal-api (COGNITO_CLIENT_ID and
+  PORTAL_URL) plus one portal patch — see voice-assist/docs/PORTAL-CHANGES.md.
+  Also built: a side-by-side DEV APP (own bundle id, icon and URL scheme) so
+  Steven's daily driver never comes off the phone to test.
 - **Trigger**: Charlie proven + a second person wants access. NOT before.
 - **Stack**: Native app (Expo/React Native, iPhone first) —
   **Apple on-device speech (free ears) + brain via /chat SSE + ElevenLabs direct (Charlie)**.

@@ -44,7 +44,14 @@ export const T = {
   small: { fontSize: 12.5, lineHeight: 17, color: C.muted },
 };
 
-export const money = (n) => `$${(Number(n) || 0).toFixed(2)}`;
+// $23,587.62 — the comma is what makes a five-figure number readable at arm's
+// length in a ute. Formatting only; the number itself always arrives computed.
+// Deduction lines are negative, and "-$1,550.67" reads right where "$-" doesn't.
+export function money(n) {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${v < 0 ? "-$" : "$"}${abs}`;
+}
 
 // ServiceM8 addresses arrive with embedded newlines; a job chip is one line.
 export const oneLine = (s) => String(s || "").replace(/\s+/g, " ").trim();
@@ -61,10 +68,14 @@ export function suburb(address) {
 }
 
 // Status colours borrow the chip palette; only ServiceM8 truth is ever green.
+// Quote = ORANGE and Work Order = BLUE, matching ServiceM8 exactly - Steven,
+// 30 Aug 2026: "I switch apps and get lost looking for a WO in the blue
+// section." Two apps, one colour language.
 export function statusChip(status) {
   const s = String(status || "").toLowerCase();
   if (s === "completed") return { bg: "rgba(47,158,87,.16)", ink: "#6FD096" };
-  if (s === "work order") return { bg: C.warnChipBg, ink: C.warnChipInk };
-  if (s === "quote") return { bg: C.infoChipBg, ink: C.infoChipInk };
+  if (s === "work order") return { bg: C.infoChipBg, ink: C.infoChipInk };
+  if (s === "quote") return { bg: C.warnChipBg, ink: C.warnChipInk };
+  if (s === "unsuccessful") return { bg: "rgba(226,75,74,.16)", ink: "#F09595" };
   return { bg: "rgba(141,160,188,.14)", ink: C.muted };
 }

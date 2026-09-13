@@ -1,0 +1,399 @@
+<title>Mr Sparky — the money side, final review</title>
+<style>
+  :root {
+    --paper:#EEF0EC; --card:#FBFCFA; --sunk:#E4E7E2;
+    --ink:#15191B; --ink-2:#4C5551; --ink-3:#78827D;
+    --rule:#D2D7D0; --rule-2:#BFC6BD;
+    --live:#0E6B4A; --live-soft:#DCEBE2;
+    --inert:#7C8790; --inert-soft:#E3E7E9;
+    --gate:#9A6B10; --gate-soft:#F2E8D2;
+    --gap:#A63C24;  --gap-soft:#F3DFD8;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, ui-serif, Georgia, serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#121614; --card:#1A201D; --sunk:#0D110F;
+      --ink:#E7EBE7; --ink-2:#A9B3AD; --ink-3:#79847E;
+      --rule:#2A322E; --rule-2:#3A443F;
+      --live:#4FBE8E; --live-soft:#14301F;
+      --inert:#8B959D; --inert-soft:#1F2528;
+      --gate:#D8A73F; --gate-soft:#2C2413;
+      --gap:#E07B5C;  --gap-soft:#301A13;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#121614; --card:#1A201D; --sunk:#0D110F;
+    --ink:#E7EBE7; --ink-2:#A9B3AD; --ink-3:#79847E;
+    --rule:#2A322E; --rule-2:#3A443F;
+    --live:#4FBE8E; --live-soft:#14301F;
+    --inert:#8B959D; --inert-soft:#1F2528;
+    --gate:#D8A73F; --gate-soft:#2C2413;
+    --gap:#E07B5C;  --gap-soft:#301A13;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:920px; margin:0 auto; padding:44px 22px 90px; display:flex; flex-direction:column; gap:44px; }
+
+  header { display:flex; flex-direction:column; gap:14px; }
+  .eyebrow {
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3);
+  }
+  h1 { margin:0; font-size:clamp(28px,5vw,42px); line-height:1.05; letter-spacing:-.028em; font-weight:680; text-wrap:balance; }
+  .thesis {
+    font-family:var(--serif); font-size:clamp(17px,2.2vw,20px); line-height:1.45;
+    color:var(--ink-2); max-width:62ch; margin:0;
+    border-left:3px solid var(--live); padding-left:16px;
+  }
+  .thesis strong { color:var(--ink); font-weight:600; }
+
+  section { display:flex; flex-direction:column; gap:14px; }
+  .sec-head { display:flex; align-items:baseline; gap:12px; border-bottom:1px solid var(--rule); padding-bottom:9px; }
+  .num {
+    font-family:var(--mono); font-size:12px; color:var(--live);
+    font-weight:600; flex:none; padding-top:2px;
+  }
+  h2 { margin:0; font-size:21px; letter-spacing:-.018em; font-weight:660; }
+  .sub { font-size:13px; color:var(--ink-3); margin-left:auto; text-align:right; font-family:var(--mono); }
+
+  h3 { margin:0 0 2px; font-size:14.5px; font-weight:640; letter-spacing:-.006em; }
+  p { margin:0; color:var(--ink-2); max-width:68ch; }
+
+  ul { margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px; }
+  li { color:var(--ink-2); font-size:14.5px; line-height:1.5; }
+  li strong, li b { color:var(--ink); font-weight:600; }
+  li > ul { margin-top:6px; }
+
+  code {
+    font-family:var(--mono); font-size:.86em; background:var(--sunk);
+    padding:1px 5px; border-radius:3px; color:var(--ink);
+  }
+  .m { font-family:var(--mono); font-size:.86em; color:var(--ink-3); }
+
+  .card {
+    background:var(--card); border:1px solid var(--rule);
+    border-left:4px solid var(--rule-2); border-radius:5px;
+    padding:14px 16px; display:flex; flex-direction:column; gap:8px;
+  }
+  .c-live { border-left-color:var(--live); }
+  .c-gate { border-left-color:var(--gate); background:var(--gate-soft); }
+  .c-gap  { border-left-color:var(--gap);  background:var(--gap-soft); }
+  .c-inert{ border-left-color:var(--inert); background:transparent; }
+  .tag {
+    font-family:var(--mono); font-size:10px; letter-spacing:.11em; text-transform:uppercase;
+    align-self:flex-start; padding:2px 6px; border-radius:3px;
+    background:var(--live-soft); color:var(--live);
+  }
+  .c-gate .tag { background:var(--card); color:var(--gate); }
+  .c-gap  .tag { background:var(--card); color:var(--gap); }
+  .c-inert .tag { background:var(--inert-soft); color:var(--inert); }
+
+  .calc {
+    background:var(--card); border:1px solid var(--rule); border-radius:5px;
+    overflow-x:auto; padding:4px 0;
+  }
+  .calc div {
+    font-family:var(--mono); font-size:13.5px; padding:7px 16px; white-space:nowrap;
+    font-variant-numeric:tabular-nums; color:var(--ink);
+  }
+  .calc div span { color:var(--ink-3); }
+  .calc b { color:var(--live); }
+
+  .scroll { overflow-x:auto; border:1px solid var(--rule); border-radius:5px; background:var(--card); }
+  table { border-collapse:collapse; width:100%; min-width:560px; font-size:14px; }
+  th, td { text-align:left; padding:10px 14px; border-bottom:1px solid var(--rule); vertical-align:top; }
+  thead th {
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase;
+    color:var(--ink-3); font-weight:500; background:var(--sunk);
+  }
+  tbody tr:last-child td { border-bottom:0; }
+  td b { color:var(--ink); }
+  .pill {
+    display:inline-block; font-family:var(--mono); font-size:10.5px; letter-spacing:.08em;
+    text-transform:uppercase; padding:2px 7px; border-radius:3px; white-space:nowrap;
+  }
+  .p-yes { background:var(--live-soft); color:var(--live); }
+  .p-no  { background:var(--inert-soft); color:var(--inert); }
+  .p-gap { background:var(--gap-soft); color:var(--gap); }
+
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; }
+
+  footer {
+    border-top:1px solid var(--rule); padding-top:20px;
+    font-size:12.5px; color:var(--ink-3); display:flex; flex-direction:column; gap:6px;
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Mr Sparky Network · final review before build · 8 Aug 2026</div>
+  <h1>The money side, settled</h1>
+  <p class="thesis">On <strong>Friday 14 August</strong> three things change at once: Form 001 stops being filled in, material stops being Mr Sparky's cost and becomes the tech's, and commission moves onto the ladder. Everything below is what we agreed. Nothing has been built yet.</p>
+</header>
+
+<!-- 1 -->
+<section>
+  <div class="sec-head"><span class="num">01</span><h2>How a job earns money</h2><span class="sub">after 14 Aug</span></div>
+  <ul>
+    <li><b>Trigger:</b> job marked Completed in ServiceM8. No form, no gate, nothing else to wait for.</li>
+    <li><b>Owner:</b> <code>completion_actioned_by</code>. That one field decides the money, the conversion credit, the ladder movement, and who wears a defect.</li>
+  </ul>
+  <div class="calc">
+    <div><span>material  =</span> Σ receipts logged to this job <span>+</span> declared van stock</div>
+    <div><span>gross     =</span> invoice inc GST <span>−</span> material</div>
+    <div><span>share     =</span> gross <span>×</span> <b>rung rate</b> <span>(minus 2 points if compliance failed)</span></div>
+    <div><span>payable   =</span> share <span>+</span> material <span>← reimbursed, because the tech funded it</span></div>
+  </div>
+  <ul>
+    <li>Claim submitted → <b>every figure freezes</b>. Corrections go forward as adjustments, never by editing history.</li>
+    <li>Adjustments and retention settle → approve → RCTI → paid.</li>
+    <li>GST is on the full value of the supply, not the net of retention.</li>
+  </ul>
+</section>
+
+<!-- 2 -->
+<section>
+  <div class="sec-head"><span class="num">02</span><h2>The ladder</h2><span class="sub">lib/ladder.mjs — already built</span></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th style="width:18%">Rung</th><th style="width:16%">Rate</th><th>To reach it</th></tr></thead>
+      <tbody>
+        <tr><td><b>0 — start</b></td><td><b>50%</b></td><td>Where everyone begins on the 14th. Negotiable per contractor — someone could start at 60.</td></tr>
+        <tr><td>1</td><td>60%</td><td>≥50% conversion over ≥6 claims</td></tr>
+        <tr><td>2</td><td>70%</td><td>≥65% conversion over ≥12 claims</td></tr>
+        <tr><td>3</td><td>80%</td><td>≥80% conversion over ≥20 claims</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul>
+    <li><b>No movement until 10 claims.</b> That is “the first ten jobs establish your rate”.</li>
+    <li>90-day rolling window, <b>floored at 14 August</b> — nobody arrives already qualified on history.</li>
+    <li>Promotion is immediate. A drop needs <b>two weak reviews running</b>.</li>
+    <li>No claims at all in the window slips a rung — nobody camps on 80% doing a job a fortnight.</li>
+    <li><b>Three outcomes per assessment:</b> hold at 50 · up to 60 · down to 48 on compliance.</li>
+    <li>The rate <b>locks when the lead is claimed</b>, so a rung change can never move a job already taken on.</li>
+  </ul>
+  <div class="card c-inert">
+    <span class="tag">Horizon</span>
+    <h3>The ladder is version one</h3>
+    <p>Commission is performance-based for now; a more sophisticated system takes over once the network grows. The plumbing already allows it: rules are effective-dated per contractor and claims freeze their figures, so a future scheme is a new rule version from a chosen date — nothing historical moves, no migration.</p>
+  </div>
+  <div class="card c-gate">
+    <span class="tag">Build note</span>
+    <h3>Store the rung and the compliance flag — never store “48%”</h3>
+    <p>A raw 48 loses which rung they are on. Record <em>rung 0, compliance failed</em> and both answers fall out: compliance recovers → back to 50; they climb a rung while still failing → 58. The penalty is always minus 2 from whatever rung they hold, computed fresh.</p>
+  </div>
+</section>
+
+<!-- 3 -->
+<section>
+  <div class="sec-head"><span class="num">03</span><h2>Who owns a job</h2><span class="sub">one field, no sync</span></div>
+  <ul>
+    <li>Tech accepts in Telegram → ServiceM8 assigns it → <b>only they can see it</b>.</li>
+    <li>A tech <b>cannot</b> hand his own job on. Only the office can reallocate. Every handover crosses your desk by construction.</li>
+    <li>Office moves it → A loses access, B gains it → B completes it → <b>B's UUID lands on the job</b>.</li>
+    <li>Nobody records the handover, because the handover is what <em>caused</em> the field to change.</li>
+    <li>The Telegram claim record is <b>never edited</b>. A-claimed-B-finished stays visible as the drill-down if the two ever diverge suspiciously.</li>
+    <li><b>Conversion:</b> a lead someone else completed leaves A's denominator entirely — not won, not lost. B gets it in both halves of his.</li>
+    <li>Quoted-by / completed-by split is <b>retired</b>. One rate, one person.</li>
+    <li>Match on the <b>ServiceM8 staff UUID</b>, not the name. Aliases exist today only because the Form 001 dropdown drifted; a UUID never does.</li>
+  </ul>
+</section>
+
+<!-- 4 -->
+<section>
+  <div class="sec-head"><span class="num">04</span><h2>Material</h2><span class="sub">no office data entry, anywhere</span></div>
+  <ul>
+    <li>Tech photographs the docket → OCR reads it → ABN identifies the supplier → dedupe engine checks it → stored.</li>
+    <li><b>The sum of those records is the material figure.</b> The database does what the Job_Cost sheet used to do, without anyone typing.</li>
+    <li>Voided receipts excluded. Credit notes carry a negative amount, so a return reduces the total correctly.</li>
+    <li>One docket, one job. No duplicates, no reissuing between techs.</li>
+    <li><b>Van stock:</b> $50 inc GST per job with no receipt. Per-contractor override; <b>zero is valid</b> for anyone not yet trusted.</li>
+    <li><b>Flag, not a gate:</b> declared over <b>5% of job value</b> lands on the approval panel beside the existing receipt-variance flag.</li>
+    <li>Receipt arriving after a claim is submitted → <b>credit adjustment on the next claim</b>, itemised. A standalone materials-only RCTI only if someone actually asks.</li>
+  </ul>
+  <div class="card c-live">
+    <span class="tag">Why $50 on trust is safe</span>
+    <h3>A padded declaration is worth <code>cap × (100 − rate)</code></h3>
+    <p>The material is subtracted from profit before the split and only then handed back. A fake $50 at the rung-0 rate nets the tech <b>$25</b>, not $50 — and $10 at 80%. Note which way that runs: the lower the rung, the more it is worth to them. Least track record, most to gain — which is the argument for starting new people at zero and raising the cap as they earn a rung.</p>
+  </div>
+  <div class="card c-gate">
+    <span class="tag">Why not 5% as the cap</span>
+    <h3>Van stock has no receipt and never can</h3>
+    <p>He bought that box of RCDs in June; there is no docket for one of them. On a $250 callout swapping a $30 RCD, a 5% cap is $12.50 — he is over it and <em>cannot comply</em>. He also cannot know 5% at the moment he declares, because the invoice may not be priced yet. Hence a flat cap as the rule, and the percentage as the review flag.</p>
+  </div>
+</section>
+
+<!-- 5 -->
+<section>
+  <div class="sec-head"><span class="num">05</span><h2>Compliance</h2><span class="sub">2 points of the rung</span></div>
+  <ul>
+    <li><b>≥80% of jobs with every task ticked</b> → keep the rung rate. Below → rung minus 2.</li>
+    <li>Same 90-day window as conversion, assessed at the same moment.</li>
+    <li><b>No penalty during the qualifying period</b> — you cannot measure a window that has not happened.</li>
+    <li>Start with the <b>JSA only</b>. Widen once it is boring.</li>
+    <li>Ticking a task writes a diary entry: <b>what, when, and by whom</b>. Better than a yes/no — a JSA ticked at knock-off is not a JSA, and only the timestamp shows that.</li>
+    <li>A rate drop must arrive with its reason attached: <em>“48% — compliance ran at 72%, needed 80%.”</em> Unexplained is a dispute; explained is a conversation about paperwork.</li>
+  </ul>
+  <div class="card c-gap">
+    <span class="tag">The hole — catch this before building</span>
+    <h3>0 of 0 tasks reads as 100% compliant</h3>
+    <p>You can only police against a <em>known required set</em>. If “required” means whatever happens to be on the job card, then a job with no tasks scores perfect and the worst case wins. The checklist must <b>auto-attach at job creation</b> from a template or category, so the required set is defined by the template, not by the person being measured. Same for the JSA.</p>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th style="width:22%">What</th><th style="width:34%">Where it lives</th><th>How it is counted</th></tr></thead>
+      <tbody>
+        <tr><td><b>Tasks</b></td><td><code>task.json</code>, filtered to the job</td><td>Total on the job vs how many ticked</td></tr>
+        <tr><td><b>JSA / forms</b></td><td>Attached to job; completed via <code>formresponse</code></td><td>Attached = required, response exists = done. <b>Same code path as Form 001, different UUID.</b></td></tr>
+        <tr><td><b>Photos</b></td><td><code>attachment.json</code>, filtered to the job</td><td>Count them. Presence is checkable; correctness is not</td></tr>
+        <tr><td><b>CCEW</b></td><td>Structured reference field, never free text</td><td>Presence only. Validity needs the eCert API — parked</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 6 -->
+<section>
+  <div class="sec-head"><span class="num">06</span><h2>Warranty</h2><span class="sub">zero build — settled 8 Aug, late</span></div>
+  <ul>
+    <li><b>Mr Sparky does all warranty repairs. Full stop.</b> Nobody on the network touches them, so there is no rectifier to pay and no two-entry resolution to compute.</li>
+    <li>Raised in ServiceM8 under category <b>010 — Warranty Claim</b>, handled in-house.</li>
+    <li>The original contractor is charged <b>as agreed in their contract</b> — $85/hr, 3-hour minimum, plus material, or whatever their signed terms say. The office works out the number.</li>
+    <li>The charge lands as a <b>manual back-charge adjustment</b> with the value typed in and the reason spelled out: <em>“Warranty claim job 167*** — $378.00 + GST.”</em> That button already exists in the portal and shows line-by-line at settlement — never a silent deduction.</li>
+    <li><b>12 months</b> from completion of the original job — a human check now, not a coded one.</li>
+    <li>The per-contractor warranty rate is a number the office <em>reads</em> from settings, not an engine input. Show it beside the adjustment form as it stood on the original job's date, so the right version gets charged without anyone remembering which amendment applied.</li>
+    <li><code>warranty.mjs</code> stays in the codebase, wired to nothing — dead, not deleted, same as the Form 001 readers.</li>
+  </ul>
+  <div class="card c-live">
+    <span class="tag">Deductions list</span>
+    <h3>Legitimate deductions, named in settings</h3>
+    <p>So the contract can point at them: <b>warranty claim</b> (value entered by the office) and <b>wasted lead — $200</b> (parked, below). Recovery order stays as the code has it: a charge draws on retention first, so it hits the security rather than that week's pay, and the settlement shows the draw.</p>
+  </div>
+  <div class="card c-inert">
+    <span class="tag">Parked — analytics phase</span>
+    <h3>Wasted lead: $200, detect-and-propose</h3>
+    <p>Defined: accepted but never quoted (no quote sent via SM8), or quoted with no follow-up from the SMS/email template in the diary. Both detectable from data already read. The system detects and proposes; the office approves the clip. Built when tech profiling starts, not before.</p>
+  </div>
+</section>
+
+<!-- 7 -->
+<section>
+  <div class="sec-head"><span class="num">07</span><h2>Retention</h2></div>
+  <ul>
+    <li><b>10% of every claim</b> until the balance reaches <b>$1,000</b>.</li>
+    <li>Whole balance held. <b>Released 12 months after the later of</b>: access to accept jobs removed, or last job completed.</li>
+    <li>Nothing matures while they are active. Rebuilds after a claim draws it down.</li>
+    <li>Negative balance is an accepted business risk.</li>
+    <li>Currently <code>target: 0</code> in settings, so nothing is withheld today. Setting it to $1,000 turns it on.</li>
+  </ul>
+</section>
+
+<!-- 8 -->
+<section>
+  <div class="sec-head"><span class="num">08</span><h2>Settings are the contract</h2><span class="sub">the biggest new idea</span></div>
+  <ul>
+    <li>The negotiated deal <b>is</b> the settings record: rung start, warranty rate and minimum, retention, van stock cap.</li>
+    <li>Admin uploads the signed document into settings → that action <b>locks the terms and timestamps them</b>.</li>
+    <li>The lock records <b>which settings version was signed</b>, by whom, when. Settings are already versioned on every write, so this is nearly free — and it means “what exactly did Peter sign?” is answerable by loading that version, not by inferring from today's values.</li>
+    <li><b>Amendment = new version, new signature, forward only.</b> $65 → $95 applies to work after the new signature and nothing before it.</li>
+    <li><b>Unsigned means unable to claim.</b> A contractor with no signed terms has nothing to be paid under — cleaner than any job-level gate.</li>
+    <li>Contract <b>generation</b> from settings is parked. The values are readable whenever you come to write it.</li>
+  </ul>
+  <div class="card c-gate">
+    <span class="tag">Effective dating</span>
+    <h3>Commission already does this. Warranty and retention do not.</h3>
+    <p><code>rules[].from</code> versions commission terms by date and the rate locks at claim time. Warranty policy and retention have no dating at all today, so a change would silently apply to old defects and existing balances. That is the one place “settings are the contract” needs building rather than configuring.</p>
+  </div>
+</section>
+
+<!-- 9 -->
+<section>
+  <div class="sec-head"><span class="num">09</span><h2>Retired</h2></div>
+  <ul>
+    <li><b>Helping hand</b> — they run their own businesses and settle borrowing between themselves. Not Mr Sparky's problem.</li>
+    <li><b>Quoted-by / completed-by split</b> — replaced by one field.</li>
+    <li><b>Form 001 as an input</b> — but <b>nothing that reads it is removed</b>. Pre-14th jobs claimed later still need theirs, <code>driftOnClaim</code> re-reads forms, and warranty on an old job comes from <code>warrantyFromForm()</code>. Both paths live side by side permanently.</li>
+    <li>Which makes the 14th a <b>soft switch, not a cutover</b> — nothing to migrate, no deadline, and a straggler form on the 16th for a job done on the 12th still works.</li>
+    <li><b>Warranty app screen</b> — not building it.</li>
+    <li><b>Flat-fee warranty</b> — not building it.</li>
+    <li><b>The warranty engine itself</b> — Mr Sparky does all repairs in-house, so <code>resolveWarranty()</code> and its two-entry logic wire to nothing. The charge is a manual adjustment.</li>
+    <li><b>Category filtering</b> — not needed. Only 003-pool jobs reach Telegram, so only they can ever be claimed or completed by a network tech. The attribution <em>is</em> the filter.</li>
+  </ul>
+</section>
+
+<!-- 10 -->
+<section>
+  <div class="sec-head"><span class="num">10</span><h2>The build</h2></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th style="width:46%">Item</th><th style="width:18%">Size</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td><b>Receipts feed <code>expenseIncGst</code></b></td><td><span class="pill p-gap">Largest</span></td><td>Replaces the Job_Cost sheet. Capture, OCR, ABN, dedupe and storage all exist — the sum just has to reach the calculation</td></tr>
+        <tr><td><b>“Own material, no receipt” field in the app</b></td><td><span class="pill p-yes">An afternoon</span></td><td>Cap from settings, per contractor</td></tr>
+        <tr><td><b>Van stock reimbursed under subbie-funded</b></td><td><span class="pill p-yes">One line</span></td><td>Collapses into the receipted figure — both deducted, both reimbursed</td></tr>
+        <tr><td><b>Drop the no-form gate</b></td><td><span class="pill p-yes">Small</span></td><td>The portal only loads completed jobs, so the condition already holds. <code>AWAITING_FORM</code> just goes</td></tr>
+        <tr><td><b>Attribution from <code>completion_actioned_by</code></b></td><td><span class="pill p-yes">Small</span></td><td>Two form fields replaced by one that already exists. Match on UUID</td></tr>
+        <tr><td><b>One rate per rung</b></td><td><span class="pill p-yes">Small</span></td><td>Three-way split retired throughout</td></tr>
+        <tr><td><b>Compliance into the ladder assessment</b></td><td><span class="pill p-no">Medium</span></td><td>Task/form counting per job, 80% test, minus-2 modifier, reason string. JSA first — same code path as Form 001, different UUID</td></tr>
+        <tr><td><b>Van stock cap + warranty rate per contractor in settings</b></td><td><span class="pill p-yes">Small</span></td><td>Same layered pattern retention uses. Warranty rate is display-only for the office — no engine wiring</td></tr>
+        <tr><td><b>Signed-document lock on settings</b></td><td><span class="pill p-no">Medium</span></td><td>Upload, timestamp, pointer to the signed version, read-only until amended</td></tr>
+        <tr><td><b>New rule version per contractor, 2026-08-14</b></td><td><span class="pill p-yes">Settings</span></td><td><code>materialsFundedBy: subbie</code>, rung 0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 11 -->
+<section>
+  <div class="sec-head"><span class="num">11</span><h2>Open, and to verify</h2></div>
+  <div class="grid2">
+    <div class="card c-live">
+      <span class="tag">Resolved 8 Aug</span>
+      <h3>Recovery order — code stands</h3>
+      <p>A deduction draws on retention first, so it hits the security rather than that week's pay, and the settlement shows the draw line by line. With Mr Sparky doing all warranty repairs there is no rectifier payment to order against — the contradiction with the decision record dissolved.</p>
+    </div>
+    <div class="card c-gate">
+      <span class="tag">Blocked</span>
+      <h3>Three ServiceM8 reads</h3>
+      <p>Which field carries task completion · whether unticking leaves a trace · whether <code>completion_actioned_by</code> is ever an office login. All read-only, one pass. Needs <code>api.servicem8.com</code> added to the environment's network egress allowlist (environment settings, not this session — then a fresh session picks it up).</p>
+    </div>
+    <div class="card c-gate">
+      <span class="tag">Verify</span>
+      <h3>Does the checklist auto-attach?</h3>
+      <p>The whole compliance measure depends on it. If not, the required set has to come from somewhere else before any of it is built.</p>
+    </div>
+    <div class="card c-live">
+      <span class="tag">Housekeeping</span>
+      <h3>Before go-live</h3>
+      <p>Delete Alex's stray rule from 27 July · record every contractor's ServiceM8 staff UUID · set retention target to $1,000 · set warranty rate and minimum per contractor.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section>
+  <div class="sec-head"><span class="num">12</span><h2>Go-live sequence</h2></div>
+  <ul>
+    <li><b>Snapshot every Form 001 response</b> before touching anything in ServiceM8. Small data, permanent insurance.</li>
+    <li><b>Deactivate the form, do not delete it.</b> Responses are separate records and <em>should</em> survive deletion — but that is a one-way door and losing them strands every unclaimed pre-14th job. Hiding it stops new submissions just as well.</li>
+    <li>Note: Form 001 is a <b>ServiceM8 form</b>, read via <code>formresponse.json</code>. Any Google Sheet is a mirror the office keeps, not what the calculation reads.</li>
+    <li><b>Reset:</b> <code>scripts/reset-test-data.mjs --apply</code> clears claims, receipts, adjustments and retention. Settings survive — which is what you want, and also why Alex's stray rule must be deleted by hand.</li>
+    <li><b>Order:</b> settle structure ✓ → build → test → snapshot → reset → sign → go live. The first real claim in the system is then also the first under signed terms.</li>
+  </ul>
+</section>
+
+<footer>
+  <div>Drawn from the code as deployed plus everything agreed in session. No code has been written.</div>
+  <div class="m">commission.mjs · ladder.mjs · conversion.mjs · claims.mjs · retention.mjs · adjustments.mjs · warranty.mjs · approval.mjs · receipts.mjs · receipt-dupes.mjs · rcti.mjs · settings-store.mjs · servicem8.mjs</div>
+</footer>
+
+</div>

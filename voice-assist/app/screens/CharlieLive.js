@@ -13,15 +13,20 @@ import { useKeepAwake } from "expo-keep-awake";
 import { Header, JobChip } from "../components/ui";
 import { C, R, S, T, mono } from "../lib/theme";
 import * as VV from "../lib/vapiVoice";
+import * as Thinking from "../lib/thinking";
+import { addToThread, getThread } from "../lib/thread";
 
 const ORB = 120;
 
 let msgId = 0;
 
-export default function CharlieLive({ job, onBack, onDraft }) {
+export default function CharlieLive({ job, onBack, onDraft, onSwitchToDictate }) {
   useKeepAwake();
 
-  const [log, setLog] = useState([]);
+  // Seeded from the shared thread: a call opened after a dictation exchange
+  // shows that exchange above it — one conversation, whatever the mouth.
+  const [log, setLog] = useState(() =>
+    getThread().map((m) => ({ id: msgId++, cls: m.who, text: m.text })));
   const [streamAi, setStreamAi] = useState("");
   const [liveText, setLiveText] = useState("");
   const [typed, setTyped] = useState("");
@@ -33,6 +38,8 @@ export default function CharlieLive({ job, onBack, onDraft }) {
   const liveRef = useRef(false);
   const scrollRef = useRef(null);
   const aiTailRef = useRef({ text: "", at: 0 });
+  const meTailRef = useRef({ text: "", at: 0 });
+  const speakTimer = useRef(null);
 
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
@@ -44,15 +51,29 @@ export default function CharlieLive({ job, onBack, onDraft }) {
   // ---------- session ----------
   useEffect(() => {
     start();
-    return () => { VV.stop().catch(() => {}); };
+    return () => {
+      if (speakTimer.current) clearTimeout(speakTimer.current);
+      Thinking.release();
+      VV.stop().catch(() => {});
+    };
   }, []);
 
   async function start() {
+    // A dial that hangs looks identical to a dial in progress — and "it just
+    // takes ages, it doesn't connect" is unanswerable without a clock. If the
+    // line is not live in 15 seconds, say so out loud instead of spinning.
+    const watchdog = setTimeout(() => {
+      if (!liveRef.current && phaseRef.current === "thinking") {
+        addMsg("sys", "Still not connected after 15s — that's a network or Vapi problem, not you. Tap the orb to retry, or check reception.");
+      }
+    }, 15000);
     try {
       await VV.start({ onEvent, job });
     } catch (e) {
       addMsg("sys", "Couldn't start the voice session — " + (e?.message || e));
       setPhase("idle");
+    } finally {
+      clearTimeout(watchdog);
     }
   }
 
@@ -60,24 +81,102 @@ export default function CharlieLive({ job, onBack, onDraft }) {
     if (kind === "status") {
       if (payload === "connecting") setPhase("thinking");
       if (payload === "live") { liveRef.current = true; setPhase("listening"); }
-      if (payload === "ended") { liveRef.current = false; setPhase("idle"); setLiveText(""); setStreamAi(""); }
+      if (payload === "ended") { liveRef.current = false; setPhase("idle"); setLiveText(""); setStreamAi(""); Thinking.stop(); }
       return;
     }
-    if (kind === "speaking") { setPhase(payload.on ? "speaking" : "listening"); return; }
+    // A speech turn OPENING is not the same as Charlie saying something.
+    //
+    // Now that he holds his tongue on an unfinished sentence, he returns
+    // nothing for each fragment — but Vapi still opens and closes a speech
+    // turn around that empty reply. Rendering those directly made the label
+    // strobe listening/speaking on every fragment while no audio ever played:
+    // "the microphone keeps swapping from listening to speaker back and forth,
+    // it doesn't stay in listening mode while I'm talking" (Steven, 13 Aug).
+    // The mic never stopped listening — the label was lying.
+    //
+    // So make "speaking" earn it: hold the flip for a beat, and cancel it if
+    // the turn closes first. Real speech lasts far longer than this; an empty
+    // turn never survives it.
+    if (kind === "speaking") {
+      // The bed dies the instant he opens his mouth — no debounce here, that
+      // delay is for the LABEL, and a bed still playing under his first word
+      // is exactly the noise-over-the-top we removed from the call itself.
+      if (payload.on) Thinking.stop();
+      if (speakTimer.current) { clearTimeout(speakTimer.current); speakTimer.current = null; }
+      if (payload.on) {
+        speakTimer.current = setTimeout(() => {
+          speakTimer.current = null;
+          if (phaseRef.current !== "idle") setPhase("speaking");
+        }, 350);
+      } else if (phaseRef.current !== "idle") {
+        setPhase("listening");
+      }
+      return;
+    }
     if (kind === "draft") { onDraft(payload); return; }
     if (kind === "error") { addMsg("sys", "Voice error — " + payload); return; }
+    // Audio routing: loud when it FAILS, silent when it works. The success
+    // line earned its keep while the earpiece bug was being chased; once
+    // fixed it was just four grey lines of noise per call (Steven, 9 Aug).
+    if (kind === "audio") {
+      if (payload?.error) addMsg("sys", "Audio route failed — " + payload.error);
+      return;
+    }
     if (kind !== "speech") return;
 
     const { who, text, final } = payload;
     if (who === "user") {
-      if (final) { if (text.trim()) addMsg("me", text.trim()); setLiveText(""); }
-      else setLiveText(text);
+      if (final) {
+        const mine = text.trim();
+        if (mine) {
+          addToThread("me", mine);
+          // Vapi commits a turn every time it reckons you paused, so ONE
+          // spoken sentence lands as three or four finals. Rendering each as
+          // its own bubble is what made the screen look like a shouting
+          // match with itself — "the transcription is three or four lines"
+          // (Steven, 13 Aug). Glue a run into one bubble, exactly the way
+          // Charlie's own sentences already are below. The run ends when he
+          // answers, so a real back-and-forth still reads as a conversation.
+          const at = Date.now();
+          const run = meTailRef.current;
+          if (run.at && at - run.at < 12000) {
+            setLog((l) => {
+              const copy = [...l];
+              for (let i = copy.length - 1; i >= 0; i--) {
+                if (copy[i].cls === "me") { copy[i] = { ...copy[i], text: `${copy[i].text} ${mine}`.trim() }; break; }
+              }
+              return copy;
+            });
+            meTailRef.current = { text: `${run.text} ${mine}`.trim(), at };
+          } else {
+            addMsg("me", mine);
+            meTailRef.current = { text: mine, at };
+          }
+        }
+        setLiveText("");
+        // He's gone quiet and the turn is committed — Charlie is off doing a
+        // ServiceM8 lookup. The bed fades in after 600ms, so a quick answer
+        // stays silent and only a real wait gets covered.
+        Thinking.start();
+      }
+      else {
+        setLiveText(text);
+        // Words again: he only paused to think, he hasn't finished. Kill the
+        // bed before it plays over him — that is the whole reason the constant
+        // background sound had to go.
+        Thinking.stop();
+      }
       return;
     }
-    if (!final) { setStreamAi(text); return; }
+    if (!final) { setStreamAi(text); Thinking.stop(); return; }
     const t = text.trim();
     setStreamAi("");
     if (!t) return;
+    // Charlie answering closes your run: whatever you say next starts a fresh
+    // bubble rather than being glued onto what you said before he spoke.
+    meTailRef.current = { text: "", at: 0 };
+    // The thread gets each final sentence; its duplicate guard drops echoes.
+    addToThread("ai", t);
     // Vapi reports Charlie sentence by sentence and repeats a line when the
     // audio restarts — glue the run into one bubble, drop the echoes.
     const now = Date.now();
@@ -154,6 +253,7 @@ export default function CharlieLive({ job, onBack, onDraft }) {
     const t = typed.trim();
     if (!t) return;
     addMsg("me", t);
+    addToThread("me", t);
     VV.say(t);
     setTyped("");
   }
@@ -171,6 +271,13 @@ export default function CharlieLive({ job, onBack, onDraft }) {
   return (
     <View style={s.screen}>
       <Header title="Charlie" meta={phase === "idle" ? undefined : timer} onBack={onBack} />
+      {/* The way out of a laggy call. A live session has to guess when you
+          have stopped talking; dictation is told. */}
+      {onSwitchToDictate ? (
+        <Pressable onPress={onSwitchToDictate} hitSlop={8} style={s.toDictate}>
+          <Text style={s.toDictateText}>Switch to dictation</Text>
+        </Pressable>
+      ) : null}
 
       {/* No KeyboardAvoidingView — see SignIn: its relayout on focus is what
           blacked the screen out. The transcript scroller takes keyboard insets
@@ -270,6 +377,8 @@ function Ring({ anim }) {
 }
 
 const s = StyleSheet.create({
+  toDictate: { alignSelf: "center", paddingVertical: 4, paddingHorizontal: 10, marginBottom: 2 },
+  toDictateText: { color: C.muted, fontSize: 12.5, fontWeight: "700" },
   screen: { flex: 1, backgroundColor: C.bg },
   chipWrap: { paddingHorizontal: S.screen, paddingBottom: 10 },
   log: { flex: 1, paddingHorizontal: S.screen },
