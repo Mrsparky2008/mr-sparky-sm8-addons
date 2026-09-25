@@ -54,7 +54,7 @@ function label(iso, style = { weekday: "short", day: "numeric", month: "short" }
   return iso ? new Date(`${iso}T12:00:00`).toLocaleDateString("en-AU", style) : "";
 }
 
-export default function Diary({ onBack, onTalk, onOpenJob }) {
+export default function Diary({ onBack, onOpenJob }) {
   const [date, setDate] = useState(null);        // null = server's Sydney today
   const [today, setToday] = useState(null);      // learned from the first load
   const [data, setData] = useState(null);
@@ -127,7 +127,7 @@ export default function Diary({ onBack, onTalk, onOpenJob }) {
           <ActivityIndicator color={C.brand} style={{ marginTop: 40 }} />
         ) : rows.length === 0 ? (
           <Empty>
-            Nothing booked {isToday ? "today" : `on ${label(shown)}`}.{"\n"}Ask Charlie to fill it.
+            Nothing booked {isToday ? "today" : `on ${label(shown)}`}.{"\n"}Bookings come across from ServiceM8.
           </Empty>
         ) : (
           rows.map((r, i) => (
@@ -246,7 +246,7 @@ const s = StyleSheet.create({
   },
   dateText: { color: C.ink, fontSize: 14.5, fontWeight: "800" },
   todayChip: {
-    borderRadius: R.chip, backgroundColor: C.charlieBg, borderColor: C.charlieLine, borderWidth: 1,
+    borderRadius: R.chip, backgroundColor: C.selectBg, borderColor: C.selectLine, borderWidth: 1,
     paddingHorizontal: 11, paddingVertical: 8,
   },
   todayText: { color: C.infoChipInk, fontSize: 12, fontWeight: "800" },

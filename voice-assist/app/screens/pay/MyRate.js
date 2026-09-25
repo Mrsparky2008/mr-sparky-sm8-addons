@@ -85,7 +85,7 @@ const s = StyleSheet.create({
     backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
     borderRadius: R.card, paddingHorizontal: 13, paddingVertical: 11,
   },
-  rungOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  rungOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   rungRate: { color: C.muted, fontSize: 17, fontWeight: "800", width: 52 },
   rungReq: { flex: 1, color: C.muted, fontSize: 12 },
   youBadge: {

@@ -393,13 +393,13 @@ const s = StyleSheet.create({
     borderRadius: R.chip, borderWidth: 1, borderColor: C.line, backgroundColor: C.panel,
     paddingHorizontal: 13, minHeight: 38, justifyContent: "center",
   },
-  chipOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  chipOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   chipText: { color: C.muted, fontSize: 13.5, fontWeight: "700" },
   tickRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
   tick: {
     width: 24, height: 24, borderRadius: 6, borderWidth: 1.5, borderColor: C.line,
     alignItems: "center", justifyContent: "center", backgroundColor: C.panel,
   },
-  tickOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  tickOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   tickMark: { color: C.ink, fontSize: 15, fontWeight: "800" },
 });

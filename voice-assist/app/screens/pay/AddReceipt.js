@@ -695,7 +695,7 @@ const s = StyleSheet.create({
     borderRadius: R.chip, borderWidth: 1, borderColor: C.line, backgroundColor: C.panel,
     paddingHorizontal: 13, minHeight: 38, justifyContent: "center",
   },
-  chipOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  chipOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   chipText: { color: C.muted, fontSize: 13.5, fontWeight: "700" },
   chipAbn: { color: C.muted, fontSize: 11.5, fontWeight: "400" },
   jobRow: { flexDirection: "row", alignItems: "center", gap: 10 },
@@ -706,7 +706,7 @@ const s = StyleSheet.create({
     borderRadius: R.chip, borderWidth: 1, borderColor: C.line, backgroundColor: C.panel,
     paddingHorizontal: 14, minHeight: 40, justifyContent: "center",
   },
-  flagBtnOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  flagBtnOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   flagBtnText: { color: C.muted, fontSize: 13, fontWeight: "700" },
   flagBtnOnText: { color: C.ink, fontSize: 13, fontWeight: "800" },
   queryBtn: {

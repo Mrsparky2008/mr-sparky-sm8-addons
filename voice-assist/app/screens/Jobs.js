@@ -26,7 +26,7 @@ const BUCKETS = [
   { key: "Unsuccessful", label: "Unsuccessful" },
 ];
 
-export default function Jobs({ onOpenJob, onTalk, onDiary, onAllJobs, onSignOut, onAccount, email }) {
+export default function Jobs({ onOpenJob, onDiary, onAllJobs, onSignOut, onAccount, email }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState({});   // bucket key -> whole bucket shown
   const [jobs, setJobs] = useState([]);

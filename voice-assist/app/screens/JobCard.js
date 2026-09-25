@@ -27,7 +27,7 @@ function parseContacts(list) {
     .filter((c, i, all) => all.findIndex((o) => o.name === c.name && o.phone === c.phone) === i);
 }
 
-export default function JobCard({ jobNumber, siblings, onSibling, onBack, onTalk, onJobDiary, onAddReceipt, onMaterials }) {
+export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobDiary, onAddReceipt, onMaterials }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [showBilling, setShowBilling] = useState(false);

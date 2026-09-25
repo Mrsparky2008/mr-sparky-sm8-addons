@@ -22,8 +22,8 @@ export const C = {
   warnChipInk: "#EFA96A",
   infoChipBg: "rgba(46,125,209,.16)",
   infoChipInk: "#7FB4EE",
-  charlieBg: "rgba(26,115,232,.14)",
-  charlieLine: "rgba(26,115,232,.35)",
+  selectBg: "rgba(26,115,232,.14)",
+  selectLine: "rgba(26,115,232,.35)",
   // Mr Sparky's real brand pair, off the logo.
   navy: "#19488F",
   yellow: "#FEDA00",

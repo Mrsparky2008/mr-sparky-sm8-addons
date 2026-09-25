@@ -2,31 +2,30 @@
 //
 // Four questions, one tab each:
 //   Work      what am I doing   — jobs, today's diary, a job card
-//   Charlie   talk to it        — voice, and the quote he builds on screen
-//   Pay       what am I owed    — the subcontractor portal, natively
+//   AI Assist ask about it      — opens Claude with a primer, outside the app
+//   My day    what's booked     — today's bookings
+//   Money     what am I owed    — the subcontractor portal, natively
 //   Business  how's it going    — admin only: the claims waiting on a decision
 //
-// Role-shaped: a subcontractor never learns the fourth tab exists. The portal
+// Role-shaped: a subcontractor never learns the last tab exists. The portal
 // already knows who is an admin, so the app asks it rather than deciding.
 //
 // Navigation is a stack per tab, held in state. React Navigation would bring a
-// native dependency and a lot of ceremony for a shape this small — and tabs
-// give us something the old single stack had to fake: screens that stay
-// mounted. Charlie's cleanup hangs up the call, so he must never be unmounted
-// while a call is live; that used to need a hidden absolutely-positioned
-// overlay, and now it is just what a tab bar does.
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, LogBox, SafeAreaView, StyleSheet, View } from "react-native";
+// native dependency and a lot of ceremony for a shape this small.
+//
+// **Charlie and Vapi were removed on 25 Sep 2026.** The in-app voice assistant
+// ran on Vapi over Daily's WebRTC, and that native module will not initialise
+// under React Native's New Architecture on Android — the app installed, opened
+// and died before rendering a thing. Charlie had already come off the tab bar
+// on 30 Aug; keeping a retired feature's native dependency was costing us the
+// whole Android platform. Gone with it: the microphone and speech-recognition
+// permissions, which nothing else was using.
+//
+// Talking to the assistant now happens in Claude itself, opened by a link.
 
-// Daily (Vapi's call layer) console.errors two things that are not faults,
-// and the dev build promotes any console.error to the full red screen:
-//  - "Meeting ended in error: Network request failed" — its own aborted
-//    cleanup when a call is hung up mid-flight; the sound of a hang-up.
-//  - "daily-js version … is no longer supported" — a deprecation nag on
-//    every call start. Real fix is upgrading @vapi-ai/react-native and its
-//    Daily dependency, which is NATIVE code — next full build, not OTA.
-// Everything else still shows.
-LogBox.ignoreLogs([/Meeting ended in error/, /daily-js version .* no longer supported/]);
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
+
 import { StatusBar } from "expo-status-bar";
 import * as Linking from "expo-linking";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -41,9 +40,6 @@ import Jobs from "./screens/Jobs";
 import AllJobs from "./screens/AllJobs";
 import JobCard from "./screens/JobCard";
 import JobDiary from "./screens/JobDiary";
-import CharlieLive from "./screens/CharlieLive";
-import CharlieDictate from "./screens/CharlieDictate";
-import QuoteWorkshop from "./screens/QuoteWorkshop";
 import Diary from "./screens/Diary";
 import MoneyHub from "./screens/pay/MoneyHub";
 import ClaimsList from "./screens/pay/ClaimsList";
@@ -65,7 +61,7 @@ import CrewMember from "./screens/admin/CrewMember";
 import ApproveClaim from "./screens/admin/ApproveClaim";
 import { signOut } from "./lib/auth";
 import * as portal from "./lib/portal";
-import * as VV from "./lib/vapiVoice";
+
 import { IS_DEV_APP } from "./lib/config";
 import { C, S, suburb } from "./lib/theme";
 
@@ -100,23 +96,6 @@ function Shell() {
   const [tab, setTab] = useState("work");
   const [stacks, setStacks] = useState(ROOTS);
   const [workView, setWorkView] = useState("jobs");   // jobs | today
-  const [charlieJob, setCharlieJob] = useState(null);
-  // Charlie's screen dials the moment it mounts — right when he was a screen
-  // you tapped into, wrong for a tab that exists from launch. Found live: the
-  // app opened and started talking. So he is born on the FIRST visit to his
-  // tab and stays mounted after (leaving mid-call must not hang up the line).
-  const [charlieBorn, setCharlieBorn] = useState(false);
-  // "dictate" | "voice". Live voice is the default again (Steven, 9 Aug:
-  // "we do need a live conversation") — dictation was shipped as the default
-  // when it was only ever asked for as an option, and reaching the live orb
-  // through an extra switch was part of why connecting felt so slow. The
-  // live session DIALS the moment it mounts, which is why it stays behind
-  // charlieBorn; dictation remains one tap away from the live screen.
-  const [charlieMode, setCharlieMode] = useState("voice");
-  const [draft, setDraft] = useState(null);           // quote lines from Charlie
-  const [committing, setCommitting] = useState(false);
-  // An approval waiting for the dictation screen to say on our behalf.
-  const [pendingSay, setPendingSay] = useState(null);
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
   const [account, setAccount] = useState(false);      // the who-am-I / sign-out sheet
 
@@ -170,48 +149,9 @@ function Shell() {
     Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(primer));
   }, []);
 
-  // Talking about a job is a tab change, not a push — Charlie is a place you go
-  // back to, and the call has to survive going somewhere else and returning.
-  const openCharlie = useCallback((job) => {
-    setDraft(null);
-    setCharlieJob(asJob(job));
-    setCharlieBorn(true);
-    setTab("charlie");
-  }, []);
-
-  // Charlie surfaces a draft as a tool call; it gets its own screen so nobody
-  // mistakes talk for something that has been saved.
-  const onDraft = useCallback((lines) => {
-    setDraft(lines);
-    setTab("charlie");
-  }, []);
-
-  // Committing is Charlie's job, not the app's: saying the approval out loud
-  // runs the same add-only, duplicate-guarded write the voice flow already uses,
-  // rather than inventing a second path into ServiceM8 billing.
-  // Committing is Charlie's job, not the app's — but it has to reach him.
-  // VV.say() only speaks into a LIVE call; pressed from dictation it went
-  // nowhere at all, so "Lock it in" closed the draft and wrote nothing
-  // (Steven, 9 Aug: "it says it saved but it's not happening"). Route it to
-  // whichever mouth is actually open.
-  const lockIn = useCallback(() => {
-    const approval = "Lock it in — add those lines to the job.";
-    setCommitting(true);
-    if (charlieMode === "voice" && charlieBorn) {
-      VV.say(approval);
-      setTimeout(() => { setCommitting(false); setDraft(null); }, 900);
-      return;
-    }
-    // Dictation: hand it to that screen, which sends it the ordinary way and
-    // shows the answer, so "did it save?" is answered on screen.
-    setPendingSay(approval);
-    setCommitting(false);
-    setDraft(null);
-  }, [charlieMode, charlieBorn]);
-
   // Deep link from the ServiceM8 job card: mrsparky-aiassist://job/167483.
   // The add-on is the doorway, this is the room — it opens the job card for
-  // that job, from which Charlie is one tap away already anchored. It stops
+  // that job. It stops
   // short of dialling straight into a live mic session off a single tap.
   const pendingJob = useRef(null);
 
@@ -268,13 +208,9 @@ function Shell() {
   }, []);
 
   async function handleSignOut() {
-    await VV.stop().catch(() => {});
     await signOut();
     setStacks(ROOTS);
     setTab("work");
-    setDraft(null);
-    setCharlieJob(null);
-    setCharlieBorn(false);
     setWho(null);
     setWaiting(0);
     setDemoSignedIn(false);
@@ -353,7 +289,7 @@ function Shell() {
     );
   }
 
-  // Charlie retired 30 Aug 2026 - AI Assist (Claude via the connector) does
+  // AI Assist (Claude via the connector) does
   // the talking. The bar carries the everyday four: Work, AI Assist, My day,
   // Money - plus Business for the admin.
   const tabs = ["work", "assist", "day", "pay", ...(who?.isAdmin ? ["admin"] : [])];
@@ -395,7 +331,6 @@ function Shell() {
                 onOpenJob={(j, siblings) => push({
                   name: "job", job: asJob(j), siblings: (siblings || []).map(asJob).filter(Boolean),
                 })}
-                onTalk={openCharlie}
                 onDiary={() => setWorkView("today")}
                 onAllJobs={() => push({ name: "alljobs" })}
                 onSignOut={handleSignOut}
@@ -403,7 +338,6 @@ function Shell() {
               />
             ) : (
               <Diary
-                onTalk={openCharlie}
                 onOpenJob={(j) => push({ name: "job", job: asJob(j) })}
               />
             )}
@@ -422,7 +356,6 @@ function Shell() {
                 siblings={top.siblings}
                 onSibling={(j) => replaceTop({ name: "job", job: j, siblings: top.siblings })}
                 onBack={pop}
-                onTalk={openCharlie}
                 onJobDiary={(payload) => push({ name: "jobdiary", job: top.job, ...payload })}
                 onAddReceipt={(jobNumber) => push({ name: "jobreceipt", jobNumber })}
                 onMaterials={(jobNumber) => push({ name: "jobmaterial", jobNumber })}
@@ -440,7 +373,6 @@ function Shell() {
                 attachments={top.attachments}
                 timeOnSite={top.timeOnSite}
                 onAddReceipt={() => push({ name: "jobreceipt", jobNumber: top.job.job_number })}
-                onTalk={() => openCharlie(top.job)}
                 onBack={pop}
               />
             </View>
@@ -464,47 +396,6 @@ function Shell() {
           {top?.name === "jobmaterial" ? (
             <View style={s.fill}>
               <JobMaterial jobNumber={top.jobNumber} onBack={pop} />
-            </View>
-          ) : null}
-        </View>
-
-        {/* ---- Charlie ---------------------------------------------------
-            Mounted on first visit, never unmounted after: mounting dials, and
-            unmounting runs his cleanup, which hangs up the call — so leaving
-            this tab must never destroy him, and launching the app must never
-            create him. Hang up by tapping the orb, or sign out. */}
-        <View style={[s.fill, tab !== "charlie" && s.hidden]} pointerEvents={tab === "charlie" ? "auto" : "none"}>
-          {/* Two ways to talk to him, and they are genuinely different tools.
-              Dictation does not guess when you have stopped speaking, so there
-              is nothing to lag; live voice is for when your hands are full.
-              Dictation is the default because it is the one that answers on
-              the first try. */}
-          {charlieMode === "dictate" ? (
-            <CharlieDictate
-              job={charlieJob}
-              onBack={() => setTab("work")}
-              onDraft={onDraft}
-              pendingSay={pendingSay}
-              onPendingSaid={() => setPendingSay(null)}
-              onSwitchToVoice={() => { setCharlieMode("voice"); setCharlieBorn(true); }}
-            />
-          ) : charlieBorn ? (
-          <CharlieLive
-            job={charlieJob}
-            onBack={() => setTab("work")}
-            onDraft={onDraft}
-            onSwitchToDictate={() => setCharlieMode("dictate")}
-          />
-          ) : null}
-          {draft ? (
-            <View style={s.fill}>
-              <QuoteWorkshop
-                job={charlieJob}
-                lines={draft}
-                committing={committing}
-                onKeepTalking={() => setDraft(null)}
-                onLockIn={lockIn}
-              />
             </View>
           ) : null}
         </View>

@@ -30,7 +30,7 @@ function hoursLabel(minutes) {
   return h ? `${h}h ${m % 60}m` : `${m}m`;
 }
 
-export default function JobDiary({ jobNumber, bookings = [], notes = [], noteFeed = [], timeOnSite, onAddReceipt, onTalk, onBack }) {
+export default function JobDiary({ jobNumber, bookings = [], notes = [], noteFeed = [], timeOnSite, onAddReceipt, onBack }) {
   const ordered = [...bookings].sort((a, b) => String(b.start || "").localeCompare(String(a.start || "")));
   const [added, setAdded] = useState([]);          // notes written this visit
   const [writing, setWriting] = useState(false);
@@ -249,7 +249,7 @@ const s = StyleSheet.create({
     borderRadius: R.chip, borderWidth: 1, borderColor: C.line, backgroundColor: C.panel,
     paddingHorizontal: 12, minHeight: 34, justifyContent: "center",
   },
-  chipOn: { borderColor: C.brand, backgroundColor: C.charlieBg },
+  chipOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   chipText: { color: C.muted, fontSize: 13, fontWeight: "700" },
   addRow: { flexDirection: "row", gap: 9 },
   addBtn: {
