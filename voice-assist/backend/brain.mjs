@@ -443,7 +443,22 @@ async function buildJobIndex() {
   }
   const jobs = [];
   for (const j of toArray(jobsRes.body)) {
-    if (String(j.active) !== "1" && j.active !== 1) continue;
+    /*
+     * Archived jobs stay IN the index, marked.
+     *
+     * They used to be dropped here, and that had two consequences nobody
+     * wanted. A tech's Work tab lists the jobs he accepted and asks this
+     * index for their live status; a job that is not in it keeps whatever
+     * status was stamped when he accepted it, so 167697 and 167698 at
+     * 2 Clower Avenue still read "Quote" two days after Steven closed them
+     * as duplicates. And tapping one answered "Job 167698 isn't in
+     * ServiceM8" about a job that plainly is (30 Sep 2026).
+     *
+     * They are kept out of BROWSING, which is where "archived" means "I have
+     * put this away" - see the bucket list in index.mjs. Search and a direct
+     * job card find them, because looking one up is a deliberate act.
+     */
+    const archived = String(j.active) !== "1" && j.active !== 1;
     const address = String(j.job_address || "").replace(/\s+/g, " ").trim();
     const description = String(j.job_description || "").replace(/\s+/g, " ").trim();
     const contact = contactByJob.get(j.uuid) || "";
@@ -457,6 +472,7 @@ async function buildJobIndex() {
       uuid: j.uuid,
       number: j.generated_job_id,
       status: j.status,
+      archived,
       address, contact, description, haystack,
       tokens: new Set(tokens(`${num} ${address} ${contact} ${description}`)),
     });

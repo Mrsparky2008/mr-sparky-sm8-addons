@@ -30,12 +30,23 @@ async function freshStatuses(result) {
   if (!result?.ok || !result.matches?.length) return result;
   try {
     const index = await jobIndex();
-    const statusOf = new Map(index.map((j) => [String(j.number), j.status]));
+    const byNumber = new Map(index.map((j) => [String(j.number), j]));
     const counts = {};
     const matches = result.matches.map((m) => {
-      const status = statusOf.get(String(m.job_number)) || m.status;
+      /*
+       * The live status, and `|| m.status` only as a genuine last resort.
+       *
+       * That fallback is the status stamped when the tech ACCEPTED the job,
+       * and it used to be reached by every archived job - 167697 and 167698
+       * read "Quote" for two days after they were closed as duplicates,
+       * because they were not in the index to be looked up (30 Sep 2026).
+       * Now they are, so the fallback only fires for a job ServiceM8 has
+       * genuinely never heard of.
+       */
+      const live = byNumber.get(String(m.job_number));
+      const status = live ? live.status : m.status;
       counts[status] = (counts[status] || 0) + 1;
-      return { ...m, status };
+      return { ...m, status, archived: live ? !!live.archived : undefined };
     });
     return { ...result, matches, counts };
   } catch {
@@ -666,7 +677,11 @@ export const handler = awslambda.streamifyResponse(async (event, responseStream)
           const index = await jobIndex();
           const BUCKETS = ["Quote", "Work Order", "Completed"];
           const PER_BUCKET = 8;
-          const newestFirst = [...index].sort((a, b) => Number(b.number) - Number(a.number));
+          // Archived jobs are in the index now so a card can open and a
+          // status can be right, but browsing is where "archived" means "I
+          // have put this away" - so they stay out of here (30 Sep 2026).
+          const newestFirst = index.filter((j) => !j.archived)
+            .sort((a, b) => Number(b.number) - Number(a.number));
           const counts = {};
           const picked = [];
           for (const j of newestFirst) {
