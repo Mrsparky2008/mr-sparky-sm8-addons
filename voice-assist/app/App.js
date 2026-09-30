@@ -295,7 +295,26 @@ function Shell() {
   // AI Assist (Claude via the connector) does
   // the talking. The bar carries the everyday four: Work, AI Assist, My day,
   // Money - plus Business for the admin.
-  const tabs = ["work", "assist", "day", "pay", ...(who?.isAdmin ? ["admin"] : [])];
+  /*
+   * What this person may see. The portal decides it and sends it on /api/me;
+   * the phone renders what it is told it may have.
+   *
+   * Steven, 1 October 2026, on the employees he is adding for Jason: "will
+   * they have access to the app? Probably. Then we might have to hide the
+   * business tab from them and just give them the day, the AI assist and the
+   * work tab." The money on the jobs they finish is their employer's, not
+   * theirs - a Money tab would show them somebody else's figures or an empty
+   * screen, and both are worse than not having it.
+   *
+   * Defaults to the old four, so a portal that has not been updated yet, or a
+   * reply that arrives without capabilities, behaves exactly as before.
+   */
+  const can = who?.can || {};
+  const tabs = [
+    "work", "assist", "day",
+    ...(can.money === false ? [] : ["pay"]),
+    ...(who?.isAdmin && can.admin !== false ? ["admin"] : []),
+  ];
 
   return (
     <SafeAreaView style={s.root}>
