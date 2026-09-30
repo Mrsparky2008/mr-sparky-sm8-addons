@@ -105,6 +105,20 @@ const qs = (params) => {
 export const handover = ({ action, jobNumber }) =>
   post("/api/handover", { action, jobNumber });
 
+/*
+ * An invoice the contractor sends US - their own tax invoice for hours they
+ * put into somebody else's job. Not the RCTI, which runs untouched for their
+ * own jobs, and paid on its own rather than folded into a claim.
+ *
+ * `preview: true` renders the document and stores nothing. The number is
+ * issued by the portal, never sent from here.
+ */
+export const raiseInvoice = ({ jobNumber, reference, lines, preview }) =>
+  post("/api/invoices", { jobNumber, reference, lines, preview: !!preview });
+
+/** The ones this person has already raised. */
+export const myInvoices = () => get("/api/invoices");
+
 /** Who the portal thinks you are: name, role, and whether you can approve. */
 export const me = () => get("/api/me");
 

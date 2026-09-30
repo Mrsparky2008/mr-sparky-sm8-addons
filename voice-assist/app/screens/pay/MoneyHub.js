@@ -160,6 +160,14 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
             sub="insurance & certificates"
             onPress={() => onOpen("docs", data)}
           />
+          {/* Hours put into somebody else's job. It has been on the portal
+              since 24 Sep 2026; this is the same thing where he already is
+              (Steven, 30 Sep 2026). */}
+          <HubTile
+            icon="topay" label="Invoice us"
+            sub="labour on another job"
+            onPress={() => onOpen("raise", data)}
+          />
         </View>
 
         <Pressable onPress={() => onOpen("details", data)} style={s.detailsRow}>

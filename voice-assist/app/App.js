@@ -42,6 +42,7 @@ import JobCard from "./screens/JobCard";
 import JobDiary from "./screens/JobDiary";
 import Diary from "./screens/Diary";
 import MoneyHub from "./screens/pay/MoneyHub";
+import RaiseInvoice from "./screens/pay/RaiseInvoice";
 import ClaimsList from "./screens/pay/ClaimsList";
 import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
@@ -423,6 +424,9 @@ function Shell() {
           ) : null}
           {top?.name === "statement" ? (
             <View style={s.fill}><Statement data={top.data} onBack={pop} /></View>
+          ) : null}
+          {top?.name === "raise" ? (
+            <View style={s.fill}><RaiseInvoice onBack={pop} /></View>
           ) : null}
           {top?.name === "retention" ? (
             <View style={s.fill}><Retention data={top.data} onBack={pop} /></View>
