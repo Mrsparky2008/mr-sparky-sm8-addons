@@ -77,7 +77,29 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
           <WhoseJob rows={handovers} onDone={load} />
         ) : null}
 
-        {(handovers.settled || []).length ? <Decided rows={handovers.settled} /> : null}
+        {(handovers.settled || []).length ? (
+          <Decided rows={handovers.settled} onDispute={(r) => {
+            Alert.alert(
+              "You do not accept that?",
+              `Job ${r.jobNumber} is then frozen: neither of you can claim it until you settle it between you.`,
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "I don't accept that",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      await portal.handover({ action: "dispute", jobNumber: r.jobNumber });
+                      load();
+                    } catch (err) {
+                      Alert.alert("It would not go through", err?.message || "Try again in a minute.");
+                    }
+                  },
+                },
+              ],
+            );
+          }} />
+        ) : null}
 
         <Card>
           <SectionLabel>Ready to claim</SectionLabel>
@@ -178,12 +200,19 @@ function WhoseJob({ rows, onDone }) {
       ? `Ask for job ${d.jobNumber}?\n\nThe person whose job it is will be asked to hand it over.`
       : action === "handover"
         ? `Hand job ${d.jobNumber} over?\n\nEverything it is worth moves to them. It stops being yours to claim.`
-        : `Keep job ${d.jobNumber}?\n\nIt stays yours and the question goes away.`;
+        : action === "dispute"
+          ? `Say you do not accept that?\n\nJob ${d.jobNumber} is then frozen: neither of you can claim it until you settle it between you.`
+          : action === "withdraw"
+            ? `Drop it?\n\nJob ${d.jobNumber} goes back to them and stops being frozen.`
+            : `Keep job ${d.jobNumber}?\n\nIt stays yours. If they do not accept that, the job freezes until you settle it.`;
     Alert.alert("Whose job is this?", words, [
       { text: "Cancel", style: "cancel" },
       {
-        text: action === "ask" ? "Ask" : action === "handover" ? "Hand it over" : "Keep it",
-        style: action === "handover" ? "destructive" : "default",
+        text: action === "ask" ? "Ask"
+          : action === "handover" ? "Hand it over"
+            : action === "dispute" ? "I don't accept that"
+              : action === "withdraw" ? "Drop it" : "Keep it",
+        style: action === "handover" || action === "dispute" ? "destructive" : "default",
         onPress: async () => {
           setBusy(d.jobNumber);
           try {
@@ -221,8 +250,25 @@ function WhoseJob({ rows, onDone }) {
                 ? `${firstName(d.completedBy?.name)} completed it${asked ? " and has asked for it" : ""}`
                 : `You completed it — it is ${firstName(d.acceptedBy?.name)}'s${asked ? ". You have asked for it" : ""}`}
             </Text>
+            {d.frozen ? (
+              <Text style={[T.small, { marginTop: 4, color: C.active }]}>
+                In dispute. Nobody can claim this until you two settle it.
+                {d.disputeReason ? ` \u201C${d.disputeReason}\u201D` : ""}
+              </Text>
+            ) : null}
             <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-              {owner ? (
+              {d.frozen ? (
+                owner ? (
+                  <Pressable style={[s.whoseBtn, s.whoseGo]} disabled={!!busy}
+                    onPress={() => act("handover", d)}>
+                    <Text style={s.whoseGoText}>Hand it over</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable style={s.whoseBtn} disabled={!!busy} onPress={() => act("withdraw", d)}>
+                    <Text style={s.whoseBtnText}>Drop it</Text>
+                  </Pressable>
+                )
+              ) : owner ? (
                 <>
                   <Pressable style={[s.whoseBtn, s.whoseGo]} disabled={!!busy}
                     onPress={() => act("handover", d)}>
@@ -256,17 +302,27 @@ function WhoseJob({ rows, onDone }) {
  * learns what happened is by opening the app - and a card that simply
  * vanishes tells him nothing. It says so, in words, for a fortnight.
  */
-function Decided({ rows }) {
+function Decided({ rows, onDispute }) {
   const firstName = (n) => String(n || "The office").trim().split(/\s+/)[0];
   return (
     <Card>
       <SectionLabel>Decided</SectionLabel>
       {rows.map((r) => (
-        <Text key={r.jobNumber} style={[T.small, { marginTop: 4 }]}>
-          {r.moved
-            ? `${firstName(r.decidedBy || r.fromName)} handed job ${r.jobNumber} to you. It is in your claimable now.`
-            : `${firstName(r.decidedBy || r.fromName)} is keeping job ${r.jobNumber}.`}
-        </Text>
+        <View key={r.jobNumber} style={{ marginTop: 6 }}>
+          <Text style={T.small}>
+            {r.moved
+              ? `${firstName(r.decidedBy || r.fromName)} handed job ${r.jobNumber} to you. It is in your claimable now.`
+              : `${firstName(r.decidedBy || r.fromName)} is keeping job ${r.jobNumber}.`}
+          </Text>
+          {/* A refusal is not the end of it. Saying so freezes the job for
+              both of them until they have talked. */}
+          {r.moved ? null : (
+            <Pressable style={[s.whoseBtn, { marginTop: 8, alignSelf: "flex-start" }]}
+              onPress={() => onDispute(r)}>
+              <Text style={s.whoseBtnText}>I don't accept that</Text>
+            </Pressable>
+          )}
+        </View>
       ))}
     </Card>
   );
