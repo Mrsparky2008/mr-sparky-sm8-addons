@@ -77,6 +77,8 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
           <WhoseJob rows={handovers} onDone={load} />
         ) : null}
 
+        {(handovers.settled || []).length ? <Decided rows={handovers.settled} /> : null}
+
         <Card>
           <SectionLabel>Ready to claim</SectionLabel>
           {claimable ? (
@@ -242,6 +244,30 @@ function WhoseJob({ rows, onDone }) {
           </View>
         );
       })}
+    </Card>
+  );
+}
+
+/*
+ * What was decided while you were not looking.
+ *
+ * Steven, 30 September 2026: "he's using the app only." Jason has no push
+ * notification and does not follow this on Telegram, so the only way he
+ * learns what happened is by opening the app - and a card that simply
+ * vanishes tells him nothing. It says so, in words, for a fortnight.
+ */
+function Decided({ rows }) {
+  const firstName = (n) => String(n || "The office").trim().split(/\s+/)[0];
+  return (
+    <Card>
+      <SectionLabel>Decided</SectionLabel>
+      {rows.map((r) => (
+        <Text key={r.jobNumber} style={[T.small, { marginTop: 4 }]}>
+          {r.moved
+            ? `${firstName(r.decidedBy || r.fromName)} handed job ${r.jobNumber} to you. It is in your claimable now.`
+            : `${firstName(r.decidedBy || r.fromName)} is keeping job ${r.jobNumber}.`}
+        </Text>
+      ))}
     </Card>
   );
 }
