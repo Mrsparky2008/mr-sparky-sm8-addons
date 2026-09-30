@@ -235,6 +235,16 @@ export const abnLookup = (q) => get(`/api/abr${qs({ q })}`);
 /** A short-lived URL to look at a receipt; the bucket blocks public access. */
 export const receiptViewUrl = (key) => get(`/api/receipts/view${qs({ key })}`);
 
+/*
+ * The supplier's own paperwork behind a charge - the PDF they sent, or the
+ * photo of a docket that was paid on the card. A short-lived signed URL.
+ *
+ * The office may open anything; a contractor may open the paper on their own
+ * jobs and anything charged against them, and nothing else.
+ */
+export const purchaseDoc = ({ emailId, docIndex }) =>
+  get(`/api/purchases/doc${qs({ emailId, docIndex })}`);
+
 /* ---- Insurance: the Certificate of Currency, same rails as receipts ------ */
 /** A short-lived URL to put a certificate photo straight into the bucket. */
 export const insuranceUploadUrl = ({ contentType, extension }) =>

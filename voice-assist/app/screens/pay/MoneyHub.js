@@ -46,7 +46,7 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
   }
 
   const { statement: st, claimable, claims = [], profile, retention, receipts = {}, ladder, conversion,
-    handovers = { mine: [], theirs: [] } } = data;
+    handovers = { mine: [], theirs: [] }, owedBack } = data;
 
   const heldCount = (st.jobs || []).filter((j) => j.outcome !== "OK").length;
   const awaiting = claims.filter((c) => c.status === "submitted").length;
@@ -147,6 +147,17 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
             icon="bank" label="Retention"
             sub={retention ? `${money(retention.balance)} held` : "nothing held"}
             onPress={() => onOpen("retention", data)}
+          />
+          {/* What they owe US - material on our account that was for them.
+              It has been in the browser portal since 23 Sep; the phone was
+              the gap, which is the wrong way round when the man being
+              charged is the one carrying it (Steven, 30 Sep 2026). */}
+          <HubTile
+            icon="topay" label="What I owe"
+            sub={owedBack?.totalIncGst
+              ? `${money(owedBack.totalIncGst)} on the account`
+              : "nothing owing"}
+            onPress={() => onOpen("owed", data)}
           />
           <HubTile
             icon="trend" label="My rate"
