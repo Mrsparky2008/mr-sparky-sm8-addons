@@ -17,7 +17,8 @@
 // all come off the record the office holds.
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet,
+  Text, TextInput, View,
 } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono, money } from "../../lib/theme";
@@ -120,7 +121,25 @@ export default function RaiseInvoice({ onBack }) {
   return (
     <View style={{ flex: 1 }}>
       <Header title="Invoice us" onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+      {/*
+        * The number pad has no Return key, so there was nothing to tap to put
+        * it away - it sat on top of "See the invoice" and the screen looked
+        * finished with no way to finish it (Steven, 30 Sep 2026).
+        *
+        * Two ways out, because one is never enough on a phone: the content
+        * lifts above the keyboard, and a downward swipe anywhere on the form
+        * dismisses it.
+        */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
+      <ScrollView
+        contentContainerStyle={s.body}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
         <Card>
           <SectionLabel>What it is for</SectionLabel>
           <Text style={[T.small, { marginBottom: 10 }]}>
@@ -189,6 +208,7 @@ export default function RaiseInvoice({ onBack }) {
           </Card>
         ) : null}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -211,7 +231,9 @@ function Field({ label, value, onChange, placeholder, keyboardType }) {
 }
 
 const s = StyleSheet.create({
-  body: { padding: S.screen, gap: S.gap, paddingBottom: 60 },
+  // Room for the number pad underneath, so the button can still be scrolled
+  // to even if the lift is defeated - a rotation, a small screen, Android.
+  body: { padding: S.screen, gap: S.gap, paddingBottom: 320 },
   label: { color: C.muted, fontSize: 12, marginBottom: 4 },
   input: {
     minHeight: S.touch, borderWidth: 1, borderColor: C.line, borderRadius: R.button,

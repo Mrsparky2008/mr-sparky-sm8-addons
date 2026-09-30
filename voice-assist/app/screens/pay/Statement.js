@@ -1,11 +1,11 @@
 // The job-by-job truth: every job, what it's worth, and the held ones with the
 // reason in plain words. Was the front page of the old Pay tab; now a bucket.
-import { ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Card, Empty, Header, Row, SectionLabel } from "../../components/ui";
 import { S, money } from "../../lib/theme";
 import { HELD } from "./shared";
 
-export default function Statement({ data, onBack }) {
+export default function Statement({ data, onBack, onOpenJob }) {
   const st = data?.statement || {};
   const meta = data?.meta || {};
   const claimed = new Set(data?.claimedJobNumbers || []);
@@ -25,6 +25,7 @@ export default function Statement({ data, onBack }) {
               {ready.map((j, i) => (
                 <Row
                   key={j.jobNumber}
+                  onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : undefined}
                   label={`#${j.jobNumber}  ${meta[j.jobNumber]?.suburb || ""}`.trim()}
                   value={money(j.payableIncGst)}
                   last={i === ready.length - 1}
@@ -41,6 +42,7 @@ export default function Statement({ data, onBack }) {
               {held.map((j, i) => (
                 <Row
                   key={j.jobNumber}
+                  onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : undefined}
                   label={`#${j.jobNumber}`}
                   value={HELD[j.outcome] || j.outcome}
                   dim
@@ -58,6 +60,7 @@ export default function Statement({ data, onBack }) {
               {onClaims.map((j, i) => (
                 <Row
                   key={j.jobNumber}
+                  onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : undefined}
                   label={`#${j.jobNumber}  ${meta[j.jobNumber]?.suburb || ""}`.trim()}
                   value={money(j.payableIncGst)}
                   dim

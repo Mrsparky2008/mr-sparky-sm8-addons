@@ -25,7 +25,7 @@ function when(iso) {
   return sameDay ? `${t} today` : `${t}, ${d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
 }
 
-export default function SubmitClaim({ data, onBack, onSubmitted }) {
+export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
   const claimable = data?.claimable;
   const meta = data?.meta || {};
   const jobsById = Object.fromEntries((data?.statement?.jobs || []).map((j) => [j.jobNumber, j]));
@@ -113,6 +113,10 @@ export default function SubmitClaim({ data, onBack, onSubmitted }) {
                 onPress={() => toggle(n)}
                 label={`#${n}  ${meta[n]?.suburb || ""}`.trim()}
                 value={money(jobsById[n]?.payableIncGst)}
+                /* The whole row still ticks. The chevron is its own target,
+                   so looking at a job cannot accidentally deselect it - which
+                   on a claim screen would be an expensive mis-tap. */
+                onInspect={onOpenJob ? () => onOpenJob(jobsById[n], meta[n]) : null}
               />
             ))}
             {helperCount ? (
@@ -171,12 +175,17 @@ export default function SubmitClaim({ data, onBack, onSubmitted }) {
   );
 }
 
-function Tick({ on, onPress, label, value }) {
+function Tick({ on, onPress, label, value, onInspect }) {
   return (
     <Pressable onPress={onPress} style={s.tick}>
       <View style={[s.box, on && s.boxOn]}>{on ? <Text style={s.boxTick}>✓</Text> : null}</View>
       <Text style={[s.tickLabel, !on && { color: C.muted }]} numberOfLines={1}>{label}</Text>
       <Text style={[s.tickValue, mono, !on && { color: C.muted }]}>{value}</Text>
+      {onInspect ? (
+        <Pressable onPress={onInspect} hitSlop={12} style={s.inspect}>
+          <Text style={s.chev}>›</Text>
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -191,6 +200,8 @@ const s = StyleSheet.create({
     paddingVertical: 10, borderBottomColor: C.line, borderBottomWidth: 1,
   },
   tickLabel: { flex: 1, color: C.ink, fontSize: 14.5 },
+  inspect: { paddingLeft: 10, paddingVertical: 4 },
+  chev: { color: C.muted, fontSize: 20, lineHeight: 22 },
   tickValue: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
   accept: { flexDirection: "row", alignItems: "center", gap: 11, minHeight: S.touch, marginTop: 4 },
   box: {

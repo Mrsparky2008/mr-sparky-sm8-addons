@@ -44,6 +44,7 @@ import Diary from "./screens/Diary";
 import MoneyHub from "./screens/pay/MoneyHub";
 import RaiseInvoice from "./screens/pay/RaiseInvoice";
 import Owed from "./screens/pay/Owed";
+import JobBreakdown from "./screens/pay/JobBreakdown";
 import ClaimsList from "./screens/pay/ClaimsList";
 import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
@@ -424,7 +425,21 @@ function Shell() {
             </View>
           ) : null}
           {top?.name === "statement" ? (
-            <View style={s.fill}><Statement data={top.data} onBack={pop} /></View>
+            <View style={s.fill}>
+              <Statement
+                data={top.data} onBack={pop}
+                onOpenJob={(job, meta) => push({ name: "jobmoney", job, jobMeta: meta })}
+              />
+            </View>
+          ) : null}
+          {/* One job and how its number was arrived at. Reachable from the
+              claim screen and the statement, because the moment somebody
+              wants to check a figure is the moment they are about to sign
+              for it (Steven, 30 Sep 2026). */}
+          {top?.name === "jobmoney" ? (
+            <View style={s.fill}>
+              <JobBreakdown job={top.job} meta={top.jobMeta} onBack={pop} />
+            </View>
           ) : null}
           {top?.name === "raise" ? (
             <View style={s.fill}><RaiseInvoice onBack={pop} /></View>
@@ -482,6 +497,7 @@ function Shell() {
               <SubmitClaim
                 data={top.data}
                 onBack={pop}
+                onOpenJob={(job, meta) => push({ name: "jobmoney", job, jobMeta: meta })}
                 onSubmitted={(claim) => {
                   resetTab("pay");
                   if (claim) push({ name: "claim", claim });
