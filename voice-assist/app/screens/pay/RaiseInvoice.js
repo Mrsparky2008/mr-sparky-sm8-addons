@@ -8,8 +8,19 @@
 //
 // This is NOT the RCTI and does not touch it. An RCTI is us writing the
 // invoice on his behalf for his OWN jobs. This is the other direction: his
-// document, his ABN, his numbering, for hours he put into somebody else's
-// job — and it is paid on its own, never folded into a claim.
+// document, his ABN, his numbering, for hours he put into one of OURS — and
+// it is paid on its own, never folded into a claim.
+//
+// LABOUR ONLY. Steven, 30 September 2026: "remove material, we buy our own
+// material." Which also removes the way this could have been paid twice — a
+// receipt attached here and lodged again under Receipts is the same money
+// claimed from two directions, and nothing cross-checks them.
+//
+// And only on a job the OFFICE holds — Steven's or Marites's. "Invoicing is
+// for convenience for helping us out, not an invoicing platform." The server
+// decides that, not this screen: a subbie invoice counts as its job's
+// material cost, so one raised on the sender's own job would drop his share
+// by his rate on it while paying him the whole amount.
 //
 // Every figure here is HIS. That is the opposite of a claim, where the app
 // sends only which jobs and the portal derives every number. What the app
@@ -24,6 +35,14 @@ import { Card, Cta, Empty, Header, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
 
+/* Mirrors REFERENCES in lib/subbieinvoice.mjs. Two things happen and they are
+   not the same kind of money; anything else is somebody's own words. */
+const REFS = [
+  { key: "helping", label: "Helping hand" },
+  { key: "warranty", label: "Warranty repair" },
+  { key: "other", label: "Other" },
+];
+
 const blank = () => ({ what: "", qty: "", price: "" });
 const num = (v) => {
   const n = Number(String(v).replace(/[^0-9.]/g, ""));
@@ -32,6 +51,7 @@ const num = (v) => {
 
 export default function RaiseInvoice({ onBack }) {
   const [job, setJob] = useState("");
+  const [refKey, setRefKey] = useState("helping");
   const [reference, setReference] = useState("");
   const [lines, setLines] = useState([blank()]);
   const [busy, setBusy] = useState(false);
@@ -56,7 +76,8 @@ export default function RaiseInvoice({ onBack }) {
    * against a form that looks complete.
    */
   const body = () => ({
-    jobNumber: job.trim() || null,
+    jobNumber: job.trim(),
+    referenceKey: refKey,
     reference: reference.trim() || null,
     lines: lines
       .filter((l) => l.what.trim() || l.qty.trim() || l.price.trim())
@@ -143,13 +164,31 @@ export default function RaiseInvoice({ onBack }) {
         <Card>
           <SectionLabel>What it is for</SectionLabel>
           <Text style={[T.small, { marginBottom: 10 }]}>
-            Hours you put into somebody else's job. Paid on its own — it does not go
-            into a claim.
+            Hours you put into one of our jobs. Labour only — we buy the material.
+            Paid on its own, not through a claim.
           </Text>
-          <Field label="Job number (optional)" value={job} onChange={setJob}
+          {/* Required, and the server checks whose job it is. Without a job
+              number there is nothing to check and nothing to cost it to. */}
+          <Field label="Job number" value={job} onChange={setJob}
             placeholder="167673" keyboardType="number-pad" />
-          <Field label="Reference (optional)" value={reference} onChange={setReference}
-            placeholder="Helping hand" />
+          <Text style={s.label}>What it was</Text>
+          <View style={s.picker}>
+            {REFS.map((r) => (
+              <Pressable key={r.key} onPress={() => { setRefKey(r.key); setPreview(null); }}
+                style={[s.pick, refKey === r.key && s.pickOn]}>
+                <Text style={[s.pickText, refKey === r.key && s.pickTextOn]}>{r.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {refKey === "other" ? (
+            <Field label="In your own words" value={reference} onChange={setReference}
+              placeholder="Made safe after hours" />
+          ) : null}
+          {refKey === "warranty" ? (
+            <Text style={[T.small, { marginTop: 8 }]}>
+              The office is told, so it can be charged back to whoever left the work.
+            </Text>
+          ) : null}
         </Card>
 
         <Card>
@@ -187,7 +226,9 @@ export default function RaiseInvoice({ onBack }) {
 
         {error ? <Text style={s.error}>{error}</Text> : null}
 
-        <Cta label={busy ? "Working…" : "See the invoice"} disabled={busy || !subtotal}
+        <Cta label={busy ? "Working…" : "See the invoice"}
+          disabled={busy || !subtotal || !job.trim()}
+          sub={!job.trim() ? "Needs the job number you helped on" : undefined}
           onPress={doPreview} />
 
         {mine.length ? (
@@ -235,6 +276,14 @@ const s = StyleSheet.create({
   // to even if the lift is defeated - a rotation, a small screen, Android.
   body: { padding: S.screen, gap: S.gap, paddingBottom: 320 },
   label: { color: C.muted, fontSize: 12, marginBottom: 4 },
+  picker: { flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" },
+  pick: {
+    minHeight: 40, paddingHorizontal: 13, justifyContent: "center",
+    borderRadius: R.chip, borderWidth: 1, borderColor: C.line,
+  },
+  pickOn: { backgroundColor: C.selectBg, borderColor: C.selectLine },
+  pickText: { color: C.muted, fontWeight: "600", fontSize: 13.5 },
+  pickTextOn: { color: C.ink },
   input: {
     minHeight: S.touch, borderWidth: 1, borderColor: C.line, borderRadius: R.button,
     paddingHorizontal: 12, color: C.ink, fontSize: 16, backgroundColor: C.bg,
