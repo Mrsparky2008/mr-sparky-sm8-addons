@@ -9,7 +9,7 @@
 // Every figure arrives worked out — the hub renders one statement payload and
 // hands slices of it to the screens behind the tiles.
 import { useCallback, useEffect, useState } from "react";
-import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Empty, Header, SectionLabel } from "../../components/ui";
 import Icon from "../../components/icons";
 import { C, R, S, T, mono, money } from "../../lib/theme";
@@ -45,7 +45,8 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
     );
   }
 
-  const { statement: st, claimable, claims = [], profile, retention, receipts = {}, ladder, conversion } = data;
+  const { statement: st, claimable, claims = [], profile, retention, receipts = {}, ladder, conversion,
+    handovers = { mine: [], theirs: [] } } = data;
 
   const heldCount = (st.jobs || []).filter((j) => j.outcome !== "OK").length;
   const awaiting = claims.filter((c) => c.status === "submitted").length;
@@ -72,6 +73,10 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
         contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={C.muted} />}
       >
+        {(handovers.mine || []).length || (handovers.theirs || []).length ? (
+          <WhoseJob rows={handovers} onDone={load} />
+        ) : null}
+
         <Card>
           <SectionLabel>Ready to claim</SectionLabel>
           {claimable ? (
@@ -145,6 +150,102 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
   );
 }
 
+/*
+ * The job somebody else finished.
+ *
+ * Steven, 30 September 2026, on job 167631: he accepted it off Telegram in
+ * August, Jason closed it in ServiceM8 in September, and the money side never
+ * noticed - it stayed in Steven's list as though nothing had happened.
+ *
+ * Ownership does not move on its own, and that is deliberate. The accept
+ * record is a promise: he said he would do this job. A job changing hands
+ * because of who happened to tap Complete is what turns into an argument
+ * about money later. So both men see it, worded from their own side, and one
+ * of them has to say.
+ *
+ * Above the claimable figure on purpose. It is the only thing on this screen
+ * that says money may be sitting with the wrong person.
+ */
+function WhoseJob({ rows, onDone }) {
+  const [busy, setBusy] = useState(null);
+  const mine = (rows.mine || []).map((d) => ({ d, owner: true }));
+  const theirs = (rows.theirs || []).map((d) => ({ d, owner: false }));
+
+  const act = (action, d) => {
+    const words = action === "ask"
+      ? `Ask for job ${d.jobNumber}?\n\nThe person whose job it is will be asked to hand it over.`
+      : action === "handover"
+        ? `Hand job ${d.jobNumber} over?\n\nEverything it is worth moves to them. It stops being yours to claim.`
+        : `Keep job ${d.jobNumber}?\n\nIt stays yours and the question goes away.`;
+    Alert.alert("Whose job is this?", words, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: action === "ask" ? "Ask" : action === "handover" ? "Hand it over" : "Keep it",
+        style: action === "handover" ? "destructive" : "default",
+        onPress: async () => {
+          setBusy(d.jobNumber);
+          try {
+            await portal.handover({ action, jobNumber: d.jobNumber });
+            onDone();
+          } catch (err) {
+            Alert.alert("It would not go through", err?.message || "Try again in a minute.");
+          } finally {
+            setBusy(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "somebody";
+
+  return (
+    <Card style={{ borderLeftWidth: 3, borderLeftColor: C.active }}>
+      <SectionLabel>Whose job is this?</SectionLabel>
+      <Text style={[T.small, { marginBottom: 10 }]}>
+        Accepted by one person, completed by another. Nothing moves until somebody says.
+      </Text>
+      {mine.concat(theirs).map(({ d, owner }) => {
+        const asked = d.status === "asked";
+        return (
+          <View key={d.jobNumber} style={s.whoseRow}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+              <Text style={s.whoseJob}>{d.jobNumber}</Text>
+              <Text style={[s.whoseAmt, mono]}>{money(d.valueIncGst)}</Text>
+            </View>
+            {d.address ? <Text style={T.small}>{d.address}</Text> : null}
+            <Text style={[T.small, { marginTop: 2 }]}>
+              {owner
+                ? `${firstName(d.completedBy?.name)} completed it${asked ? " and has asked for it" : ""}`
+                : `You completed it — it is ${firstName(d.acceptedBy?.name)}'s${asked ? ". You have asked for it" : ""}`}
+            </Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+              {owner ? (
+                <>
+                  <Pressable style={[s.whoseBtn, s.whoseGo]} disabled={!!busy}
+                    onPress={() => act("handover", d)}>
+                    <Text style={s.whoseGoText}>Hand it over</Text>
+                  </Pressable>
+                  <Pressable style={s.whoseBtn} disabled={!!busy} onPress={() => act("keep", d)}>
+                    <Text style={s.whoseBtnText}>It stays mine</Text>
+                  </Pressable>
+                </>
+              ) : asked ? (
+                <Text style={T.small}>Waiting on {firstName(d.acceptedBy?.name)}</Text>
+              ) : (
+                <Pressable style={[s.whoseBtn, s.whoseGo]} disabled={!!busy}
+                  onPress={() => act("ask", d)}>
+                  <Text style={s.whoseGoText}>Ask for it</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        );
+      })}
+    </Card>
+  );
+}
+
 function HubTile({ icon, label, sub, badge, onPress }) {
   return (
     <Pressable onPress={onPress} style={s.tile}>
@@ -163,6 +264,16 @@ function HubTile({ icon, label, sub, badge, onPress }) {
 }
 
 const s = StyleSheet.create({
+  whoseRow: { borderTopWidth: 1, borderTopColor: C.line, paddingTop: 10, marginTop: 10 },
+  whoseJob: { color: C.ink, fontWeight: "700", fontSize: 16 },
+  whoseAmt: { color: C.ink, fontWeight: "700" },
+  whoseBtn: {
+    minHeight: 40, paddingHorizontal: 14, justifyContent: "center",
+    borderRadius: R.button, borderWidth: 1, borderColor: C.line,
+  },
+  whoseBtnText: { color: C.muted, fontWeight: "600" },
+  whoseGo: { backgroundColor: C.brand, borderColor: C.brand },
+  whoseGoText: { color: "#fff", fontWeight: "700" },
   body: { padding: S.screen, paddingTop: 0, gap: S.gap },
   hero: { color: C.ink, fontSize: 32, fontWeight: "800", letterSpacing: -0.6, marginVertical: 3 },
 

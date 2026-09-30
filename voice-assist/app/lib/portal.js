@@ -95,6 +95,16 @@ const qs = (params) => {
   return parts.length ? `?${parts.join("&")}` : "";
 };
 
+/*
+ * A job accepted by one man and finished by another.
+ *
+ * `action` is "ask" (I finished it, I want it), "handover" (it is his) or
+ * "keep" (it stays mine). The portal checks who is allowed to say which -
+ * never this screen.
+ */
+export const handover = ({ action, jobNumber }) =>
+  post("/api/handover", { action, jobNumber });
+
 /** Who the portal thinks you are: name, role, and whether you can approve. */
 export const me = () => get("/api/me");
 
