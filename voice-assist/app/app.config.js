@@ -17,7 +17,29 @@ const IS_DEV = process.env.APP_VARIANT === "dev";
 export default ({ config }) => ({
   ...config,
 
-  name: IS_DEV ? "AI Assist Dev" : "AI Assist",
+  /*
+   * "Mr Sparky", not "AI Assist".
+   *
+   * Steven, 4 Oct 2026. The app started as one feature and became the whole
+   * thing - work, the day, money, invoices - so naming it after the feature
+   * stopped making sense. The brand is the honest name, and it is short enough
+   * that iOS will not truncate it on the home screen.
+   *
+   * This is a NATIVE change: the home-screen name lives in Info.plist and is
+   * baked in at build time. It cannot ship over the air - it needs a rebuild
+   * and an App Store submission, and Jason and his employees get it as an
+   * ordinary update.
+   *
+   * The bundle id is deliberately NOT changed. Same id means the update lands
+   * on top of what they already have, their sign-in survives (the keychain is
+   * keyed to it) and there is one listing rather than two apps on a phone. A
+   * new bundle id would mean a fresh App Store listing, a new review, a manual
+   * install and signing in again.
+   *
+   * The App Store listing name is set separately in App Store Connect and has
+   * to be changed there too.
+   */
+  name: IS_DEV ? "Mr Sparky Dev" : "Mr Sparky",
 
   // A URL scheme is claimed device-wide and iOS does not define which app wins
   // when two claim the same one. Sharing it would mean the ServiceM8 job-card
