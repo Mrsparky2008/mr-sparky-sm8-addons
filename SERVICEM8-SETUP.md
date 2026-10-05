@@ -136,21 +136,24 @@ Steven, 5 Oct 2026, correcting this: **"only 1.4 is available per job."**
 Steven has been revising it and deactivating each version as he replaced it.
 That is the system working. **Nothing to fix here.**
 
-### 2. But there ARE two active CCEW forms
+### 2. 202 is the paper CCEW. It is dead - ignore its numbers
 
-| Form | Total | Since 1 Jul |
-|---|---|---|
-| `202_Certificate of Compliance Electrical Work (CCEW)` | 32 | **13** |
-| `BCNSW CCEW 1.4` | 4 | **4** |
+`202_Certificate of Compliance Electrical Work (CCEW)` is the **paper** form,
+and paper CCEWs stopped being accepted on 1 July 2026.
 
-Both are active and both appear in the form picker. 202 is used three times as
-often.
+It shows 13 responses since July across 4 jobs, which looks alarming and is
+not. Steven, 5 Oct 2026: **"we decided to ignore them, they were done on the
+portal and a lot are sample testing."** Two of those four jobs are Quotes, and
+job 167610's real certificate was lodged to BCNSW successfully on 2 October.
 
-**Worth asking, not assuming:** is 202 the older route that BCNSW CCEW 1.4 is
-replacing, or do they do different jobs? It matters because the eCert
-lodgement reads a form to build the certificate - see `docs/ecert` and sections
-11-15 of `CLAUDE.md` in `mr-sparky-network`. If it reads one and the techs are
-filling in the other, certificates go missing.
+**There is no compliance gap here. Do not raise it again.**
+
+**The live route is `BCNSW CCEW 1.4`** - the only CCEW in the form picker, as
+the picker itself shows.
+
+That makes 202 a candidate for deactivating: it is a form for a process that no
+longer exists, and taking it out removes a wrong turn from the picker. Steven's
+call, and it costs nothing to leave.
 
 ### 3. The JSA has quietly stopped
 
