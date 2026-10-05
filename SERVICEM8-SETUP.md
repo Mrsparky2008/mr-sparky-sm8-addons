@@ -106,52 +106,75 @@ adding anything.
 
 ---
 
-## What a first look already found (5 Oct 2026)
+## What a first look found (5 Oct 2026, corrected)
 
-Counted from 917 form responses. **Start here rather than rediscovering it.**
+Counted from the live form responses. **Start here rather than rediscovering
+it** - and read the correction below before trusting any count in this file.
 
-### 1. The CCEW is split across six forms, and five are still in use
+### How to count form responses properly
 
-The statutory certificate - the one lodged to BCNSW - is being filled in on
-whichever version the tech happens to tap:
+The first version of this section got it wrong twice, and both traps are easy
+to fall into:
 
-| Form | All time | Since 1 Jul |
+1. **Use `timestamp`, not `edit_date`.** `edit_date` is the LAST EDIT. A
+   response filled in during May and touched in August looks like August.
+2. **Check whether the FORM is still active**, not just the response. ServiceM8
+   never deletes, so an inactive form still has all its old responses - and
+   those responses are not evidence that anybody can still fill it in.
+
+Steven, 5 Oct 2026, correcting this: **"only 1.4 is available per job."**
+
+### 1. The BCNSW CCEW versions are a sequence, not a conflict
+
+| Form | Filled since 1 Jul | Form active |
 |---|---|---|
-| 202_Certificate of Compliance Electrical Work (CCEW) | 33 | **13** |
-| BCNSW CCEW | 7 | **7** |
-| BCNSW CCEW 1.4 | 4 | **4** |
-| BCNSW CCEW 1.2 | 4 | **4** |
-| BCNSW CCEW 1.3 | 2 | **2** |
-| Test Form CCEW | 3 | 0 |
-| Certificate of Compliance Electrical Work (CCEW) *(inactive)* | 5 | 0 |
+| BCNSW CCEW 1.4 | 4 | **yes - the only one in the picker** |
+| BCNSW CCEW 1.3 | 2 | no |
+| BCNSW CCEW 1.2 | 4 | no |
+| BCNSW CCEW | 7 | no |
 
-**This is the first thing to look at.** If the fields differ between versions
-then the eCert lodgement is reading different shapes of the same certificate,
-and a statutory document is not a place for five versions. There is also a live
-form called "Test Form CCEW".
+Steven has been revising it and deactivating each version as he replaced it.
+That is the system working. **Nothing to fix here.**
 
-Related: the lodgement itself is built and running - see `docs/ecert` and
-sections 11-15 of `CLAUDE.md` in `mr-sparky-network`.
+### 2. But there ARE two active CCEW forms
 
-### 2. The JSA has quietly stopped being filled in
+| Form | Total | Since 1 Jul |
+|---|---|---|
+| `202_Certificate of Compliance Electrical Work (CCEW)` | 32 | **13** |
+| `BCNSW CCEW 1.4` | 4 | **4** |
+
+Both are active and both appear in the form picker. 202 is used three times as
+often.
+
+**Worth asking, not assuming:** is 202 the older route that BCNSW CCEW 1.4 is
+replacing, or do they do different jobs? It matters because the eCert
+lodgement reads a form to build the certificate - see `docs/ecert` and sections
+11-15 of `CLAUDE.md` in `mr-sparky-network`. If it reads one and the techs are
+filling in the other, certificates go missing.
+
+### 3. The JSA has quietly stopped
 
 `101_Job Safety Analysis (JSA) - Procedures`: **155 all time, 1 since July.**
+The form is still active and still in the picker - it is simply not being
+filled in.
 
 Either it moved somewhere else or it was abandoned. A safety form that stopped
 being used is a compliance exposure, not a tidiness problem. **Find out which
 before touching it.**
 
-Two more in the same shape - used, then not:
+Same shape - active, in the picker, not used:
 
-| Form | All time | Since 1 Jul |
+| Form | Total | Since 1 Jul |
 |---|---|---|
-| Inspection report | 43 | **0** |
+| Inspection report | 17 | **0** |
 | Test & Tag | 7 | **0** |
 | TCA1 | 2 | **0** |
+| DB Schedule Chassis | 1 | **0** |
+| DB Schedule DIN Rail | 0 | **0** |
 
-### 3. Form 001 is the one that actually gets used
+### 4. Form 001 is the one that actually gets used
 
-`001 - Job Share and Expenses`: **605 responses, 49 since July.** Three times
+`001 - Job Share and Expenses`: **604 responses, 49 since July.** More than
 everything else put together.
 
 That makes it the one worth making faster, and the one where a saved tap is
@@ -159,14 +182,13 @@ worth the most. It is also the form the retired form-to-sheets Lambda used to
 copy into a Google Sheet - that is gone now, so where its answers should end up
 is an open question.
 
-### 4. Badges
+### 5. Badges
 
-Fifteen active, and two of them are both called **CCEW**. One is called
-**"test badge"**.
+Fifteen active, two of them both called **CCEW**, one called **"test badge"**.
 
 ### What this suggests, without deciding it
 
-The system is not short of forms. It has a workhorse that everybody uses, a
-safety form that has stopped, a few that have fallen out of use, and one
-statutory certificate wearing five different faces. **Consolidating the CCEW
-and finding out what happened to the JSA are worth more than anything new.**
+The forms are not a mess. There is a workhorse everybody uses, a tidy sequence
+of CCEW revisions, and a handful that have fallen out of use. The two questions
+worth a straight answer are **which CCEW form is the real one now**, and **what
+happened to the JSA**.
