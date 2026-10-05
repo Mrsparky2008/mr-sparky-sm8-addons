@@ -29,6 +29,78 @@ Decisions taken during the build, worth knowing before changing anything:
 
 Not yet built: the entitlement gate (paid-seat pitch instead of a dead control).
 
+## BUILT — the portal as part of the app, 2026-08-05
+
+Steven's call: native, not an embedded web view. "We never shy from hard work."
+The reasoning that survived the decision — and that governs every screen added
+here — is one rule:
+
+> **The phone renders. The portal calculates.** No screen does arithmetic. Every
+> figure arrives worked out by `lib/*.mjs` in the portal repo, where the rules
+> live and where they have tests.
+
+Navigation became a **tab bar**, role-shaped: Work / Charlie / Pay, plus
+**Business** for admins only. Diary moved under Work as a segment — five tabs
+breaks glove-sized targets. The tab bar also retired the hidden-overlay hack
+that kept Charlie mounted; tabs do that by nature.
+
+- Tabs → `components/TabBar.js`, wired in `App.js`
+- Pay → `screens/pay/{Earnings,ClaimDetail,SubmitClaim,AddReceipt,RctiView}.js`
+- Business → `screens/admin/{ClaimsInbox,ApproveClaim}.js`
+- Portal API → `lib/portal.js`
+
+Decisions worth knowing before changing anything:
+
+- **No running total** while selecting jobs for a claim. It would be arithmetic,
+  and it could disagree with the claim the portal builds.
+- **The RCTI stays a document** — a WebView over the server-rendered HTML, plus
+  print to PDF. It is built from the frozen claim; recomputing an invoice on a
+  phone is the one thing this whole tab exists to avoid.
+- **Only allowed claim transitions are offered.** A dead button on a money
+  screen reads as something being broken.
+- **Business is lite on purpose.** Analytics, settings and the ladder review stay
+  on the web: the ladder moves people's rates and deserves a dry run, not a thumb.
+  The phone acts on claims; the desk changes the rules.
+- **The test build wears a stripe.** Two identical dark apps will be on the phone
+  and the one that can approve a real claim should never be a guess.
+
+## BUILT — the Money hub, 2026-08-06 (approved: "Love it")
+
+Visual reference: https://claude.ai/code/artifact/b1ca15e1-2d16-4e16-a0b1-2ceb2d5e3c28
+Steven approved the mockups and the icon language same day. New law:
+
+- **Icons are white line-work only** — stroke SVGs (`components/icons.js`,
+  react-native-svg), no fills, no colour, no emoji in chrome. Colour stays
+  reserved for meaning (the wiring-code states).
+- **The Mr Sparky yellow has exactly one job: marking the active tab.** Not
+  wallpaper — one yellow mark per screen reads as identity; six would outshout
+  orange = attention and green = real.
+- **Pay tab renamed Money.** Hub layout: headline "Ready to claim" (the only
+  big number) → Make a claim → attention strip (exists only when something
+  needs a human) → six tiles, each carrying one live fact: Claims, Receipts,
+  Statement, Retention, My rate, My documents → My details row.
+- Screens → `screens/pay/{MoneyHub,ClaimsList,Statement,Retention,MyRate,
+  MyDetails,DocumentsSoon}.js`; shared furniture in `screens/pay/shared.js`.
+  Earnings.js retired — the hub + Statement replaced it.
+- **My documents is designed but portal-blocked** (tables + S3 + warning
+  ladder + claims-blocked enforcement). Until the backend exists the tile
+  opens an honest "being set up" screen — never a dead control.
+
+## BUILT — the Business hub, 2026-08-06 (same artifact, screen 3)
+
+The admin tab gets the same hub grammar. Headline = what needs YOU (count to
+approve + oldest date — the dollar total waits until the portal serves a sum;
+the phone never adds). Buckets mirror the life of a claim: **To approve**
+(badged) → **To pay** → **Settled**, with **Rejected** as its own pile because
+every entry carries its reason. **The crew** = the web portal's "viewing as",
+phone-sized: pick a person, see their Money as they see it. Compliance tile is
+deliberately absent until the documents module exists.
+
+- Screens → `screens/admin/{BusinessHub,BucketList,CrewList,CrewMember}.js`;
+  ClaimsInbox.js retired into the To-approve bucket.
+- Actionable buckets open ApproveClaim; record buckets open ClaimDetail
+  read-only, RCTI included (admin passes the contractor name through).
+
 ## Tokens
 ```
 bg           #0F1B24 → use #0f1b2d (matches scaffold)   app background

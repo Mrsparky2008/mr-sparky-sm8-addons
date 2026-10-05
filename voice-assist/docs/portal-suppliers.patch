@@ -1,0 +1,371 @@
+diff --git a/api/index.mjs b/api/index.mjs
+index fc783f3..2b6b0a4 100644
+--- a/api/index.mjs
++++ b/api/index.mjs
+@@ -23,6 +23,7 @@ import { policyFor } from '../lib/retention.mjs';
+ import { ladderFor, assessLadder } from '../lib/ladder.mjs';
+ import * as conv from '../lib/conversion.mjs';
+ import * as settingsStore from '../lib/settings-store.mjs';
++import { suppliersFor } from '../lib/suppliers.mjs';
+ import { runReview } from '../lib/review.mjs';
+ import * as analytics from '../lib/analytics.mjs';
+ import * as receipts from '../lib/receipts.mjs';
+@@ -369,7 +370,14 @@ export async function handler(event) {
+     }
+ 
+     if (path === '/api/me') {
+-      return json(200, { name: who.person.name, role: who.person.role, isAdmin: who.isAdmin });
++      // The suppliers ride along here rather than on the statement: the native
++      // app calls this on every launch, it is the cheap route (no ServiceM8,
++      // no sheet), and the receipt form needs the chips before any money data
++      // has loaded.
++      return json(200, {
++        name: who.person.name, role: who.person.role, isAdmin: who.isAdmin,
++        suppliers: suppliersFor(settings),
++      });
+     }
+ 
+     if (path === '/api/statement') {
+@@ -533,6 +541,11 @@ export async function handler(event) {
+       if (!who.isAdmin) return json(403, { error: 'Admins only' });
+       return json(200, {
+         settings, editable: settingsStore.EDITABLE,
++        // The EFFECTIVE list, so the pane edits what the phone is actually
++        // being served. Stored settings written before this key existed carry
++        // no suppliers at all, and an empty pane beside eight chips on the
++        // phone would be a lie about the state of the system.
++        suppliers: suppliersFor(settings),
+         history: await settingsStore.history(10).catch(() => []),
+       });
+     }
+diff --git a/api/shell.mjs b/api/shell.mjs
+index 7d28130..6028d0b 100644
+--- a/api/shell.mjs
++++ b/api/shell.mjs
+@@ -77,6 +77,7 @@ main{max-width:1100px;margin:0 auto;padding:20px}
+ .settile .s{font-size:11.5px;color:var(--muted);line-height:1.4;min-height:0}
+ .ic-blue{background:#2e63b5}.ic-orange{background:#e08a1f}.ic-green{background:#199a68}
+ .ic-violet{background:#8156c9}.ic-teal{background:#14939c}.ic-slate{background:#5b6b7d}
++.ic-rose{background:#b04a63}
+ .tile[disabled]{cursor:default;opacity:.75}
+ .tile .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600}
+ .tile .v{font-size:23px;font-weight:800;margin:5px 0 3px;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+@@ -200,6 +201,9 @@ let DATA=null,stack=[],ME=null,SUBBIES=[],VIEWING=null,SEL=new Set(),TAB='jobs',
+ /* Settings navigation: null = the card dashboard, otherwise the open section.
+    SETSUB is the person id when the section is one subcontractor's page. */
+ let SETSEC=null,SETSUB=null,ABRSTATUS=null;
++/* The suppliers list while it is being edited: the rows live here rather than
++   in the DOM, so adding one never loses what was typed into the others. */
++let SUPP=null;
+ let OPENM={},OPENY=new Set(),MINIT=new Set(),Q='',BIZ=null;
+ let SEC=null,SCROLLTO=null;   // one open section at a time
+ 
+@@ -618,7 +622,8 @@ const numInput=(id,label,val,hint)=>'<div class="calcrow"><span class="lbl">'+la
+ 
+ function settingsView(){
+   if(!SETTINGS){loadSettings();return '<div class="card" style="padding:24px;text-align:center;color:var(--muted)">Loading settings...</div>'}
+-  return SETSEC==='subbies' ? subbiesSection()
++  return SETSEC==='suppliers' ? suppliersSection()
++    : SETSEC==='subbies' ? subbiesSection()
+     : SETSEC==='subbie' ? subbieSection(SETSUB)
+     : SETSEC==='users' ? usersSection()
+     : SETSEC==='template' ? templateSection()
+@@ -647,6 +652,7 @@ function settingsHome(){
+     ladder:'<svg viewBox="0 0 24 24"><path d="M8 3v18M16 3v18"/><path d="M8 7h8M8 12h8M8 17h8"/></svg>',
+     money:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 8.8c-.6-1-1.7-1.6-3-1.6-1.8 0-3 1-3 2.4 0 3.4 6 1.7 6 4.9 0 1.5-1.3 2.5-3 2.5-1.4 0-2.6-.7-3.2-1.8"/></svg>',
+     plug:'<svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></svg>',
++    shop:'<svg viewBox="0 0 24 24"><path d="M4 9h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M3 9l1.6-5h14.8L21 9"/><path d="M9.5 21v-6h5v6"/></svg>',
+   };
+   const card=(sec,ic,color,title,sub)=>'<button class="tile settile" data-setsec="'+sec+'">'
+    +'<span class="ic '+color+'">'+IC[ic]+'</span>'
+@@ -664,6 +670,7 @@ function settingsHome(){
+    +card('users','users','ic-slate','Users &amp; roles',S.people.length+' people can sign in')
+    +card('template','ladder','ic-violet','Commission template','New subbies start on '+((L.rungs||[{rates:{quoted_and_completed:'?'}}])[0].rates.quoted_and_completed)+'&ndash;'+topRate+'%')
+    +card('money','money','ic-green','Invoicing &amp; money','GST '+esc((S.tax||{}).gstRatePercent)+'% &middot; retention &middot; warranty')
++   +card('suppliers','shop','ic-rose','Suppliers',((SETTINGS.suppliers||[]).length)+' on the list &middot; chips on the receipt form')
+    +card('integrations','plug','ic-teal','Integrations','ServiceM8 &middot; Sheets &middot; ABN &middot; Telegram')
+    +'</div>';
+ 
+@@ -873,6 +880,61 @@ function moneySection(){
+   return h;
+ }
+ 
++/* ── Suppliers ─────────────────────────────────────────────────────────
++   Steven, 2026-08-06: "a section in settings to add common suppliers to
++   select from ... it will serve as dial purposes later." The list is what
++   the phone shows as chips on the receipt form, so the same wholesaler is
++   spelled one way and spend actually groups.
++
++   Aliases are edited nowhere: they are what a DOCKET prints (MIDDENDORP
++   ELECTRIC for Middy's) and they matter for reading a photographed receipt,
++   not for the office. They ride through a save untouched. */
++function suppliersSection(){
++  if(!SUPP)SUPP=(SETTINGS.suppliers||[]).map(function(x){return {...x}});
++  const inp=(id,val,ph,w)=>'<input id="'+id+'" value="'+esc(val||'')+'" placeholder="'+ph+'" '
++   +'style="width:'+w+';padding:6px 8px;border:1px solid var(--line);border-radius:7px;'
++   +'background:var(--bg);color:var(--ink);font:inherit">';
++  let h=setBack('Suppliers');
++  h+='<div class="card" style="padding:13px 15px;margin-bottom:12px"><div class="sub">'
++   +'What the crew sees on the receipt form. Anything not on the list is still accepted &mdash; '
++   +'they pick Other and type it &mdash; so this is a shortcut, never a gate. '
++   +'Phone numbers are held for dialling from the app.</div></div>';
++  h+='<div class="card">';
++  SUPP.forEach(function(x,i){
++    h+='<div class="calcrow"><span class="lbl">'+inp('sup_n'+i,x.name,'Supplier','100%')
++     +(x.aliases&&x.aliases.length?'<div class="sub" style="font-size:11.5px">docket prints: '+esc(x.aliases.join(', '))+'</div>':'')
++     +'</span><span class="val">'+inp('sup_p'+i,x.phone,'Phone','130px')
++     +' <button class="mini" data-supprm="'+i+'">Remove</button></span></div>';
++  });
++  if(!SUPP.length)h+='<div class="sub" style="padding:14px">Nobody on the list yet.</div>';
++  h+='</div>';
++  h+='<div class="card" style="margin-top:12px;padding:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
++   +'<button class="act ghost" data-suppadd="1">Add supplier</button>'
++   +'<button class="act" data-savesuppliers="1">Save</button>'
++   +'<span class="sub" id="setMsg"></span></div>';
++  return h;
++}
++
++/* The rows as they stand on screen. Called before anything re-renders, so a
++   half-typed name is never thrown away by pressing Add. */
++function readSuppliers(){
++  SUPP=SUPP.map(function(x,i){
++    return {...x, name:v('sup_n'+i), phone:v('sup_p'+i)};
++  });
++  return SUPP;
++}
++
++function addSupplier(){ readSuppliers(); SUPP.push({name:'',phone:'',aliases:[]}); render(); }
++function removeSupplier(i){ readSuppliers(); SUPP.splice(Number(i),1); render(); }
++
++function saveSuppliers(){
++  return withSaveMsg(async function(){
++    const rows=readSuppliers().filter(function(x){return x.name});
++    await putSettings({suppliers:rows},'Supplier list updated');
++    SUPP=null;
++  });
++}
++
+ function integrationsSection(){
+   let h=setBack('Integrations');
+   const rowi=(name,state,detail)=>'<div class="row"><span class="grow"><span class="ttl">'+name+'</span>'
+@@ -1162,8 +1224,14 @@ document.addEventListener('click',function(e){
+   if(ax2){ABR.mode=null;ABR.picked=null;ABR.err=null;renderModal();return}
+   const ss=e.target.closest&&e.target.closest('[data-savesettings]');
+   if(ss){saveSettings();return}
++  const sv2=e.target.closest&&e.target.closest('[data-savesuppliers]');
++  if(sv2){saveSuppliers();return}
++  const sa2=e.target.closest&&e.target.closest('[data-suppadd]');
++  if(sa2){addSupplier();return}
++  const sr2=e.target.closest&&e.target.closest('[data-supprm]');
++  if(sr2){removeSupplier(sr2.getAttribute('data-supprm'));return}
+   const sec2=e.target.closest&&e.target.closest('[data-setsec]');
+-  if(sec2){SETSEC=sec2.getAttribute('data-setsec')||null;SETSUB=null;render();return}
++  if(sec2){SETSEC=sec2.getAttribute('data-setsec')||null;SETSUB=null;SUPP=null;render();return}
+   const sb2=e.target.closest&&e.target.closest('[data-subbieset]');
+   if(sb2){SETSEC='subbie';SETSUB=sb2.getAttribute('data-subbieset');render();return}
+   const st2=e.target.closest&&e.target.closest('[data-savetemplate]');
+diff --git a/lib/settings-store.mjs b/lib/settings-store.mjs
+index cac49f4..8a050a1 100644
+--- a/lib/settings-store.mjs
++++ b/lib/settings-store.mjs
+@@ -86,6 +86,9 @@ export async function history(limit = 20) {
+ export const EDITABLE = [
+   'business', 'tax', 'companies', 'people', 'commissionRules', 'commissionLadder',
+   'retention', 'warranty', 'penalties', 'claimDeclaration', 'formPolicy', 'excludedJobNumbers',
++  // Reference data, not money: a bad row here means a chip spelled wrong on a
++  // phone, which the person holding the docket can see and fix.
++  'suppliers',
+ ];
+ 
+ /**
+diff --git a/lib/suppliers.mjs b/lib/suppliers.mjs
+new file mode 100644
+index 0000000..b2016a5
+--- /dev/null
++++ b/lib/suppliers.mjs
+@@ -0,0 +1,97 @@
++/**
++ * The suppliers list.
++ *
++ * Steven's ask (2026-08-06): "a section in settings to add common suppliers to
++ * select from ... if not in list select other and open a field to type the
++ * supplier name. It will serve as dial purposes later."
++ *
++ * Two jobs, one list. On the phone it turns a supplier field into a row of
++ * chips, so the same wholesaler is spelled the same way every time — which is
++ * what lets receipts group and reconcile at all. Later it holds the phone
++ * number, so the same list dials.
++ *
++ * The matching half exists because a docket never prints the name anyone
++ * says out loud. The paper says MIDDENDORP ELECTRIC CO PTY LTD; the trade
++ * says Middy's. Aliases carry that, so a receipt read off a photo lands on
++ * the right chip instead of creating a fourteenth spelling.
++ *
++ * Nothing here decides money. It normalises a name, and that is all.
++ */
++
++/**
++ * The starter list — electrical wholesalers an Australian sparky actually
++ * stands at. It is a SEED, not the truth: the office edits the live list in
++ * portal settings, and phone numbers are deliberately blank rather than
++ * guessed, because a wrong number that dials is worse than an empty field.
++ */
++export const DEFAULT_SUPPLIERS = [
++  { id: 'middys', name: "Middy's", phone: '', aliases: ['Middendorp', 'Middendorp Electric'] },
++  { id: 'lh', name: 'Lawrence & Hanson', phone: '', aliases: ['L&H', 'Lawrence and Hanson'] },
++  { id: 'mmem', name: 'MM Electrical', phone: '', aliases: ['MMEM', 'MM Electrical Merchandising'] },
++  { id: 'rexel', name: 'Rexel', phone: '', aliases: ['Ideal Electrical', 'Rexel Electrical'] },
++  { id: 'agm', name: 'AGM Electrical Supplies', phone: '', aliases: ['AGM', 'AGM Electrical'] },
++  { id: 'auslec', name: 'Auslec', phone: '', aliases: [] },
++  { id: 'cnw', name: 'CNW', phone: '', aliases: ['CNW Electrical'] },
++  { id: 'haymans', name: 'Haymans', phone: '', aliases: ['Haymans Electrical'] },
++  { id: 'bunnings', name: 'Bunnings', phone: '', aliases: ['Bunnings Warehouse'] },
++];
++
++/**
++ * The live list. Settings win when they carry one; the seed stands in when
++ * they do not — which is the normal case for a while, because the stored
++ * settings in DynamoDB predate this key and a deploy never overwrites them.
++ */
++export function suppliersFor(settings) {
++  const list = Array.isArray(settings?.suppliers) && settings.suppliers.length
++    ? settings.suppliers
++    : DEFAULT_SUPPLIERS;
++  return list
++    .filter((s) => s && String(s.name || '').trim())
++    .map((s, i) => ({
++      id: String(s.id || slug(s.name) || `s${i}`),
++      name: String(s.name).trim(),
++      phone: String(s.phone || '').trim(),
++      aliases: (Array.isArray(s.aliases) ? s.aliases : []).map((a) => String(a).trim()).filter(Boolean),
++    }));
++}
++
++export function slug(name) {
++  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24);
++}
++
++/**
++ * Down to the letters that identify a business. Company suffixes go, because
++ * "PTY LTD" is on every docket and identifies nobody; punctuation goes,
++ * because an apostrophe is a coin toss (Middys, Middy's, MIDDYS).
++ */
++export function normalise(text) {
++  return String(text || '')
++    .toLowerCase()
++    .replace(/\b(pty|ltd|limited|inc|incorporated|group|australia|au|co|company|the)\b/g, ' ')
++    .replace(/[^a-z0-9]+/g, ' ')
++    .trim();
++}
++
++/**
++ * Which supplier a piece of text is, or null. Deliberately conservative: it
++ * matches on a whole name or alias appearing in the text (or the text in the
++ * name), never on a fuzzy distance. A wrong confident match would put one
++ * wholesaler's spend under another's name, and nobody would ever notice.
++ */
++export function matchSupplier(suppliers, text) {
++  const hay = normalise(text);
++  if (!hay) return null;
++  let best = null;
++  for (const s of suppliers || []) {
++    for (const candidate of [s.name, ...(s.aliases || [])]) {
++      const needle = normalise(candidate);
++      // Two letters is not evidence — "co" or "au" would match half the page.
++      if (needle.length < 3) continue;
++      if (hay.includes(needle) || (hay.length >= 3 && needle.includes(hay))) {
++        // The longest match wins: "Lawrence & Hanson" beats a bare "Hanson".
++        if (!best || needle.length > best.length) best = { supplier: s, length: needle.length };
++      }
++    }
++  }
++  return best ? best.supplier : null;
++}
+diff --git a/settings/portal-settings.json b/settings/portal-settings.json
+index 488b84b..4350b22 100644
+--- a/settings/portal-settings.json
++++ b/settings/portal-settings.json
+@@ -466,6 +466,18 @@
+     "requirePhoto": true,
+     "_photoNote": "No evidence, no payment - but the amount is always recorded and visible, never silently dropped."
+   },
++  "_suppliersNote": "The wholesalers the crew actually stands at. On the phone this is a row of chips on the receipt form, so the same supplier is spelled the same way every time - which is what lets spend group and reconcile at all. Aliases are what the DOCKET prints: the paper says MIDDENDORP ELECTRIC CO PTY LTD, the trade says Middy's. Phone numbers are for dialling from the app later, and are left blank rather than guessed. Edited in the portal under Settings > Suppliers.",
++  "suppliers": [
++    { "id": "middys", "name": "Middy's", "phone": "", "aliases": ["Middendorp", "Middendorp Electric"] },
++    { "id": "lh", "name": "Lawrence & Hanson", "phone": "", "aliases": ["L&H", "Lawrence and Hanson"] },
++    { "id": "mmem", "name": "MM Electrical", "phone": "", "aliases": ["MMEM", "MM Electrical Merchandising"] },
++    { "id": "rexel", "name": "Rexel", "phone": "", "aliases": ["Ideal Electrical", "Rexel Electrical"] },
++    { "id": "agm", "name": "AGM Electrical Supplies", "phone": "", "aliases": ["AGM", "AGM Electrical"] },
++    { "id": "auslec", "name": "Auslec", "phone": "", "aliases": [] },
++    { "id": "cnw", "name": "CNW", "phone": "", "aliases": ["CNW Electrical"] },
++    { "id": "haymans", "name": "Haymans", "phone": "", "aliases": ["Haymans Electrical"] },
++    { "id": "bunnings", "name": "Bunnings", "phone": "", "aliases": ["Bunnings Warehouse"] }
++  ],
+   "payment": {
+     "_note": "When a claim becomes due and how remittance reaches the contractor. The portal knows what is outstanding and what is overdue; the bank sends the remittance advice to the address held against the company.",
+     "termsDays": 7,
+diff --git a/test/suppliers.test.mjs b/test/suppliers.test.mjs
+new file mode 100644
+index 0000000..a5c8b62
+--- /dev/null
++++ b/test/suppliers.test.mjs
+@@ -0,0 +1,59 @@
++/**
++ * The suppliers list, and matching a docket's printed name to it.
++ *
++ * Run: node --test test/suppliers.test.mjs
++ */
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import {
++  DEFAULT_SUPPLIERS, suppliersFor, matchSupplier, normalise, slug,
++} from '../lib/suppliers.mjs';
++
++const list = suppliersFor(null);
++
++test('the seed stands in when settings carry no list', () => {
++  assert.equal(suppliersFor(null).length, DEFAULT_SUPPLIERS.length);
++  assert.equal(suppliersFor({}).length, DEFAULT_SUPPLIERS.length);
++  assert.equal(suppliersFor({ suppliers: [] }).length, DEFAULT_SUPPLIERS.length);
++});
++
++test('a settings list wins outright — the seed never merges into it', () => {
++  const own = suppliersFor({ suppliers: [{ name: 'Sparky Supplies' }] });
++  assert.equal(own.length, 1);
++  assert.equal(own[0].name, 'Sparky Supplies');
++  assert.equal(own[0].id, 'sparkysupplies');
++  assert.deepEqual(own[0].aliases, []);
++});
++
++test('a nameless row is dropped rather than served as a blank chip', () => {
++  const own = suppliersFor({ suppliers: [{ name: 'Real' }, { name: '  ' }, null] });
++  assert.deepEqual(own.map((s) => s.name), ['Real']);
++});
++
++test('the docket name is not the trade name — aliases carry the gap', () => {
++  assert.equal(matchSupplier(list, 'MIDDENDORP ELECTRIC CO PTY LTD').id, 'middys');
++  assert.equal(matchSupplier(list, 'LAWRENCE & HANSON GROUP PTY LTD').id, 'lh');
++  assert.equal(matchSupplier(list, 'L&H Marrickville').id, 'lh');
++  assert.equal(matchSupplier(list, 'MMEM ALEXANDRIA').id, 'mmem');
++  assert.equal(matchSupplier(list, 'Bunnings Warehouse Ashfield').id, 'bunnings');
++});
++
++test('an unknown supplier stays unknown — no nearest guess', () => {
++  assert.equal(matchSupplier(list, 'Joe Blow Electrical Wholesale'), null);
++  assert.equal(matchSupplier(list, ''), null);
++  assert.equal(matchSupplier(list, null), null);
++  assert.equal(matchSupplier([], 'Middy\'s'), null);
++});
++
++test('the longest match wins, so a shared word cannot steal it', () => {
++  const two = suppliersFor({ suppliers: [
++    { name: 'Hanson' }, { name: 'Lawrence & Hanson' },
++  ] });
++  assert.equal(matchSupplier(two, 'LAWRENCE & HANSON PTY LTD').name, 'Lawrence & Hanson');
++});
++
++test('normalise drops what identifies nobody', () => {
++  assert.equal(normalise('MIDDENDORP ELECTRIC CO PTY LTD'), 'middendorp electric');
++  assert.equal(normalise("Middy's"), 'middy s');
++  assert.equal(slug('Lawrence & Hanson'), 'lawrencehanson');
++});

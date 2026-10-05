@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "AI Assist",
+    "name": "Mr Sparky",
     "slug": "mr-sparky-ai-assistant",
     "owner": "mr_sparky",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "scheme": "mrsparky-aiassist",
     "extra": {
       "eas": {
@@ -24,8 +24,6 @@
       "supportsTablet": false,
       "bundleIdentifier": "au.com.mrsparky.aiassist",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "AI Assist uses the microphone so you can talk to it.",
-        "NSSpeechRecognitionUsageDescription": "AI Assist transcribes what you say to hold the conversation.",
         "NSPhotoLibraryUsageDescription": "AI Assist can attach photos from your library to job cards.",
         "NSPhotoLibraryAddUsageDescription": "AI Assist can save job photos to your library.",
         "NSCameraUsageDescription": "AI Assist can take photos to attach to job cards.",
@@ -40,22 +38,18 @@
         "backgroundColor": "#0f1b2d"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      "permissions": []
     },
     "plugins": [
-      "expo-audio",
-      [
-        "expo-speech-recognition",
-        {
-          "microphonePermission": "AI Assist uses the microphone so you can talk to it.",
-          "speechRecognitionPermission": "AI Assist transcribes what you say to hold the conversation."
-        }
-      ],
       "expo-asset",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "AI Assist uses the camera to photograph receipts and job photos.",
+          "photosPermission": "AI Assist can attach photos from your library to receipts and job cards."
+        }
+      ]
     ],
     "runtimeVersion": {
       "policy": "appVersion"
