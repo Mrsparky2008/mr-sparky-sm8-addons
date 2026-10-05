@@ -103,3 +103,70 @@ adding anything.
 - VIP
 - Warranty
 - test badge
+
+---
+
+## What a first look already found (5 Oct 2026)
+
+Counted from 917 form responses. **Start here rather than rediscovering it.**
+
+### 1. The CCEW is split across six forms, and five are still in use
+
+The statutory certificate - the one lodged to BCNSW - is being filled in on
+whichever version the tech happens to tap:
+
+| Form | All time | Since 1 Jul |
+|---|---|---|
+| 202_Certificate of Compliance Electrical Work (CCEW) | 33 | **13** |
+| BCNSW CCEW | 7 | **7** |
+| BCNSW CCEW 1.4 | 4 | **4** |
+| BCNSW CCEW 1.2 | 4 | **4** |
+| BCNSW CCEW 1.3 | 2 | **2** |
+| Test Form CCEW | 3 | 0 |
+| Certificate of Compliance Electrical Work (CCEW) *(inactive)* | 5 | 0 |
+
+**This is the first thing to look at.** If the fields differ between versions
+then the eCert lodgement is reading different shapes of the same certificate,
+and a statutory document is not a place for five versions. There is also a live
+form called "Test Form CCEW".
+
+Related: the lodgement itself is built and running - see `docs/ecert` and
+sections 11-15 of `CLAUDE.md` in `mr-sparky-network`.
+
+### 2. The JSA has quietly stopped being filled in
+
+`101_Job Safety Analysis (JSA) - Procedures`: **155 all time, 1 since July.**
+
+Either it moved somewhere else or it was abandoned. A safety form that stopped
+being used is a compliance exposure, not a tidiness problem. **Find out which
+before touching it.**
+
+Two more in the same shape - used, then not:
+
+| Form | All time | Since 1 Jul |
+|---|---|---|
+| Inspection report | 43 | **0** |
+| Test & Tag | 7 | **0** |
+| TCA1 | 2 | **0** |
+
+### 3. Form 001 is the one that actually gets used
+
+`001 - Job Share and Expenses`: **605 responses, 49 since July.** Three times
+everything else put together.
+
+That makes it the one worth making faster, and the one where a saved tap is
+worth the most. It is also the form the retired form-to-sheets Lambda used to
+copy into a Google Sheet - that is gone now, so where its answers should end up
+is an open question.
+
+### 4. Badges
+
+Fifteen active, and two of them are both called **CCEW**. One is called
+**"test badge"**.
+
+### What this suggests, without deciding it
+
+The system is not short of forms. It has a workhorse that everybody uses, a
+safety form that has stopped, a few that have fallen out of use, and one
+statutory certificate wearing five different faces. **Consolidating the CCEW
+and finding out what happened to the JSA are worth more than anything new.**
