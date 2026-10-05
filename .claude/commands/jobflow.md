@@ -80,10 +80,23 @@ pruning. **Removing a form may be worth more than adding one.**
 badge, form and template by name.** Read it first - it needs no credentials and
 it is the fastest way to see the shape of what is there.
 
-**And note what it already shows:** more than half of everything is switched
-off. 66 badges, 15 active. 33 forms, 10 active. 21 queues, 10 active. That is a
-system that has grown and never been pruned, which tells you where the work
-probably is.
+**And read the inactive counts correctly.** 66 badges with 15 active, 33 forms
+with 10 active, 21 queues with 10 active.
+
+That is NOT clutter. Steven, 5 Oct 2026: **"SM8 didn't delete anything."**
+ServiceM8 never deletes - deactivating IS how you remove something, and the
+record stays because old jobs still reference it. So the inactive ones have
+already been taken out. Somebody has pruned this.
+
+Two things follow, and both matter:
+
+1. **The live system is the active set** - 10 queues, 15 badges, 10 forms, 4
+   categories, 1 template. Judge the setup on those, not on the totals.
+2. **Removing something is cheap and safe.** It does not destroy history; the
+   old jobs keep their badge or their form response. So if a form has outlived
+   its use, say so - the cost of retiring it is close to zero.
+
+Never propose "deleting" a ServiceM8 object. The word is deactivate.
 
 To refresh it, or to look deeper:
 
