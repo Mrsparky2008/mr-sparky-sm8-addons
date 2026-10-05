@@ -77,7 +77,16 @@ Checklists already sit on the job card — "101_Job Safety Analysis (JSA)" and
 forms is not a blank page — it is more likely a system that has grown without
 pruning. **Removing a form may be worth more than adding one.**
 
-You can list any of it through the API:
+**`SERVICEM8-SETUP.md` in the root of this repo lists every queue, category,
+badge, form and template by name.** Read it first - it needs no credentials and
+it is the fastest way to see the shape of what is there.
+
+**And note what it already shows:** more than half of everything is switched
+off. 66 badges, 15 active. 33 forms, 10 active. 21 queues, 10 active. That is a
+system that has grown and never been pruned, which tells you where the work
+probably is.
+
+To refresh it, or to look deeper:
 
 ```
 GET https://api.servicem8.com/api_1.0/{queue|badge|form|category|jobtemplate}.json
