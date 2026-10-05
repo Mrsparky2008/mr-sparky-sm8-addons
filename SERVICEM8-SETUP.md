@@ -26,6 +26,13 @@ GET https://api.servicem8.com/api_1.0/{queue|category|badge|form|jobtemplate}.js
 
 **917 form responses** have been submitted against those forms.
 
+**Read the gap between Active and Total correctly.** ServiceM8 never deletes -
+deactivating is how you remove something, and the record stays because old jobs
+still reference it. So the inactive ones have already been taken out, not
+forgotten. The live system is the ACTIVE column.
+
+It also means retiring something is cheap: history keeps working.
+
 ---
 
 ## Queues - what Steven calls the buckets
