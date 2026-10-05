@@ -1,12 +1,12 @@
 ---
-description: Design session — app GUI and the ServiceM8 job flow for contractors
+description: Optimise the ServiceM8 job flow for contractors, and polish the app GUI
 ---
 
 # Job flow and app GUI
 
-You are starting a **design and build session** on the Mr Sparky app and the
-ServiceM8 process the contractors work inside. It runs **alongside** another
-Claude session working on the same business, so the first instruction matters
+You are starting a session on **how the contractors' work flows through
+ServiceM8**, and on polishing the Mr Sparky app around it. It runs **alongside**
+another Claude session on the same business, so the first instruction matters
 more than the rest.
 
 ---
@@ -26,121 +26,157 @@ Then, for the whole session:
   another session's half-finished work and commit it as yours.
 - **Never force-push, never rebase a shared branch, never amend somebody
   else's commit.**
-- If you need the other session's latest work, merge the base branch in
-  deliberately. Do not assume it is there.
 
-The other session works mainly in `mr-sparky-network` and the `mr-sparky-portal`
-worktrees. **This session lives in `sm8-addons`.** If you need a portal change,
-say so and agree it rather than reaching in.
+The other session works in `mr-sparky-network` and the `mr-sparky-portal`
+worktrees. **This session lives in `sm8-addons`.** A portal change gets agreed,
+not reached for.
 
 ---
 
-## 2. Who you are working with
+## 2. THIS IS NOT A BUILD JOB
+
+Steven, 5 Oct 2026, and it is the whole brief:
+
+> **"I want to optimise ServiceM8 with what it has, not build anything new
+> unless absolutely useful and ingenious."**
+
+ServiceM8 is a mature product that already does almost all of this. **The
+default answer is a setting, a template or a form — not code.** An addon is the
+last resort, and it has to be obviously better than the native thing it
+replaces, not merely newer.
+
+**Before proposing anything, you must be able to say why ServiceM8 cannot
+already do it.** If you cannot, you have not read enough.
+
+### What is already there — counted, not guessed (5 Oct 2026)
+
+| | |
+|---|---|
+| **Queues** — these ARE the buckets | **21** |
+| **Badges** | **66** |
+| **Forms** | **33**, with **917** responses |
+| **Categories** | **4** |
+| **Job templates** | **2** |
+
+The active queues:
+
+> To be Quoted · To be Scheduled · Call Customer · Check Customer Message /
+> Email · Follow-up · For Review · Order Parts/Supplies · Waiting on
+> Parts/Supplies · Reinspection/Revisit · Awaiting Approval
+
+The categories:
+
+> 001 - Mr Sparky Network · 002 - Contractor Client · 010 - Warranty Claim ·
+> 003 - Mr Sparky Network pool
+
+Checklists already sit on the job card — "101_Job Safety Analysis (JSA)" and
+"001 - Job Share and Expenses" among them.
+
+**Read all of it before designing anything.** Sixty-six badges and thirty-three
+forms is not a blank page — it is more likely a system that has grown without
+pruning. **Removing a form may be worth more than adding one.**
+
+You can list any of it through the API:
+
+```
+GET https://api.servicem8.com/api_1.0/{queue|badge|form|category|jobtemplate}.json
+```
+
+The key is in AWS Secrets Manager, `mr-sparky/servicem8-job-push-telegram`,
+field `SERVICEM8_API_KEY`, region `us-east-1`. **Read only — never write to
+ServiceM8 from a script without Steven saying so.**
+
+---
+
+## 3. The brief
+
+Make the contractors' work flow better: **buckets, mandatory forms and
+checklists**, so the job moves efficiently and the customer stays well informed,
+**without overloading the subbies with steps.**
+
+That last clause is the hard part and the whole test. Every form is a tax on a
+man standing in somebody's hallway with a torch in his teeth.
+
+**Judge every idea against these, in order:**
+
+1. **Does ServiceM8 already do this?** If yes, the work is configuration and
+   showing Steven where it lives. Stop there.
+2. **Does it save the sparky a step, or cost him one?** A checklist that
+   replaces a phone call is a win. One that duplicates what ServiceM8 already
+   knows is a tax.
+3. **Does the customer find out something they would otherwise have chased?**
+   On the way, running late, done, here is your certificate.
+4. **Can it be answered with a tap?** Typing on a phone, one-handed, in a roof
+   space, is the thing to design out.
+5. **What happens if he skips it?** If nothing, it is not mandatory and should
+   not pretend to be. If something, say what.
+
+**Deleting and merging counts as progress.** Fewer, better-placed forms beat
+more of them.
+
+---
+
+## 4. The app
+
+Polish, not rebuild. (`voice-assist/app`, Expo.)
+
+- `voice-assist/DESIGN.md` — **the locked design spec. It wins over everything,
+  including `lib/theme.js`. Steven approves changes; nobody else.**
+- `app/components/ui.js` — Header, JobChip, StatusChip, Card, Cta, Empty.
+  **Use these. Do not invent a second button.**
+- `app/screens/` — AllJobs, Apply, Diary, Earnings, JobCard, JobDiary,
+  JobMaterial, Jobs, SignIn, Welcome, WhatsNext, plus `admin/` and `pay/`.
+- `app/App.js` — a plain stack in state. No React Navigation.
+
+**Built, deployed, and not yet called by the app** — do not rebuild these:
+
+| What | Where |
+|---|---|
+| Accept a job | `POST /api/jobs/accept` |
+| Register for push | `POST`/`DELETE /api/push/register` |
+
+Sections 14 and 15 of `CLAUDE.md` in `mr-sparky-network` explain them.
+
+---
+
+## 5. Who you are working with
 
 **Steven Sukar is not a developer.** Read `CLAUDE.md` in `mr-sparky-network`
 first — it is the handover notes for the whole business and it is kept current.
 
 - Plain words. Short replies. **One command at a time.**
 - He thinks in problems, not solutions. "Why does this take four taps?" is the
-  brief. Work out the fix yourself and tell him what you recommend.
+  brief. Work out the fix and tell him what you recommend.
 - **He is usually right when he pushes back.** If he says a screen is useless,
-  it is useless — do not defend it, replace it.
-- Anything decided belongs in a file, not in the chat. The chat is gone next
-  week.
+  replace it rather than defending it.
+- **Never guess.** His words: *"Don't guess. If you're guessing, let me know.
+  You read the code. You give me the answer."*
+- Anything decided belongs in a file, not the chat.
 
 ---
 
-## 3. The brief
-
-> Polish the app GUI, and the ServiceM8 job management the contractors work
-> inside — **buckets, mandatory forms and checklists** — so the work is more
-> efficient and the customer stays well informed, **without overloading the
-> subbies with steps.**
-
-That last clause is the hard part and the whole test. Every form is a tax on a
-man standing in somebody's hallway with a torch in his teeth. The job is to
-make the *right* thing the easy thing, not to add gates.
-
-**Judge every idea against these, in order:**
-
-1. **Does it save the sparky a step, or cost him one?** A checklist that
-   replaces a phone call is a win. One that duplicates what ServiceM8 already
-   knows is a tax.
-2. **Does the customer find out something they would otherwise have chased?**
-   On the way, running late, done, here is your certificate.
-3. **Can it be answered with a tap?** Typing on a phone, one-handed, in a roof
-   space, is the thing to design out.
-4. **What happens if he skips it?** If nothing, it is not mandatory and should
-   not pretend to be. If something, say what.
-
----
-
-## 4. What already exists — read before designing
-
-**The app** (`voice-assist/app`, Expo):
-
-- `voice-assist/DESIGN.md` — **the locked design spec. It wins over everything,
-  including `lib/theme.js`. Steven approves changes to it; nobody else.**
-- `app/lib/theme.js` — tokens, type, spacing. Follows DESIGN.md.
-- `app/components/ui.js` — Header, JobChip, StatusChip, Card, Cta, Empty. Use
-  these. Do not invent a second button.
-- `app/screens/` — AllJobs, Apply, Diary, Earnings, JobCard, JobDiary,
-  JobMaterial, Jobs, SignIn, Welcome, WhatsNext, plus `admin/` and `pay/`.
-- `app/App.js` — a plain stack in state. No React Navigation.
-
-**ServiceM8** already has checklists on the job card — "101_Job Safety Analysis
-(JSA)" and "001 - Job Share and Expenses" among them. Look at what is there
-before adding to it.
-
-**The backend is built and deployed, and the app does not call it yet:**
-
-| What | Where |
-|---|---|
-| Accept a job | `POST /api/jobs/accept` |
-| Register for push | `POST`/`DELETE /api/push/register` |
-| The decisions behind both | `lib/jobaccept.mjs`, `lib/push.mjs` in the portal repo |
-
-Sections 14 and 15 of the network `CLAUDE.md` explain both.
-
----
-
-## 5. Rules that are not negotiable
+## 6. Rules that are not negotiable
 
 - **Number masking is the core of the product.** Real client phone numbers live
-  only in the `customers` table. Never put one on a screen a contractor sees.
+  only in the `customers` table. Never on a screen a contractor sees.
 - **Nobody accepts work unless Steven created them in ServiceM8 by hand.** The
   gate is `canAccessJobs`. Do not add a second way in.
-- **Employees do not claim and do not see money.** Whatever they complete
-  belongs to the subcontractor they work for.
+- **Employees do not claim and do not see money.** What they complete belongs to
+  the subcontractor they work for.
+- **Do not write to ServiceM8 programmatically** without Steven agreeing it.
+  Configuration changes are his to make in the console, where he can see them.
 - **Do not publish to the `production` EAS channel.** Jason and his employees
-  are on it; a publish reaches their phones in minutes with no review. Build and
-  test on `preview`, which is a **separate app** they cannot receive.
-- **A rename, a new native capability, or a new permission needs a rebuild and
-  an App Store submission.** Only JavaScript goes over the air.
-- **Do not deploy anything in the other session's repos** without agreeing it.
-
----
-
-## 6. How to work
-
-1. **Look before you design.** Open the screens, read DESIGN.md, look at a real
-   job card in ServiceM8. Most of the answer is already on screen somewhere.
-2. **Show him, do not describe.** A mockup he can look at beats three
-   paragraphs. He has said so repeatedly.
-3. **One change at a time, deployed and seen**, rather than a batch he has to
-   unpick.
-4. **Write the reasoning into the file you change**, in his words where you
-   have them. The next session has only what is written down.
-5. **Never guess.** If you are not sure, read the code or say you are not sure.
-   He has asked for this directly: *"Don't guess. If you're guessing, let me
-   know. You read the code. You give me the answer."*
+  are on it; a publish reaches their phones in minutes with no review. Build on
+  `preview` — a separate app they cannot receive.
+- **A rename, a native capability or a new permission needs a rebuild and an
+  App Store submission.** Only JavaScript goes over the air.
 
 ---
 
 ## 7. Where the business actually is
 
-There are **no subbies on the network yet** — it is Steven, Jason, and Jason's
-employees. The contractor side has no live users, so it can be changed freely.
+There are **no subbies on the network yet** — Steven, Jason, and Jason's
+employees. The contractor side has no live users, so process can change freely.
 Jobs arriving and being accepted is real. The call path is **not** live.
 
 Target is 3–5 new sparkies a month. Design for the man who joins in six months
@@ -148,6 +184,7 @@ and has never been shown anything.
 
 ---
 
-**Start by telling Steven which branch you are on, then ask him what is
-annoying him most about the current flow.** That answer is worth more than any
-amount of reading.
+**Start by reading the queues, forms and badges that already exist. Then tell
+Steven what you found — especially anything that looks unused, duplicated or in
+the wrong place — and ask him what annoys him most about the current flow.**
+That answer is worth more than any amount of designing.
