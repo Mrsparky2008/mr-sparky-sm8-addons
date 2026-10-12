@@ -74,29 +74,35 @@ def compose(layer: Image.Image, fill: float, size: int = S) -> Image.Image:
 art = ink_layer(SRC)
 print(f"ink block {art.size[0]}x{art.size[1]}")
 
-# iOS. Measured: nothing is clipped even at 0.92, because the squircle is full
-# width at mid-height and that is exactly where his lettering sits. So this is
-# a judgement about margin, not about safety. 0.88.
-compose(art, 0.88).save(os.path.join(ASSETS, "icon.png"))
+# iOS, back at 0.78 where it started. 0.88 measured clean against a rounded
+# rectangle, but the real squircle pulls in harder than that approximation and
+# Steven could see the Y touching the edge. The measurement was not wrong about
+# pixels; it was answering the wrong question. An icon needs MARGIN, not the
+# largest size that technically survives. He never asked for iOS to grow.
+compose(art, 0.78).save(os.path.join(ASSETS, "icon.png"))
 
-# Android is the one that CANNOT grow to match, and this was got wrong twice.
-# The foreground sits on a 108dp canvas and EVERY launcher masks it to the
-# inner 72dp, so the outer third is cut on every phone - not on some. The first
-# check rendered the mask across the whole image, which made the safe area look
-# far larger than it is and made 0.62 look fine when it was eating the lettering.
+# Android, and this is the one that cannot be argued with. The foreground sits
+# on a 108dp canvas and EVERY launcher masks it to the inner 72dp, so the outer
+# third is cut on every phone - not on some.
+#
+# The first check rendered the mask across the whole image, which made the safe
+# area look far bigger than it is. That is what made Android look small and
+# invited "a bit bigger"; bigger ate the M, the Y and NETWORK.
 #
 # Measured against the real 0.667 mask, counting ink pixels lost:
 #     0.54  none        0.58  147
 #     0.56  41          0.62  1039
 #
-# So 0.54 is the ceiling, and it is BELOW where this started. Android simply
-# does not get to be as big as iOS. Do not raise it by eye.
+# So 0.54, which is slightly BELOW where this started. Android does not get to
+# match iOS, and the circle makes it look larger than the number suggests
+# because the visible area is smaller. Do not raise it by eye.
 compose(art, 0.54).save(os.path.join(ASSETS, "adaptive-icon.png"))
 
 # The splash - the picture held on screen for the second while the app starts.
 # resizeMode is "contain", so this image's own padding is the only thing setting
-# how big it looks. No mask here at all, so it can run closest to the edge.
-compose(art, 0.84).save(os.path.join(ASSETS, "splash-icon.png"))
+# how big it looks. Back to 0.62: it fills the screen width anyway, so growing
+# the artwork inside it only costs breathing room.
+compose(art, 0.62).save(os.path.join(ASSETS, "splash-icon.png"))
 
 # The favicon is 48px: the lettering is hopeless there, so it carries the house
 # alone. Cropping the top 56% of the block leaves the roof and the plug.
