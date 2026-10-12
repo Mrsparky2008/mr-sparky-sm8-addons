@@ -9,7 +9,7 @@
 // declaration. Nothing here writes anything.
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator, Alert, Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Alert, Dimensions, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { Card, Empty, Header, SectionLabel } from "../components/ui";
 import { C, S, T, mono, money } from "../lib/theme";
@@ -22,6 +22,8 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
   const [viewer, setViewer] = useState(null);   // { uri } while a docket photo is open
   const [imgLoading, setImgLoading] = useState(false);
   const [opening, setOpening] = useState(null); // imageKey being fetched
+  const [paper, setPaper] = useState("");       // office-sheet ref being fetched
+  const [paperError, setPaperError] = useState("");
 
   const load = useCallback(() => {
     portal.statement()
@@ -90,6 +92,32 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
       String(current?.amountIncGst ?? ""),
       "decimal-pad",
     );
+  }
+
+  /*
+   * The supplier's invoice behind an office-sheet line. Steven, 13 Oct 2026:
+   * "I can't view the action invoice when I click on it."
+   *
+   * Nothing new was needed server side - /api/purchases/doc has existed since
+   * September and already says a contractor may open the paper behind a charge
+   * on his own job and nothing else. The line simply was not tappable, while
+   * the receipts section two cards above had been from the start. A figure you
+   * cannot see the paper for cannot be argued with, and that rule did not stop
+   * applying because the office typed the line instead of the man.
+   */
+  async function openPaper(ref) {
+    if (!ref || paper) return;
+    const [emailId, docIndex] = String(ref).split("|");
+    setPaper(ref); setPaperError("");
+    try {
+      const { url, filename } = await portal.purchaseDoc({ emailId, docIndex });
+      // Suppliers send PDFs; a docket paid on the card is a photograph. The PDF
+      // wants the phone's reader, the photograph opens here beside its figure.
+      if (String(filename || url).toLowerCase().includes(".pdf")) await Linking.openURL(url);
+      else { setImgLoading(true); setViewer({ uri: url }); }
+    } catch (e) {
+      setPaperError(e?.message || "That invoice wouldn't open.");
+    } finally { setPaper(""); }
   }
 
   async function openImage(imageKey) {
@@ -189,13 +217,22 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
               <SectionLabel>Mr Sparky account — office sheet</SectionLabel>
               <Card>
                 {sheetLines.length ? sheetLines.map((l, i) => (
-                  <View key={i} style={[s.row, i === sheetLines.length - 1 && s.rowLast]}>
+                  <Pressable
+                    key={i}
+                    onPress={l.ref ? () => openPaper(l.ref) : undefined}
+                    style={[s.row, i === sheetLines.length - 1 && s.rowLast]}
+                  >
                     <View style={{ flex: 1 }}>
                       <Text style={s.supplier} numberOfLines={1}>{l.supplier || "Supplier"}</Text>
-                      <Text style={s.sub}>{[l.date, l.invoice].filter(Boolean).join(" · ")}</Text>
+                      <Text style={s.sub}>
+                        {[l.date, l.invoice].filter(Boolean).join(" · ")}
+                        {l.ref ? "  ·  tap for the invoice" : ""}
+                      </Text>
                     </View>
-                    <Text style={[s.amount, mono]}>{money(l.amountIncGst)}</Text>
-                  </View>
+                    {paper === l.ref
+                      ? <ActivityIndicator size="small" color={C.brand} />
+                      : <Text style={[s.amount, mono]}>{money(l.amountIncGst)}</Text>}
+                  </Pressable>
                 )) : (
                   <View style={[s.row, s.rowLast]}>
                     <View style={{ flex: 1 }}>
@@ -210,6 +247,7 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
                 Bought on the company account and entered by the office — comes off the
                 job's gross before your rate, not out of your pocket.
               </Text>
+              {paperError ? <Text style={s.paperError}>{paperError}</Text> : null}
             </View>
           ) : null}
 
@@ -302,6 +340,7 @@ const s = StyleSheet.create({
   supplier: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
   sub: { color: C.muted, fontSize: 11.5, marginTop: 2 },
   sheetNote: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
+  paperError: { color: C.active, fontSize: 12, lineHeight: 16, marginTop: 6 },
   // A docket photographed so the amount is missing. Shown as words, dimmed,
   // never as $0.00 — a confident zero is worse than an honest gap.
   amountUnknown: { color: C.muted, fontWeight: "600" },
