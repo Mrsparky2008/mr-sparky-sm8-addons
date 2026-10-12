@@ -71,7 +71,7 @@ export default ({ config }) => ({
     //
     // EAS assigns the number when the build STARTS, so it cannot be known
     // when the source is uploaded. Build 31 therefore shipped saying 29;
-    // an OTA to production@2.3.0 corrects it, and reaches only build 31.
+    // an OTA to production@2.3.0 corrects it, and reaches only build 32.
     iosBuild: "32",
   },
 });
