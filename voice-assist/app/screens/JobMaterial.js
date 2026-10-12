@@ -118,6 +118,17 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
     ? sheetLines.reduce((s2, l) => s2 + (Number(l.amountIncGst) || 0), 0)
     : (Number(meta?.expenseIncGst) || 0);
 
+  // Material picked up on the company account that the supplier has not
+  // billed yet. It is the thing holding the job: a claim raised now would be
+  // priced on a gross profit that is about to shrink (23 Sep 2026).
+  //
+  // Shown even though no amount is known, because an empty list reads as
+  // "nothing was bought" — Steven, 12 Oct 2026: everything allocated to a job
+  // has to be visible. A docket whose amount could not be read off the photo
+  // says so rather than showing a confident zero.
+  const awaiting = meta?.awaitingInvoice;
+  const awaitingDockets = awaiting?.dockets || [];
+
   return (
     <View style={{ flex: 1 }}>
       <Header title={`Materials · #${jobNumber}`} onBack={onBack} />
@@ -202,7 +213,35 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
             </View>
           ) : null}
 
-          {!rows.length && !declared && !(sheetTotal > 0) ? (
+          {awaitingDockets.length ? (
+            <View>
+              <SectionLabel>Picked up — invoice not in yet</SectionLabel>
+              <Card>
+                {awaitingDockets.map((d, i) => (
+                  <View key={d.id || i} style={[s.row, i === awaitingDockets.length - 1 && s.rowLast]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.supplier} numberOfLines={1}>{d.supplier || "Supplier"}</Text>
+                      <Text style={s.sub}>
+                        {[d.date, d.reference].filter(Boolean).join(" · ")}
+                        {d.waitingDays ? `  ·  ${d.waitingDays} day${d.waitingDays === 1 ? "" : "s"}` : ""}
+                        {d.pickedBy ? `  ·  ${d.pickedBy}` : ""}
+                      </Text>
+                    </View>
+                    <Text style={[s.amount, mono, d.amountless && s.amountUnknown]}>
+                      {d.amountless ? "not read" : money(d.amountIncGst)}
+                    </Text>
+                  </View>
+                ))}
+              </Card>
+              <Text style={s.sheetNote}>
+                Picked up on the company account and waiting on the supplier's invoice.
+                The job can't be claimed until it arrives — claiming now would price the
+                job before this lands on it.
+              </Text>
+            </View>
+          ) : null}
+
+          {!rows.length && !declared && !(sheetTotal > 0) && !awaitingDockets.length ? (
             <Empty>Nothing filed on this job yet.</Empty>
           ) : null}
           {rows.length || declared ? (
@@ -263,6 +302,9 @@ const s = StyleSheet.create({
   supplier: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
   sub: { color: C.muted, fontSize: 11.5, marginTop: 2 },
   sheetNote: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
+  // A docket photographed so the amount is missing. Shown as words, dimmed,
+  // never as $0.00 — a confident zero is worse than an honest gap.
+  amountUnknown: { color: C.muted, fontWeight: "600" },
   amount: { color: C.ink, fontSize: 15, fontWeight: "800" },
   totalRow: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4, marginTop: 2 },
   totalLabel: { ...T.small },
