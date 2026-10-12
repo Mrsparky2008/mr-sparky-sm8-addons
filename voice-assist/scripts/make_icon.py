@@ -74,16 +74,29 @@ def compose(layer: Image.Image, fill: float, size: int = S) -> Image.Image:
 art = ink_layer(SRC)
 print(f"ink block {art.size[0]}x{art.size[1]}")
 
-# iOS. 0.78 was chosen by eye against a 180px render - the home-screen size.
-compose(art, 0.78).save(os.path.join(ASSETS, "icon.png"))
+# iOS. Measured: nothing is clipped even at 0.92, because the squircle is full
+# width at mid-height and that is exactly where his lettering sits. So this is
+# a judgement about margin, not about safety. 0.88.
+compose(art, 0.88).save(os.path.join(ASSETS, "icon.png"))
 
-# Android masks adaptive icons to a CIRCLE and crops harder than iOS: only the
-# central ~66% is guaranteed. Everything outside can be cut on some launchers,
-# so the artwork is pulled in rather than trusting the corners.
-compose(art, 0.56).save(os.path.join(ASSETS, "adaptive-icon.png"))
+# Android is the one that CANNOT grow to match, and this was got wrong twice.
+# The foreground sits on a 108dp canvas and EVERY launcher masks it to the
+# inner 72dp, so the outer third is cut on every phone - not on some. The first
+# check rendered the mask across the whole image, which made the safe area look
+# far larger than it is and made 0.62 look fine when it was eating the lettering.
+#
+# Measured against the real 0.667 mask, counting ink pixels lost:
+#     0.54  none        0.58  147
+#     0.56  41          0.62  1039
+#
+# So 0.54 is the ceiling, and it is BELOW where this started. Android simply
+# does not get to be as big as iOS. Do not raise it by eye.
+compose(art, 0.54).save(os.path.join(ASSETS, "adaptive-icon.png"))
 
-# The splash is seen for a moment at full screen, so it can breathe.
-compose(art, 0.62).save(os.path.join(ASSETS, "splash-icon.png"))
+# The splash - the picture held on screen for the second while the app starts.
+# resizeMode is "contain", so this image's own padding is the only thing setting
+# how big it looks. No mask here at all, so it can run closest to the edge.
+compose(art, 0.84).save(os.path.join(ASSETS, "splash-icon.png"))
 
 # The favicon is 48px: the lettering is hopeless there, so it carries the house
 # alone. Cropping the top 56% of the block leaves the roof and the plug.
