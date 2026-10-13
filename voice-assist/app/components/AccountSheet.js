@@ -10,12 +10,13 @@
 // signup (Guideline 5.1.1(v)) and asks to see it in the review recording — but
 // the reason it belongs on THIS sheet rather than a screen of its own is that
 // this is already where someone goes when they want out.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, SectionLabel } from "./ui";
 import { deleteAccount } from "../lib/portal";
 import { C, R, S, T } from "../lib/theme";
 import { IS_DEV_APP, VERSION } from "../lib/config";
+import { pushState } from "../lib/push";
 
 export default function AccountSheet({
   visible, email, who, demo, onClose, onSignOut, onDeleted,
@@ -73,6 +74,23 @@ export default function AccountSheet({
                   {IS_DEV_APP ? " — test build. Everything it does is real." : ""}
                 </Text>
               </Card>
+
+              {/*
+                * NOTIFICATIONS, SAID OUT LOUD.
+                *
+                * Everything about push failed silently tonight and nobody
+                * could see it: the app asked, got its token, called the
+                * portal, and the portal could not write to the table. Three
+                * failures in a row and not one of them showed on a screen.
+                *
+                * So the state is on the account sheet. "Not allowed" is a
+                * setting he can change; "no Apple token" is a bug; both of
+                * them beat a quiet nothing. And the token itself is here
+                * because it is the one thing needed to prove the pipe from
+                * outside the app - it is an address, not a secret, and
+                * useless to anybody without the signing key.
+                */}
+              <PushState />
 
               <View style={{ height: 14 }} />
               <Cta
@@ -137,6 +155,24 @@ export default function AccountSheet({
         </Pressable>
       </Pressable>
     </Modal>
+  );
+}
+
+function PushState() {
+  const [st, setSt] = useState(null);
+  useEffect(() => { pushState().then(setSt).catch(() => setSt({ why: "could not check" })); }, []);
+  if (!st) return null;
+  return (
+    <Card style={{ marginTop: 10 }}>
+      <SectionLabel>Notifications</SectionLabel>
+      <Text style={T.small}>
+        {st.granted ? "Allowed" : "NOT allowed — turn them on in iPhone Settings"}
+        {st.granted ? (st.apns ? " · Apple token ok" : " · no Apple token yet") : ""}
+      </Text>
+      {st.apns ? (
+        <Text selectable style={[T.small, { marginTop: 6, fontSize: 11 }]}>{st.apns}</Text>
+      ) : null}
+    </Card>
   );
 }
 

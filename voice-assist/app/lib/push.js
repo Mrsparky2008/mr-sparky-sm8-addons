@@ -172,3 +172,26 @@ export function usePush({ signedIn, onJob }) {
 
   return { token };
 }
+
+/**
+ * What the phone can actually tell us about notifications, for the account
+ * sheet. Pure enquiry: it never asks for permission, so opening the account
+ * screen cannot burn the one permission prompt iOS allows.
+ */
+export async function pushState() {
+  try {
+    if (!Device.isDevice) return { granted: false, why: "simulator" };
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== "granted") return { granted: false, why: status };
+    let apns = null;
+    try {
+      const d = await Notifications.getDevicePushTokenAsync();
+      apns = typeof d?.data === "string" ? d.data : null;
+    } catch (e) {
+      return { granted: true, apns: null, why: e?.message || "no device token" };
+    }
+    return { granted: true, apns, why: "" };
+  } catch (e) {
+    return { granted: false, why: e?.message || "unknown" };
+  }
+}
