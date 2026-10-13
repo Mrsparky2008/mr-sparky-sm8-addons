@@ -101,6 +101,21 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
           }} />
         ) : null}
 
+        {/*
+          * WHAT NEEDS YOU, first and tappable.
+          *
+          * This was an amber strip that looked like a label and did nothing.
+          * Two claims sitting unapproved is work, so it reads as work and it
+          * goes somewhere.
+          */}
+        {attention.length ? (
+          <Pressable onPress={() => onOpen("claims", data)} style={s.attn}>
+            <View style={s.attnDot} />
+            <Text style={s.attnText} numberOfLines={2}>{attention.join(" · ")}</Text>
+            <Text style={s.attnChev}>›</Text>
+          </Pressable>
+        ) : null}
+
         <Card>
           <SectionLabel>Ready to claim</SectionLabel>
           {claimable ? (
@@ -119,67 +134,67 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
           <Cta label="Make a claim" tone="earth" onPress={() => onMakeClaim(data)} />
         ) : null}
 
-        {attention.length ? (
-          <View style={s.attn}>
-            <View style={s.attnDot} />
-            <Text style={s.attnText}>{attention.join(" · ")}</Text>
-          </View>
-        ) : null}
-
-        <View style={s.grid}>
-          <HubTile
-            icon="claims" label="Claims"
-            sub={overdue ? `${overdue} overdue payment${overdue === 1 ? "" : "s"}` : `${claims.length} on record`}
+        {/*
+          * WHAT YOU LOOK UP, as a list rather than eight identical tiles.
+          *
+          * Redesigned 13 Oct 2026. The grid gave a tile the same weight
+          * whether it held $420.82 or the word "camera-first", so nothing on
+          * the screen was more important than anything else and the last two
+          * rows were below the fold. A list ranks; a grid cannot.
+          *
+          * And the figure sits where the figure belongs - on the row, right
+          * aligned, in tabular figures - instead of in a sentence underneath
+          * the label. That is the portal's own rule from 8 Oct, which this
+          * screen had never been held to.
+          */}
+        <SectionLabel>Your record</SectionLabel>
+        <Card style={{ paddingVertical: 2 }}>
+          <HubRow
+            label="Claims"
+            value={claims.length ? String(claims.length) : "none"}
+            note={overdue ? `${overdue} overdue` : ""}
             badge={awaiting || undefined}
             onPress={() => onOpen("claims", data)}
           />
-          <HubTile
-            icon="receipt" label="Receipts"
-            sub={receiptCount ? `${receiptCount} lodged` : "camera-first"}
-            onPress={() => onOpen("receipt", data)}
-          />
-          <HubTile
-            icon="chart" label="Statement"
-            sub={heldCount ? `${heldCount} job${heldCount === 1 ? "" : "s"} held` : "all jobs payable"}
-            onPress={() => onOpen("statement", data)}
-          />
-          <HubTile
-            icon="bank" label="Retention"
-            sub={retention ? `${money(retention.balance)} held` : "nothing held"}
+          <HubRow
+            label="Retention held"
+            value={retention ? money(retention.balance) : "nil"}
             onPress={() => onOpen("retention", data)}
           />
-          {/* What they owe US - material on our account that was for them.
-              It has been in the browser portal since 23 Sep; the phone was
-              the gap, which is the wrong way round when the man being
-              charged is the one carrying it (Steven, 30 Sep 2026). */}
-          <HubTile
-            icon="topay" label="What I owe"
-            sub={owedBack?.totalIncGst
-              ? `${money(owedBack.totalIncGst)} on the account`
-              : "nothing owing"}
+          <HubRow
+            label="On the trade account"
+            value={owedBack?.totalIncGst ? money(owedBack.totalIncGst) : "nil"}
+            tone={owedBack?.totalIncGst ? "owed" : ""}
             onPress={() => onOpen("owed", data)}
           />
-          <HubTile
-            icon="trend" label="My rate"
-            sub={rateSub}
+          <HubRow
+            label="My rate"
+            value={rate ? `${rate.rate}%` : "—"}
+            note={conversion?.measurable ? `${conversion.conversion ?? 0}% conv` : "history builds this"}
             onPress={() => onOpen("rate", data)}
           />
-          {/* Native, like receipts (Steven, 30 Aug: "can't we just upload
-              from the phone?") - camera, Claude reads it, human confirms. */}
-          <HubTile
-            icon="idcard" label="My documents"
-            sub="insurance & certificates"
+          <HubRow
+            label="Statement"
+            value={heldCount ? `${heldCount} held` : "all payable"}
+            onPress={() => onOpen("statement", data)}
+          />
+          <HubRow
+            label="Receipts"
+            value={receiptCount ? String(receiptCount) : "none"}
+            onPress={() => onOpen("receipt", data)}
+          />
+          <HubRow
+            label="My documents"
+            value="insurance & certificates"
             onPress={() => onOpen("docs", data)}
           />
-          {/* Hours put into somebody else's job. It has been on the portal
-              since 24 Sep 2026; this is the same thing where he already is
-              (Steven, 30 Sep 2026). */}
-          <HubTile
-            icon="topay" label="Invoice us"
-            sub="labour on another job"
+          <HubRow
+            label="Invoice us"
+            value="labour on another job"
             onPress={() => onOpen("raise", data)}
+            last
           />
-        </View>
+        </Card>
 
         <Pressable onPress={() => onOpen("details", data)} style={s.detailsRow}>
           <Icon name="person" size={15} color={C.muted} />
@@ -347,19 +362,31 @@ function Decided({ rows, onDispute }) {
   );
 }
 
-function HubTile({ icon, label, sub, badge, onPress }) {
+/*
+ * One line of the record. Label left, figure right, nothing underneath.
+ *
+ * The tile it replaces put the figure in a sentence under the label, which
+ * reads as caption rather than as money, and gave "camera-first" the same
+ * weight as $420.82. The portal settled this on 8 Oct: label above, number
+ * below, and the explanation goes behind an i, never on the page.
+ */
+function HubRow({ label, value, note = "", badge, tone = "", onPress, last = false }) {
   return (
-    <Pressable onPress={onPress} style={s.tile}>
+    <Pressable onPress={onPress} style={[s.hubRow, last && { borderBottomWidth: 0 }]}>
+      <Text style={s.hubLabel} numberOfLines={1}>{label}</Text>
       {badge ? (
         <View style={s.badge}>
           <Text style={[s.badgeText, mono]}>{badge > 9 ? "9+" : badge}</Text>
         </View>
       ) : null}
-      <Icon name={icon} size={22} color={C.ink} />
-      <View>
-        <Text style={s.tileLabel}>{label}</Text>
-        <Text style={[s.tileSub, mono]} numberOfLines={1}>{sub}</Text>
-      </View>
+      {note ? <Text style={[s.hubNote, mono]} numberOfLines={1}>{note}</Text> : null}
+      <Text
+        style={[s.hubValue, mono, tone === "owed" && { color: C.warnChipInk }]}
+        numberOfLines={1}
+      >
+        {value}
+      </Text>
+      <Text style={s.chev}>›</Text>
     </Pressable>
   );
 }
@@ -387,13 +414,15 @@ const s = StyleSheet.create({
     flex: 1, color: C.warnChipInk, fontSize: 10.5, fontWeight: "800",
     letterSpacing: 0.7, textTransform: "uppercase",
   },
+  attnChev: { color: C.warnChipInk, fontSize: 18, fontWeight: "800" },
 
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
-  tile: {
-    flexGrow: 1, flexBasis: "47%", minHeight: 84,
-    backgroundColor: C.panel, borderColor: C.line, borderWidth: 1, borderRadius: R.card,
-    padding: 12, justifyContent: "space-between",
+  hubRow: {
+    flexDirection: "row", alignItems: "center", gap: 10, minHeight: S.touch,
+    paddingVertical: 12, borderBottomColor: C.line, borderBottomWidth: 1,
   },
+  hubLabel: { flex: 1, color: C.ink, fontSize: 15, fontWeight: "700" },
+  hubNote: { color: C.muted, fontSize: 12 },
+  hubValue: { color: C.ink, fontSize: 15, fontWeight: "700" },
   tileLabel: { color: C.ink, fontSize: 13.5, fontWeight: "700" },
   tileSub: { color: C.muted, fontSize: 11, marginTop: 2 },
   badge: {
