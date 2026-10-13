@@ -8,68 +8,93 @@ import { Card, Cta, Empty, Header, Row, SectionLabel, StatusChip } from "../comp
 import Icon from "../components/icons";
 import { C, R, S, T, money, mono, oneLine } from "../lib/theme";
 import { fetchJob } from "../lib/api";
+import { loadSettings, saveSettings } from "../lib/settings";
 
 const GST = 0.1;
 
 /*
- * Navigate, the way ServiceM8 does it: offer the apps he actually has.
+ * Navigate, the way ServiceM8 does it: ask once, then remember.
  *
- * Steven, 13 Oct 2026: "ServiceM8 has the same thing. You go navigate and it
- * tells you which app you want to use." iOS gives no way to change the default
- * maps app and tradesmen have opinions, so asking is right - but offering
- * Google Maps to a phone without Google Maps is not asking, it is guessing.
+ * Steven, 13 Oct 2026: "once you set the app to use that particular map, it
+ * will always open when you select it... that's what I'm used to." Right, and
+ * the first cut asked every single time, which is a tax on every job for a
+ * decision made once.
  *
- * canOpenURL only answers truthfully for schemes declared in
- * LSApplicationQueriesSchemes (app.json). Undeclared, iOS says no to
- * everything, which is why this needed a build rather than an over-the-air
- * publish: the honest answer is compiled in.
+ * iOS has NO system default for a maps app, so nothing remembers this for
+ * him. The app has to.
  *
- * Apple Maps is always there and cannot be removed, so it is never checked.
- * Falling back to the google.com/maps/dir link when nothing is installed
- * keeps the old behaviour on a phone still running an older build.
+ * It only offers what is installed. canOpenURL answers truthfully only for
+ * schemes declared in LSApplicationQueriesSchemes (app.json) - undeclared,
+ * iOS says no to everything, which is why this needed a build and not a
+ * publish. Apple Maps is never checked: it cannot be removed.
  */
-async function navigateTo(address) {
+const MAPS = {
+  apple: {
+    label: "Apple Maps",
+    scheme: null,
+    url: (w) => `http://maps.apple.com/?daddr=${w}&dirflg=d`,
+  },
+  google: {
+    label: "Google Maps",
+    scheme: "comgooglemaps://",
+    url: (w) => `comgooglemaps://?daddr=${w}&directionsmode=driving`,
+  },
+  waze: {
+    label: "Waze",
+    scheme: "waze://",
+    url: (w) => `waze://?q=${w}&navigate=yes`,
+  },
+};
+
+async function installedMaps() {
+  const out = ["apple"];
+  for (const key of ["google", "waze"]) {
+    try {
+      if (await Linking.canOpenURL(MAPS[key].scheme)) out.push(key);
+    } catch { /* an older build: iOS refuses to answer, so it is not offered */ }
+  }
+  return out;
+}
+
+/**
+ * `ask` forces the chooser even when one is remembered - that is the long
+ * press, and it is the only way back once a choice is made.
+ */
+async function navigateTo(address, { ask = false } = {}) {
   const where = encodeURIComponent(oneLine(address || "").trim());
   if (!where) {
     Alert.alert("No address", "ServiceM8 has no address on this job.");
     return;
   }
-  const open = (url) => Linking.openURL(url).catch(() => {
-    Alert.alert("Couldn't open it", "Try another one.");
+  const open = (key) => Linking.openURL(MAPS[key].url(where)).catch(() => {
+    Alert.alert("Couldn't open it", `${MAPS[key].label} wouldn't open. Hold Navigate to pick another.`);
   });
 
-  const has = async (scheme) => {
-    try { return await Linking.canOpenURL(scheme); } catch { return false; }
-  };
-  const [google, waze] = await Promise.all([
-    has("comgooglemaps://"),
-    has("waze://"),
-  ]);
+  const available = await installedMaps();
+  const { mapsApp } = await loadSettings();
 
-  const options = [
-    { text: "Apple Maps", onPress: () => open(`http://maps.apple.com/?daddr=${where}&dirflg=d`) },
-  ];
-  if (google) {
-    options.push({
-      text: "Google Maps",
-      onPress: () => open(`comgooglemaps://?daddr=${where}&directionsmode=driving`),
-    });
+  // Remembered, still installed, and he has not asked to change it.
+  if (!ask && mapsApp && available.includes(mapsApp)) {
+    open(mapsApp);
+    return;
   }
-  if (waze) {
-    options.push({ text: "Waze", onPress: () => open(`waze://?q=${where}&navigate=yes`) });
+  // Only one on the phone: there is nothing to ask about.
+  if (!ask && available.length === 1) {
+    open(available[0]);
+    return;
   }
-  // Nothing detected means an older build, where iOS refuses to answer at all.
-  // The web link opens Google Maps if it is there and Safari if it is not, so
-  // the question still gets asked rather than silently narrowing to Apple.
-  if (!google && !waze) {
-    options.push({
-      text: "Google Maps",
-      onPress: () => open(`https://www.google.com/maps/dir/?api=1&destination=${where}&travelmode=driving`),
-    });
-  }
-  options.push({ text: "Cancel", style: "cancel" });
 
-  Alert.alert("Navigate", oneLine(address), options);
+  Alert.alert(
+    "Navigate with",
+    oneLine(address),
+    [
+      ...available.map((key) => ({
+        text: MAPS[key].label,
+        onPress: () => { saveSettings({ mapsApp: key }); open(key); },
+      })),
+      { text: "Cancel", style: "cancel" },
+    ],
+  );
 }
 
 // The dossier returns contacts as "JOB: Name 0400..." strings, and ServiceM8
@@ -194,7 +219,12 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                     <Text style={s.actionText}>Call</Text>
                   </Pressable>
                 )}
-                <Pressable onPress={() => navigateTo(data.job?.address)} style={s.action}>
+                <Pressable
+                  onPress={() => navigateTo(data.job?.address)}
+                  onLongPress={() => navigateTo(data.job?.address, { ask: true })}
+                  delayLongPress={450}
+                  style={s.action}
+                >
                   <Text style={s.actionText}>Navigate</Text>
                 </Pressable>
               </View>
