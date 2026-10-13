@@ -109,6 +109,9 @@ export default function AddReceipt({
    */
   const [supOpen, setSupOpen] = useState(false);
   const [supQuery, setSupQuery] = useState("");
+  // Opened by hand, and stays open. Nothing re-collapses a form somebody is
+  // typing in.
+  const [editing, setEditing] = useState(false);
   const addressOf = (n) => String(jobAddresses?.[String(n)] || "").trim();
   const recent = useMemo(
     () => [...chips].sort((a, b) => Number(b) - Number(a)).slice(0, RECENT_JOBS),
@@ -191,6 +194,13 @@ export default function AddReceipt({
     if (!q) return allSuppliers;
     return allSuppliers.filter((r) => normalise(r.name).includes(q) || (r.abn || "").includes(supQuery.trim()));
   }, [allSuppliers, supQuery]);
+
+  /*
+   * A docket is only worth showing instead of a form when the reader actually
+   * got the two figures that make a receipt: who, and how much. Everything
+   * else can be filled in afterwards; those two cannot be guessed.
+   */
+  const compact = !!photo && !reading && !editing && !!read?.supplier && !!read?.amountIncGst;
 
   const pickSupplier = (row) => {
     mark("supplier"); setSupplier(row.name); setPicked(true);
@@ -585,6 +595,42 @@ export default function AddReceipt({
           ) : null}
         </View>
 
+        {/*
+          * ONCE THERE IS A PHOTO, THE FORM STOPS BEING A FORM.
+          *
+          * The reader already has the supplier, the invoice number, the amount
+          * and the date off the paper. Leaving six empty-looking fields on
+          * screen asks him to check his own answers one keyboard at a time,
+          * on a screen that was already too long to see the Save button.
+          *
+          * So: a docket he reads, four lines, one tap each to correct. Tapping
+          * a line opens the full form, which is this same markup - nothing is
+          * duplicated and nothing can disagree with itself.
+          *
+          * It only collapses when the reader got BOTH the supplier and the
+          * amount. A thin read leaves the form open, because then there is
+          * genuinely typing to do.
+          */}
+        {compact ? (
+          <View>
+            <SectionLabel>Read off the docket</SectionLabel>
+            <Card style={{ paddingVertical: 2 }}>
+              <DocketLine label="Supplier" value={supplier} onPress={() => setEditing(true)} />
+              <DocketLine
+                label="Invoice number"
+                value={invoiceNumber}
+                missing={!invoiceNumber}
+                onPress={() => setEditing(true)}
+              />
+              <DocketLine label="Amount inc GST" value={amount ? `$${amount}` : ""} onPress={() => setEditing(true)} />
+              <DocketLine label="Date" value={date} onPress={() => setEditing(true)} last />
+            </Card>
+            <Pressable onPress={() => setEditing(true)} hitSlop={8}>
+              <Text style={s.link}>Something is wrong — open it all</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
         <View>
           <SectionLabel>Supplier{read?.supplier ? " · read" : ""}</SectionLabel>
           {allSuppliers.length ? (
@@ -761,6 +807,8 @@ export default function AddReceipt({
             </>
           ) : null}
         </View>
+          </>
+        )}
 
         {error ? (
           <Card style={{ borderColor: C.active }}>
@@ -792,7 +840,9 @@ export default function AddReceipt({
         ) : null}
 
         <Cta
-          label={busy ? "Saving…" : "Save receipt"}
+          // The figure goes ON the button. Nobody files $181.50 by accident,
+          // and it is the last chance to notice the reader misread a total.
+          label={busy ? "Saving…" : (Number(amount) ? `File it — $${Number(amount).toFixed(2)}` : "Save receipt")}
           tone="earth"
           disabled={busy || !ready}
           onPress={save}
@@ -822,6 +872,22 @@ export default function AddReceipt({
   );
 }
 
+/** One line of the docket: what it says, and a tap to disagree with it. */
+function DocketLine({ label, value, missing = false, onPress, last = false }) {
+  return (
+    <Pressable onPress={onPress} style={[s.docketRow, last && { borderBottomWidth: 0 }]}>
+      <Text style={s.docketLabel}>{label}</Text>
+      <Text
+        style={[s.docketValue, mono, missing && { color: C.warnChipInk, fontWeight: "600" }]}
+        numberOfLines={1}
+      >
+        {value || "not read"}
+      </Text>
+      <Text style={s.docketChev}>›</Text>
+    </Pressable>
+  );
+}
+
 function Field({ mono: isMono, inputRef, onUse, ...props }) {
   const own = useRef(null);
   return (
@@ -842,6 +908,13 @@ const s = StyleSheet.create({
   body: { padding: S.screen, paddingTop: 0, gap: S.gap, paddingBottom: 40 },
   preview: { width: "100%", height: 220, borderRadius: R.card, backgroundColor: C.panel },
   note: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
+  docketRow: {
+    flexDirection: "row", alignItems: "center", gap: 10, minHeight: S.touch,
+    paddingVertical: 12, borderBottomColor: C.line, borderBottomWidth: 1,
+  },
+  docketLabel: { flex: 1, color: C.muted, fontSize: 13.5 },
+  docketValue: { color: C.ink, fontSize: 15.5, fontWeight: "700", maxWidth: "58%" },
+  docketChev: { color: C.muted, fontSize: 19 },
   warn: { color: C.warnChipInk, fontSize: 12, lineHeight: 17, marginTop: 7 },
   link: { color: C.brand, fontSize: 12.5, fontWeight: "700", marginTop: 7 },
   readingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
