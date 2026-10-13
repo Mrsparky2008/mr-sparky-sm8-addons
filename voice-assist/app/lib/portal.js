@@ -88,6 +88,9 @@ async function call(method, path, body) {
 
 const get = (path) => call("GET", path);
 const post = (path, body) => call("POST", path, body);
+// Only push uses this: turning a device off is a DELETE that still carries the
+// token in its body, because the token is which device, not which person.
+const del = (path, body) => call("DELETE", path, body);
 const qs = (params) => {
   const parts = Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && v !== "")
@@ -287,3 +290,21 @@ export const declareOwnMaterial = ({ jobNumber, amountIncGst, name }) =>
  */
 export const voidReceipt = ({ jobNumber, receiptId, reason }) =>
   post("/api/receipts/void", { jobNumber, receiptId, reason });
+
+/* ---- Push: telling the portal where to ring ----------------------------- */
+/*
+ * The token is iOS's postal address for this app on this phone - unguessable,
+ * and it changes if the app is deleted and reinstalled. Keyed on the TOKEN
+ * rather than the person, because a man can carry two phones and a phone can
+ * change hands.
+ */
+export const registerPush = ({ token, platform }) =>
+  post("/api/push/register", { token, platform });
+
+/*
+ * Signing out on a phone being handed back has to stop other people's jobs
+ * arriving on it. The record is retired, not deleted, so "he was never told"
+ * can still be answered afterwards.
+ */
+export const unregisterPush = ({ token }) =>
+  del("/api/push/register", { token });

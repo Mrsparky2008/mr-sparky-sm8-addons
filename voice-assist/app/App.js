@@ -64,6 +64,7 @@ import CrewMember from "./screens/admin/CrewMember";
 import ApproveClaim from "./screens/admin/ApproveClaim";
 import { signOut } from "./lib/auth";
 import * as portal from "./lib/portal";
+import { usePush, disable as disablePush } from "./lib/push";
 
 import { IS_DEV_APP } from "./lib/config";
 import { C, S, suburb } from "./lib/theme";
@@ -158,23 +159,40 @@ function Shell() {
   // short of dialling straight into a live mic session off a single tap.
   const pendingJob = useRef(null);
 
-  const openLink = useCallback((url) => {
-    const number = /(?:^|\/)job\/(\d+)/.exec(String(url || ""))?.[1];
+  /*
+   * Open a job by number. Two things arrive this way - the ServiceM8 job card's
+   * link, and a tapped push alert - and both can land before Face ID has
+   * finished, so both wait on the same hook.
+   */
+  const openJob = useCallback((number) => {
     if (!number) return;
     // Arrived before sign-in finished — hold it and replay once we're in.
-    if (!emailRef.current) { pendingJob.current = number; return; }
+    if (!emailRef.current) { pendingJob.current = String(number); return; }
     setTab("work");
     setStacks((s) => ({
       ...s,
-      work: [ROOTS.work, { name: "job", job: { job_number: number, address: "" } }],
+      work: [ROOTS.work, { name: "job", job: { job_number: String(number), address: "" } }],
     }));
   }, []);
+
+  const openLink = useCallback((url) => {
+    openJob(/(?:^|\/)job\/(\d+)/.exec(String(url || ""))?.[1]);
+  }, [openJob]);
 
   useEffect(() => {
     Linking.getInitialURL().then((url) => { if (url) openLink(url); }).catch(() => {});
     const sub = Linking.addEventListener("url", ({ url }) => openLink(url));
     return () => sub.remove();
   }, [openLink]);
+
+  /*
+   * Notifications. Asks the first time somebody is signed in, not on the splash
+   * screen - a permission box before you know what the app is gets refused, and
+   * iOS only ever asks once.
+   *
+   * Tapping an alert opens the job, the same path the ServiceM8 button uses.
+   */
+  const alerts = usePush({ signedIn: !!email, onJob: openJob });
 
   // A cold launch from the job card lands here before Face ID has finished,
   // so the job waits and is replayed the moment we're signed in.
@@ -211,6 +229,9 @@ function Shell() {
   }, []);
 
   async function handleSignOut() {
+    // Before anything else: a phone being handed back must stop ringing with
+    // other people's jobs.
+    await disablePush(alerts.token.current);
     await signOut();
     setStacks(ROOTS);
     setTab("work");

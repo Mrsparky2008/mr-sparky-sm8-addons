@@ -1,0 +1,120 @@
+// Being told a job is going, without Telegram.
+//
+// Steven, 9 Sep 2026: "having one app is always better than two, or three now."
+// Telegram keeps the job feed only until this is proven on a real job - both
+// fire together first, and the group is switched off after, never before.
+//
+// WHY THIS CANNOT SHIP OVER THE AIR. Push is a native capability: the
+// entitlement is compiled into the binary and the permission is granted by iOS
+// to that binary. Every other change in this app reaches the phone in minutes;
+// this one needed a provisioning profile with aps-environment on it, a new
+// build, and a trip through TestFlight.
+//
+// WHAT THE TOKEN IS. iOS hands the app an unguessable string that is the
+// address for this app on this phone. It is not an account id and it is not
+// stable: deleting and reinstalling produces a new one, which is why the portal
+// keys devices on the token rather than on the person. Two phones, two rows.
+//
+// NOTHING HERE DECIDES ANYTHING. It asks, it registers, it listens. Who is told
+// about a job is decided by canAccessJobs in the portal, where the rule has
+// tests and where it cannot be edited by holding the phone.
+import { useEffect, useRef } from "react";
+import { Platform } from "react-native";
+import * as Notifications from "expo-notifications";
+import * as Device from "expo-device";
+import * as portal from "./portal";
+
+/*
+ * An alert that arrives while the app is open should still be seen. The default
+ * is to swallow it, which on a job feed means the one time a man is already in
+ * the app is the one time he is not told.
+ */
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+/**
+ * Ask, then register. Returns the token, or null with a reason.
+ *
+ * Never asks twice. iOS only ever shows the permission box once per install -
+ * a second request returns the previous answer silently - so a "no" has to be
+ * reported rather than retried, or the app sits there believing it asked.
+ */
+export async function enable() {
+  // A simulator has no push service at all, and asking produces a confusing
+  // failure rather than an honest one.
+  if (!Device.isDevice) return { token: null, why: "simulator" };
+
+  const existing = await Notifications.getPermissionsAsync();
+  let status = existing.status;
+  if (status !== "granted") {
+    /*
+     * allowAlert/allowSound are the ask. allowCriticalAlerts is deliberately
+     * NOT requested: it needs an entitlement Apple grants case by case, and a
+     * job alert is time sensitive, not an emergency siren.
+     */
+    const asked = await Notifications.requestPermissionsAsync({
+      ios: { allowAlert: true, allowBadge: false, allowSound: true },
+    });
+    status = asked.status;
+  }
+  if (status !== "granted") return { token: null, why: "denied" };
+
+  // projectId is required on a store build - without it the token request has
+  // no way to know which Expo project is sending.
+  const projectId = "d31c0122-3886-4d57-8388-ec1bfd817f9f";
+  const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+  if (!token) return { token: null, why: "no token" };
+
+  await portal.registerPush({ token, platform: Platform.OS });
+  return { token, why: "" };
+}
+
+/** Hand a phone back and stop getting other people's jobs on it. */
+export async function disable(token) {
+  if (!token) return;
+  try { await portal.unregisterPush({ token }); } catch { /* signing out anyway */ }
+}
+
+/**
+ * Wire the app up once it knows who is signed in.
+ *
+ * `onJob` is given a job number when an alert is TAPPED - both from a cold
+ * start (the notification that launched the app) and from one tapped while the
+ * app is already running. A push nobody can act on from the lock screen is a
+ * Telegram message with extra steps.
+ */
+export function usePush({ signedIn, onJob }) {
+  const token = useRef(null);
+
+  useEffect(() => {
+    let gone = false;
+    if (!signedIn) return undefined;
+
+    enable()
+      .then((r) => { if (!gone) token.current = r.token; })
+      // Never blocks anything. A man who said no to notifications still has a
+      // working app, and he still has Telegram until it is switched off.
+      .catch(() => {});
+
+    const jobFrom = (response) => {
+      const n = response?.notification?.request?.content?.data?.jobNumber;
+      if (n && onJob) onJob(String(n));
+    };
+
+    // The alert that LAUNCHED the app, if that is how it was opened.
+    Notifications.getLastNotificationResponseAsync().then((r) => {
+      if (!gone && r) jobFrom(r);
+    }).catch(() => {});
+
+    const sub = Notifications.addNotificationResponseReceivedListener(jobFrom);
+    return () => { gone = true; sub.remove(); };
+  }, [signedIn, onJob]);
+
+  return { token };
+}

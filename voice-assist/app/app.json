@@ -3,7 +3,7 @@
     "name": "Mr Sparky",
     "slug": "mr-sparky-ai-assistant",
     "owner": "mr_sparky",
-    "version": "2.3.0",
+    "version": "2.4.0",
     "scheme": "mrsparky-aiassist",
     "extra": {
       "eas": {
@@ -24,10 +24,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "au.com.mrsparky.aiassist",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "AI Assist can attach photos from your library to job cards.",
-        "NSPhotoLibraryAddUsageDescription": "AI Assist can save job photos to your library.",
-        "NSCameraUsageDescription": "AI Assist can take photos to attach to job cards.",
-        "NSFaceIDUsageDescription": "Face ID unlocks AI Assist so you only sign in once on this phone.",
+        "NSPhotoLibraryUsageDescription": "Mr Sparky can attach photos from your library to job cards.",
+        "NSPhotoLibraryAddUsageDescription": "Mr Sparky can save job photos to your library.",
+        "NSCameraUsageDescription": "Mr Sparky can take photos to attach to job cards.",
+        "NSFaceIDUsageDescription": "Face ID unlocks Mr Sparky so you only sign in once on this phone.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -43,11 +43,12 @@
     "plugins": [
       "expo-asset",
       "expo-secure-store",
+      "expo-notifications",
       [
         "expo-image-picker",
         {
-          "cameraPermission": "AI Assist uses the camera to photograph receipts and job photos.",
-          "photosPermission": "AI Assist can attach photos from your library to receipts and job cards."
+          "cameraPermission": "Mr Sparky uses the camera to photograph receipts and job photos.",
+          "photosPermission": "Mr Sparky can attach photos from your library to receipts and job cards."
         }
       ]
     ],
