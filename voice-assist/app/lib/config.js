@@ -27,11 +27,27 @@ export const PORTAL = "https://portal.mrsparky.com.au";
 // of tonight's five updates am I actually on".
 import * as Updates from "expo-updates";
 
-// nativeBuildVersion comes back null on the shipped builds, so the number
-// is stamped into app.config.js extra per runtime (Steven, 30 Aug 2026:
-// "can we have the build no or maybe both").
-const buildNo = Constants.nativeBuildVersion || Constants.expoConfig?.extra?.iosBuild;
-const build = buildNo ? ` (${buildNo})` : "";
+/*
+ * THE BUILD NUMBER, AND IT HAS TO BE THE TRUE ONE.
+ *
+ * It used to fall back to a number typed into app.config.js by hand. Steven
+ * installed build 35 tonight and the account sheet told him 33, because the
+ * hand-typed value had not been bumped - and worse, the three builds share
+ * runtime 2.4.0, so build 35 runs an over-the-air bundle carrying whatever
+ * number was hardcoded when that bundle was published. A number that drifts
+ * is worse than no number: it is the one line somebody checks to find out
+ * whether an update landed, and it told him it had not.
+ *
+ * expo-application reads it off the binary, so it cannot be wrong and cannot
+ * go stale. If that is ever unavailable the line simply has no build number
+ * rather than a confident lie.
+ */
+let nativeBuild = Constants.nativeBuildVersion || null;
+try {
+  // eslint-disable-next-line global-require
+  nativeBuild = require("expo-application").nativeBuildVersion || nativeBuild;
+} catch { /* no module in this binary: say nothing rather than guess */ }
+const build = nativeBuild ? ` (${nativeBuild})` : "";
 const ota = Updates.createdAt
   ? ` · update ${new Date(Updates.createdAt).toLocaleDateString("en-AU")} ${new Date(Updates.createdAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}`
   : " · embedded";

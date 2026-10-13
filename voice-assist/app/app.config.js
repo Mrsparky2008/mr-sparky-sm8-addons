@@ -64,14 +64,9 @@ export default ({ config }) => ({
     // Two identical dark apps on one home screen is a mistake waiting to happen,
     // and the mistake would be approving a real claim from a test build.
     variant: IS_DEV ? "dev" : "production",
-    // The iOS build number for the current runtime. EAS numbers builds
-    // remotely, so the JS bundle cannot read it natively without
-    // expo-application (not in the build). Kept honest by hand: runtime
-    // 2.4.0 = build 33. BUMP THIS whenever a new native build ships.
-    //
-    // EAS assigns the number when the build STARTS, so it cannot be known
-    // when the source is uploaded. Build 31 therefore shipped saying 29;
-    // an OTA to production@2.4.0 corrects it, and reaches only build 33.
-    iosBuild: "33",
+    // NO iosBuild HERE ANY MORE. It was a number kept honest by hand and it
+    // was not: Steven installed build 35 and the app told him 33. The build
+    // number is read off the binary now (lib/config.js), where it cannot
+    // drift. Nothing should re-add it.
   },
 });
