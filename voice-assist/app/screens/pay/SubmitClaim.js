@@ -4,6 +4,17 @@
 // portal re-derives every figure from your own statement, so a tampered payload
 // cannot inflate a claim.
 //
+// What he owes is on this screen whether he owes anything or not. Steven,
+// 13 Oct 2026: "I want to give them the opportunity to do it first so I can
+// trust them and learn, teach them how to just pay their bills as we go
+// without having us having to chase them. But I want to have the override and
+// the final call at the end of the day."
+//
+// So the ticks here are an OFFER, never a decision. The office still approves
+// the claim, can still take off bills he skipped, and can let one go after a
+// phone call. And the section is drawn at $0.00 as well, because a blank space
+// reads as nothing owing - which is the hole this started from.
+//
 // Note what is deliberately missing: a running total as you tick jobs on and
 // off. Adding one would mean this screen doing arithmetic, and a figure worked
 // out here could disagree with the claim the portal actually builds. With
@@ -31,7 +42,20 @@ export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
   const jobsById = Object.fromEntries((data?.statement?.jobs || []).map((j) => [j.jobNumber, j]));
   const all = claimable?.jobNumbers || [];
 
+  /*
+   * A bill is offered unless it is already spoken for. `spokenFor` means
+   * recovered OR raised and waiting - a recovery bigger than the claim it was
+   * raised against stays pending on purpose, and while it waited the older
+   * field said the bill was still available, so the same bill could come off
+   * twice. Fall back to `recovered` on a server that predates the fix: it is
+   * the looser answer, and the submit refuses a stale list with a 409 anyway.
+   */
+  const owed = data?.owedBack || {};
+  const owedItems = (owed.items || []).filter((x) => !(x.spokenFor ?? x.recovered));
+  const owedBalance = Number(owed.balanceIncGst ?? owed.totalIncGst ?? 0);
+
   const [chosen, setChosen] = useState(() => new Set(all));
+  const [bills, setBills] = useState(() => new Set());
   const [helping, setHelping] = useState(true);
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,6 +68,14 @@ export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
     setChosen((prev) => {
       const next = new Set(prev);
       if (next.has(n)) next.delete(n); else next.add(n);
+      return next;
+    });
+  }
+
+  function toggleBill(id) {
+    setBills((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
@@ -68,6 +100,7 @@ export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
         jobNumbers: [...chosen],
         includeHelpingHand: helperCount ? helping : false,
         acceptDeclaration: true,
+        recoverBillIds: [...bills],
       });
       onSubmitted(res?.claim || null);
     } catch (err) {
@@ -128,6 +161,45 @@ export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
               />
             ) : null}
           </Card>
+        </View>
+
+        {/*
+          * Drawn whether he owes anything or not. The whole point is that the
+          * first he hears of a deduction is not a short payment.
+          */}
+        <View>
+          <SectionLabel>On the trade account</SectionLabel>
+          <Card>
+            {owedItems.length ? (
+              owedItems.map((x) => (
+                <Tick
+                  key={x.id}
+                  on={bills.has(String(x.id))}
+                  onPress={() => toggleBill(String(x.id))}
+                  label={[x.supplier || "Supplier", x.invoiceNumber].filter(Boolean).join("  ")}
+                  value={money(x.amountIncGst)}
+                />
+              ))
+            ) : (
+              <Text style={T.small}>
+                {owedBalance > 0
+                  ? `${money(owedBalance)} owing, all of it already allocated to a claim.`
+                  : "Nothing owing on the account."}
+              </Text>
+            )}
+          </Card>
+          {owedItems.length ? (
+            <Text style={s.owedNote}>
+              {bills.size
+                ? `${bills.size} to settle out of this claim — ${money(
+                    owedItems.filter((x) => bills.has(String(x.id)))
+                      .reduce((t, x) => t + (Number(x.amountIncGst) || 0), 0),
+                  )}. It comes off what is PAID, not off the work or the GST.`
+                : "Material you picked up on the Mr Sparky account for yourself. "
+                  + "Tick any you want settled out of this claim — a bill is taken whole "
+                  + "or it waits for a bigger claim, never half."}
+            </Text>
+          ) : null}
         </View>
 
         {data?.declaration ? (
@@ -194,6 +266,7 @@ const s = StyleSheet.create({
   body: { padding: S.screen, paddingTop: 0, gap: S.gap },
   hero: { color: C.ink, fontSize: 30, fontWeight: "800", letterSpacing: -0.6, marginVertical: 3 },
   jobsHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
+  owedNote: { color: C.muted, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
   selectAll: { color: C.infoChipInk, fontSize: 12.5, fontWeight: "800" },
   tick: {
     flexDirection: "row", alignItems: "center", gap: 11, minHeight: S.touch,

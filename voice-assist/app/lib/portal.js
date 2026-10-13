@@ -176,8 +176,21 @@ export const setAgreedRate = ({ personId, percent, reviewOn, note, clear }) =>
  * worth — the portal re-derives every figure from the caller's own statement,
  * so a tampered payload cannot inflate a claim.
  */
-export const submitClaim = ({ jobNumbers, includeHelpingHand = false, acceptDeclaration, name }) =>
-  post("/api/claims", { jobNumbers, includeHelpingHand, acceptDeclaration, name });
+/*
+ * `recoverBillIds` are bills HE chose to clear with this claim - ids off his
+ * own owedBack list. Steven, 13 Oct 2026: "they get the first opportunity
+ * before they put a claim in", and he keeps the override.
+ *
+ * They ride on the SUBMIT rather than a call of their own, on purpose: submit
+ * is already the one atomic act that settles recoveries and enforces
+ * never-split, and a separate call would be a second bite at the same bills -
+ * which is the thing "taken back once is never offered again" forbids.
+ */
+export const submitClaim = ({
+  jobNumbers, includeHelpingHand = false, acceptDeclaration, recoverBillIds = [], name,
+}) => post("/api/claims", {
+  jobNumbers, includeHelpingHand, acceptDeclaration, recoverBillIds, name,
+});
 
 /**
  * Move a claim along: submitted → approved → invoiced → paid, or rejected.
