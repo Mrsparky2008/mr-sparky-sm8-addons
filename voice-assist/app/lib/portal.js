@@ -334,3 +334,11 @@ export const acceptJob = ({ jobNumber }) =>
  * right now" is the honest answer for him and the common one for everybody.
  */
 export const availableJobs = () => get("/api/jobs/available");
+
+/*
+ * Ring my own phone, now.
+ *
+ * Deliberately only the caller's own devices: an admin who could push to
+ * anybody is a way to wake every phone in the business at 3am.
+ */
+export const testPush = () => post("/api/push/test", {});

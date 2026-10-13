@@ -17,6 +17,7 @@ import { deleteAccount } from "../lib/portal";
 import { C, R, S, T } from "../lib/theme";
 import { IS_DEV_APP, VERSION } from "../lib/config";
 import { pushState } from "../lib/push";
+import * as portal from "../lib/portal";
 
 export default function AccountSheet({
   visible, email, who, demo, onClose, onSignOut, onDeleted,
@@ -160,8 +161,29 @@ export default function AccountSheet({
 
 function PushState() {
   const [st, setSt] = useState(null);
+  const [ring, setRing] = useState("");
   useEffect(() => { pushState().then(setSt).catch(() => setSt({ why: "could not check" })); }, []);
   if (!st) return null;
+
+  /*
+   * Ring my own phone. Steven spent an hour tonight unable to tell whether
+   * push worked, and the answer was only findable by reading server logs. A
+   * button he can press himself is the difference between "it is broken" and
+   * "it is broken HERE".
+   *
+   * It only ever rings the caller's own devices - an admin who could push to
+   * anybody is a way to wake the whole business at 3am.
+   */
+  async function sendTest() {
+    setRing("…");
+    try {
+      await portal.testPush();
+      setRing("sent — it should arrive in a second or two");
+    } catch (e) {
+      setRing(e?.message || "the portal would not send it");
+    }
+  }
+
   return (
     <Card style={{ marginTop: 10 }}>
       <SectionLabel>Notifications</SectionLabel>
@@ -169,6 +191,14 @@ function PushState() {
         {st.granted ? "Allowed" : "NOT allowed — turn them on in iPhone Settings"}
         {st.granted ? (st.apns ? " · Apple token ok" : " · no Apple token yet") : ""}
       </Text>
+      {st.granted ? (
+        <Pressable onPress={sendTest} hitSlop={8} style={{ paddingVertical: 10 }}>
+          <Text style={{ color: C.infoChipInk, fontSize: 13.5, fontWeight: "700" }}>
+            Send me a test notification
+          </Text>
+        </Pressable>
+      ) : null}
+      {ring ? <Text style={[T.small, { fontSize: 12 }]}>{ring}</Text> : null}
       {st.apns ? (
         <Text selectable style={[T.small, { marginTop: 6, fontSize: 11 }]}>{st.apns}</Text>
       ) : null}
