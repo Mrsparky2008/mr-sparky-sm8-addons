@@ -65,13 +65,39 @@ export async function enable() {
   }
   if (status !== "granted") return { token: null, why: "denied" };
 
-  // projectId is required on a store build - without it the token request has
-  // no way to know which Expo project is sending.
+  /*
+   * TWO TOKENS, AND THAT IS DELIBERATE.
+   *
+   * Steven, 13 Oct 2026, on being told the Expo route means Apple's key lives
+   * on Expo's servers and every job alert passes through them: "nope, I'll go
+   * straight into Apple."
+   *
+   * Right call. The key then sits in his own Secrets Manager beside every
+   * other key he owns, and a client's address stops passing through a third
+   * party on its way to a phone.
+   *
+   * Going direct needs the DEVICE token - the raw one Apple issues - not the
+   * Expo one. But the portal's register route still validates an Expo token
+   * today, so sending only the new one would break registration the moment
+   * this publishes. Both go up: the portal keeps taking `token` as it always
+   * has, and starts using `apnsToken` whenever its half is ready. Nothing has
+   * to land in the same minute.
+   *
+   * The Expo one can be dropped once the direct sender is live and proven.
+   */
   const projectId = "d31c0122-3886-4d57-8388-ec1bfd817f9f";
   const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
   if (!token) return { token: null, why: "no token" };
 
-  await portal.registerPush({ token, platform: Platform.OS });
+  // Apple's own address for this app on this phone. A hex string, not an
+  // ExponentPushToken[...], and the only thing APNs will accept.
+  let apnsToken = null;
+  try {
+    const device = await Notifications.getDevicePushTokenAsync();
+    apnsToken = typeof device?.data === "string" ? device.data : null;
+  } catch { /* the Expo token still registers; direct push waits */ }
+
+  await portal.registerPush({ token, apnsToken, platform: Platform.OS });
   return { token, why: "" };
 }
 
