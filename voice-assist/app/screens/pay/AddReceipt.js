@@ -135,6 +135,18 @@ export default function AddReceipt({
     () => [...chips].sort((a, b) => Number(b) - Number(a)).slice(0, RECENT_JOBS),
     [chips.join(",")],
   );
+  /*
+   * What the reader did NOT get off the photo. Steven, 13 Oct 2026: "they have
+   * to take another copy to make sure that the reader understands it so
+   * nothing's cropped and missing."
+   *
+   * A blurred photo already says so, and one that yields nothing at all says
+   * so. The gap was the HALF read - a supplier and a total, no invoice number,
+   * because the top of the docket was outside the frame. That saved quietly,
+   * and the invoice number is the thing that stops the same docket being filed
+   * twice. So it is named, and a retake is offered. Never blocking: a docket
+   * that genuinely has no number on it is a real docket.
+   */
   const query = jobQuery.trim().toLowerCase();
   const matches = useMemo(() => (
     query
@@ -169,6 +181,12 @@ export default function AddReceipt({
   // A supplier picked off the suggestions closes the list; typing reopens it.
   const [picked, setPicked] = useState(false);
   const suggestions = picked ? [] : suggestSuppliers(supplier, suppliers, pastReceipts);
+  // Only what the READER missed, never what the person has since typed.
+  const thinRead = !read ? [] : [
+    !read.supplier && "supplier",
+    !read.amountIncGst && "amount",
+    !read.invoiceNumber && "invoice number",
+  ].filter(Boolean);
   const pickSupplier = (row) => {
     mark("supplier"); setSupplier(row.name); setPicked(true);
     if (row.abn) {
@@ -412,6 +430,14 @@ export default function AddReceipt({
                 </View>
               )}
               {readError ? <Text style={s.warn}>{readError}</Text> : null}
+              {!reading && !readError && read && thinRead.length ? (
+                <Text style={s.warn}>
+                  {`Couldn't read the ${thinRead.join(" or the ")} off that photo. `}
+                  {thinRead.includes("invoice number")
+                    ? "That is what stops a docket being filed twice, so it is worth a retake with the whole docket in frame — or type it in."
+                    : "Retake it with the whole docket in frame, or type it in."}
+                </Text>
+              ) : null}
             </>
           ) : (
             <View style={{ gap: 8 }}>
