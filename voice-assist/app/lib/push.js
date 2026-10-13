@@ -117,10 +117,24 @@ export async function enable() {
   const bundleId = Constants.expoConfig?.ios?.bundleIdentifier || null;
   const variant = Constants.expoConfig?.extra?.variant || null;
 
+  /*
+   * WHETHER THIS PHONE CAN ACTUALLY SHOW ANYTHING.
+   *
+   * A device token and permission to display an alert are two different
+   * things on iOS: the token is issued whether or not the man ever said yes,
+   * and APNs reports every push to a refused phone as DELIVERED while iOS
+   * drops it in silence.
+   *
+   * So the portal cannot tell "we told him" from "we sent it to a phone that
+   * can show nothing" - and the difference is a missed job. It is sent at
+   * registration and refreshed every time, because he can revoke it in
+   * Settings months later and nothing would otherwise notice.
+   */
   await portal.registerPush({
     token,
     apnsToken,
     platform: Platform.OS,
+    canShowAlerts: true,
     bundleId,
     // The portal decides; this is what it decides FROM. Production unless
     // this is plainly a development build.
