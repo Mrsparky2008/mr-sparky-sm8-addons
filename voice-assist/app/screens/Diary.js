@@ -11,7 +11,7 @@
 // never does its own timezone arithmetic.
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Cta, Empty, Header } from "../components/ui";
+import { Cta, Empty, Header, StatusDot } from "../components/ui";
 import { C, R, S, T, mono, oneLine, suburb } from "../lib/theme";
 import { fetchDiary } from "../lib/api";
 
@@ -145,6 +145,9 @@ export default function Diary({ onBack, onOpenJob }) {
                     : undefined}
                 >
                   <View style={s.eventTop}>
+                    {/* The same badge, in the same place, as the jobs list and
+                        as ServiceM8. A shape you read without reading. */}
+                    <StatusDot status={r.job?.status} size={20} />
                     <Text style={[s.eventNum, mono]}>#{r.job?.number || "—"}</Text>
                     <Text style={s.eventSuburb} numberOfLines={1}>{suburb(r.job?.address) || oneLine(r.job?.address)}</Text>
                     {r.job?.number ? <Text style={s.chev}>›</Text> : null}

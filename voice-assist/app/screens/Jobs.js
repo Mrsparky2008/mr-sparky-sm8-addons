@@ -13,7 +13,7 @@ import {
   ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet,
   Text, TextInput, View,
 } from "react-native";
-import { Card, Empty, Header, StatusChip } from "../components/ui";
+import { Card, Empty, Header, StatusChip, StatusDot } from "../components/ui";
 import Icon from "../components/icons";
 import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono, oneLine, statusChip, suburb } from "../lib/theme";
@@ -179,7 +179,12 @@ function JobRow({ job, onPress, hideStatus }) {
     <Pressable onPress={onPress}>
       <Card style={{ marginBottom: 10 }}>
         <View style={s.rowTop}>
-          <Text style={[s.number, mono]}>#{job.job_number}</Text>
+          {/* Leading, the way ServiceM8 puts it, so the eye lands on the same
+              spot in both apps. Inside a section that is already one status
+              the word is noise, but the badge is not: it keeps the rows
+              lined up with every other list. */}
+          <StatusDot status={job.status} />
+          <Text style={[s.number, mono, { flex: 1 }]}>#{job.job_number}</Text>
           {hideStatus ? null : <StatusChip status={job.status} />}
         </View>
         <Text style={s.address} numberOfLines={1}>{oneLine(job.address) || suburb(job.address) || "—"}</Text>
@@ -201,7 +206,7 @@ const s = StyleSheet.create({
     borderRadius: R.card, paddingHorizontal: 14, color: C.ink, fontSize: 16,
   },
   list: { paddingHorizontal: S.screen, paddingBottom: 20 },
-  rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  rowTop: { flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 6 },
   number: { color: C.ink, fontSize: 15, fontWeight: "800" },
   address: { ...T.body, fontSize: 14 },
   sub: { ...T.small, marginTop: 3 },

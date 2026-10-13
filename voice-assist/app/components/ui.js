@@ -51,6 +51,46 @@ export function StatusChip({ status }) {
   );
 }
 
+/*
+ * ServiceM8's letter badge: an orange Q, a blue W, a green C.
+ *
+ * Steven, 13 Oct 2026, with both apps side by side: "can we add an orange Q
+ * and blue W before each, C green for completed, similar to SM8."
+ *
+ * The colours were already the same (statusChip, 30 Aug 2026 - "I switch apps
+ * and get lost looking for a WO in the blue section"). This is the other half
+ * of that: a shape you read without reading, in the same place in the row, so
+ * a man scanning a list is not re-learning a layout every time he changes
+ * app. It is the concept copied, not the feature.
+ */
+const STATUS_LETTER = {
+  "quote": "Q",
+  "work order": "W",
+  "completed": "C",
+  "unsuccessful": "U",
+};
+
+export function StatusDot({ status, size = 22 }) {
+  const key = String(status || "").toLowerCase();
+  const letter = STATUS_LETTER[key];
+  if (!letter) return null;
+  const { ink } = statusChip(status);
+  return (
+    <View
+      style={[
+        s.dot,
+        { width: size, height: size, borderRadius: size / 2, backgroundColor: ink },
+      ]}
+      // The letter is a shorthand, so the row still has to SAY what it is to
+      // anybody who cannot see the colour.
+      accessible
+      accessibilityLabel={status}
+    >
+      <Text style={[s.dotText, { fontSize: size * 0.55 }]}>{letter}</Text>
+    </View>
+  );
+}
+
 export function Card({ children, style }) {
   return <View style={[s.card, style]}>{children}</View>;
 }
@@ -178,6 +218,10 @@ const s = StyleSheet.create({
   status: { borderRadius: R.chip, paddingHorizontal: 9, paddingVertical: 3 },
   statusText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase" },
 
+  // Dark ink on the status colour, because the colour IS the signal and a
+  // white letter on orange is the one combination that fails in sunlight.
+  dot: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  dotText: { color: "#0B1322", fontWeight: "800", letterSpacing: 0.2 },
   card: {
     backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
     borderRadius: R.card, padding: S.card,

@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
-import { Card, Empty, Header, StatusChip } from "../components/ui";
+import { Card, Empty, Header, StatusChip, StatusDot } from "../components/ui";
 import KeyboardToggle from "../components/KeyboardToggle";
 import { C, R, S, T, mono, oneLine } from "../lib/theme";
 import { fetchJobs } from "../lib/api";
@@ -85,7 +85,8 @@ export default function AllJobs({ onOpenJob, onBack }) {
             <Pressable key={j.job_uuid || j.job_number} onPress={() => onOpenJob(j)}>
               <Card style={{ marginBottom: 10 }}>
                 <View style={s.rowTop}>
-                  <Text style={[s.number, mono]}>#{j.job_number}</Text>
+                  <StatusDot status={j.status} />
+                  <Text style={[s.number, mono, { flex: 1 }]}>#{j.job_number}</Text>
                   <StatusChip status={j.status} />
                 </View>
                 <Text style={s.address} numberOfLines={1}>{oneLine(j.address) || "—"}</Text>
@@ -111,7 +112,7 @@ const s = StyleSheet.create({
     borderRadius: R.card, paddingHorizontal: 14, color: C.ink, fontSize: 16,
   },
   list: { paddingHorizontal: S.screen, paddingBottom: 20 },
-  rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  rowTop: { flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 6 },
   number: { color: C.ink, fontSize: 15, fontWeight: "800" },
   address: { ...T.body, fontSize: 14 },
   sub: { ...T.small, marginTop: 3 },
