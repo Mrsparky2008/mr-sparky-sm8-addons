@@ -3,13 +3,48 @@
 // then labelled sections. Steven moves between the two apps all day; they
 // should read the same way even though this one is dark.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Linking, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Empty, Header, Row, SectionLabel, StatusChip } from "../components/ui";
 import Icon from "../components/icons";
 import { C, R, S, T, money, mono, oneLine } from "../lib/theme";
 import { fetchJob } from "../lib/api";
 
 const GST = 0.1;
+
+/*
+ * Navigate. Steven, 13 Oct 2026, looking at the redesign: "can it do that
+ * though, call and navigate with Google Maps or Maps".
+ *
+ * Both, and he picks. Tradesmen have opinions about this and iOS gives no way
+ * to change the default maps app, so asking once beats choosing for him.
+ *
+ * Neither link needs a native module, which is the point - this ships over
+ * the air rather than waiting for a build. maps.apple.com opens Apple Maps on
+ * the phone, and the google.com/maps/dir link opens the Google Maps app when
+ * it is installed and Safari when it is not. The comgooglemaps:// scheme
+ * would be the "proper" way and is deliberately not used: it has to be
+ * declared in Info.plist, which is native, and it fails silently on a phone
+ * without the app.
+ */
+function navigateTo(address) {
+  const where = encodeURIComponent(oneLine(address || "").trim());
+  if (!where) {
+    Alert.alert("No address", "ServiceM8 has no address on this job.");
+    return;
+  }
+  const open = (url) => Linking.openURL(url).catch(() => {
+    Alert.alert("Couldn't open maps", "Try the other one.");
+  });
+  Alert.alert(
+    "Navigate",
+    oneLine(address),
+    [
+      { text: "Apple Maps", onPress: () => open(`http://maps.apple.com/?daddr=${where}&dirflg=d`) },
+      { text: "Google Maps", onPress: () => open(`https://www.google.com/maps/dir/?api=1&destination=${where}&travelmode=driving`) },
+      { text: "Cancel", style: "cancel" },
+    ],
+  );
+}
 
 // The dossier returns contacts as "JOB: Name 0400..." strings, and ServiceM8
 // hands back empty ones for roles nobody filled in.
@@ -122,6 +157,21 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                   <Text style={s.otherContact}>{c.name} · <Text style={[s.phone, mono]}>{c.phone}</Text></Text>
                 </Pressable>
               ))}
+              {/* The two things done standing in a driveway, as targets rather
+                  than as text you have to hit exactly. */}
+              <View style={s.actions}>
+                {!!primary?.phone && (
+                  <Pressable
+                    onPress={() => Linking.openURL(`tel:${primary.phone}`)}
+                    style={s.action}
+                  >
+                    <Text style={s.actionText}>Call</Text>
+                  </Pressable>
+                )}
+                <Pressable onPress={() => navigateTo(data.job?.address)} style={s.action}>
+                  <Text style={s.actionText}>Navigate</Text>
+                </Pressable>
+              </View>
             </Card>
 
             {/* Value rows, ServiceM8's own shape. Billing shows INC GST here
@@ -276,6 +326,12 @@ const s = StyleSheet.create({
   name: { color: C.ink, fontSize: 17, fontWeight: "800", flex: 1 },
   address: { ...T.body, fontSize: 14, marginTop: 4 },
   phone: { color: C.earth, fontSize: 15, fontWeight: "700", marginTop: 8 },
+  actions: { flexDirection: "row", gap: 9, marginTop: 14 },
+  action: {
+    flex: 1, minHeight: S.touch, alignItems: "center", justifyContent: "center",
+    borderColor: C.line, borderWidth: 1, borderRadius: R.button, paddingVertical: 12,
+  },
+  actionText: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
   otherContact: { ...T.small, marginTop: 8 },
 
   billing: { paddingBottom: 12, paddingTop: 2 },
