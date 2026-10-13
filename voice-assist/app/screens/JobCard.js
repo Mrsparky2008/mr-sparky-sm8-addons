@@ -8,6 +8,7 @@ import { Card, Cta, Empty, Header, Row, SectionLabel, StatusChip } from "../comp
 import Icon from "../components/icons";
 import { C, R, S, T, money, mono, oneLine } from "../lib/theme";
 import { fetchJob } from "../lib/api";
+import * as portal from "../lib/portal";
 import { loadSettings, saveSettings } from "../lib/settings";
 
 const GST = 0.1;
@@ -117,6 +118,19 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [showBilling, setShowBilling] = useState(false);
+  /*
+   * What this job is worth TO HIM. Steven, 13 Oct 2026: "show the job value,
+   * show the share, deductions, just show their share or payable to them."
+   *
+   * Billing was the client's invoice, which is the one number on this screen
+   * that is not his business. His share was three taps away on another tab.
+   *
+   * Every figure comes off the portal already worked out - material, rate,
+   * share, payable. Nothing here adds, subtracts or takes a percentage: a
+   * second implementation on a phone is how two numbers quietly stop
+   * agreeing, and this one would disagree about wages.
+   */
+  const [mine, setMine] = useState(null);
 
   // Swipe left/right through the category you came from, so working a list
   // of quotes doesn't mean Back-tap-Back-tap (Steven, 30 Aug 2026). Arrows
@@ -156,9 +170,21 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
     setData(null);
     setError("");
     setShowBilling(false);
+    setMine(null);
     fetchJob(jobNumber)
       .then((d) => { if (!dead) setData(d); })
       .catch((e) => { if (!dead) setError(e.message || "Couldn't load this job"); });
+    // His own figures, from the portal. Failing is fine and silent: the job
+    // card worked before the portal existed and has to keep working when it
+    // is unreachable in a basement.
+    portal.statement()
+      .then((st) => {
+        if (dead) return;
+        const row = (st?.statement?.jobs || []).find(
+          (j) => String(j.jobNumber) === String(jobNumber));
+        setMine(row || null);
+      })
+      .catch(() => {});
     return () => { dead = true; };
   }, [jobNumber]);
 
@@ -271,6 +297,51 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                     <Text style={s.totalStrong}>Total inc GST</Text>
                     <Text style={[s.totalStrongValue, mono]}>{money(incGst)}</Text>
                   </View>
+
+                  {/*
+                    * And then the half that is actually his. Everything below
+                    * is read off the portal, never worked out here.
+                    */}
+                  {mine ? (
+                    <View style={s.mine}>
+                      <Text style={s.mineLabel}>YOUR SHARE</Text>
+                      {Number(mine.expenseIncGst) ? (
+                        <View style={s.totalRow}>
+                          <Text style={s.totalLabel}>Material on this job</Text>
+                          <Text style={[s.totalValue, mono]}>−{money(mine.expenseIncGst)}</Text>
+                        </View>
+                      ) : null}
+                      {Number(mine.grossProfit) ? (
+                        <View style={s.totalRow}>
+                          <Text style={s.totalLabel}>Gross</Text>
+                          <Text style={[s.totalValue, mono]}>{money(mine.grossProfit)}</Text>
+                        </View>
+                      ) : null}
+                      {mine.ratePct ? (
+                        <View style={s.totalRow}>
+                          <Text style={s.totalLabel}>Your rate</Text>
+                          <Text style={[s.totalValue, mono]}>{mine.ratePct}%</Text>
+                        </View>
+                      ) : null}
+                      {Number(mine.materialsReimbursed) ? (
+                        <View style={s.totalRow}>
+                          <Text style={s.totalLabel}>Your receipts, reimbursed</Text>
+                          <Text style={[s.totalValue, mono]}>{money(mine.materialsReimbursed)}</Text>
+                        </View>
+                      ) : null}
+                      <View style={s.totalRow}>
+                        <Text style={s.totalStrong}>Payable to you</Text>
+                        <Text style={[s.totalStrongValue, mono]}>
+                          {mine.outcome === "OK" ? money(mine.payableIncGst) : "not yet"}
+                        </Text>
+                      </View>
+                      {/* A job that cannot be claimed should say so HERE, on
+                          the job, not three weeks later on a claim. */}
+                      {mine.outcome && mine.outcome !== "OK" ? (
+                        <Text style={s.mineWhy}>{mine.why || "This job is not claimable yet."}</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
                 </View>
               )}
               {/* The job's OWN diary — not the day schedule. Steven's call:
@@ -395,6 +466,12 @@ const s = StyleSheet.create({
     flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
     gap: 12, paddingVertical: 6,
   },
+  mine: { borderTopColor: C.line, borderTopWidth: 1, marginTop: 10, paddingTop: 10 },
+  mineLabel: {
+    color: C.muted, fontSize: 10, fontWeight: "800", letterSpacing: 1,
+    marginBottom: 4,
+  },
+  mineWhy: { color: C.warnChipInk, fontSize: 12, lineHeight: 16, marginTop: 6 },
   billName: { ...T.body, fontSize: 13, flex: 1 },
   billPrice: { color: C.ink, fontSize: 13, fontWeight: "600" },
   totalRow: { flexDirection: "row", justifyContent: "space-between", paddingTop: 6 },
