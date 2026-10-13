@@ -13,13 +13,20 @@
 // Two rules the reading half obeys, both Steven's (2026-08-06):
 //   · It fills in, it does not file. Every value is editable and nothing is
 //     saved until a human presses the button.
-//   · The supplier is a plain field showing exactly what is printed. What
-//     IDENTIFIES the supplier is the ABN, not the name — every valid tax
-//     invoice carries one, it has no spelling variance, and the register can
-//     confirm it. Steven's call, and a better one than matching names.
-//     If a docket photographs too badly to read, the ABN is what gets typed
-//     and the register supplies the name: eleven checksummed digits cannot be
-//     fumbled into a plausible-but-wrong supplier the way a name can.
+//   · The supplier is a plain field showing exactly what is printed. The ABN
+//     identifies a supplier better than a name ever will — no spelling
+//     variance, and the register confirms it — so the reader still lifts it
+//     off every photo. It is NOT asked for any more. Steven, 13 Oct 2026:
+//     "I don't need a supplier ABN, they're not going to type it in." It is
+//     folded away at the bottom for the one case it was really for: a docket
+//     too poor to read, where eleven checksummed digits cannot be fumbled
+//     into a plausible-but-wrong supplier the way a name can.
+//
+//     What took its place is the INVOICE NUMBER, which had been sitting at
+//     the bottom of the page marked optional where nobody saw it. Supplier
+//     plus invoice number is the key that stops one docket being filed
+//     twice (lib/receipt-dupes.mjs), so asking for it makes the duplicate
+//     check stronger, not weaker.
 //   · The job comes from where you opened the screen, not from the paper. If
 //     the docket quotes a different job number it is FLAGGED, with what
 //     ServiceM8 says that job is, and the choice is yours. If nothing anchors
@@ -41,11 +48,14 @@ import { postJobTask, postReceiptCopy, readReceipt } from "../../lib/api";
 // The phone is in the same timezone as the job. Building the date from the
 // device clock avoids toISOString(), which is UTC and would date a receipt
 // yesterday for most of a Sydney working day.
-function todayLocal() {
+function shiftLocal(days) {
   const d = new Date();
+  d.setDate(d.getDate() + days);
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+
+const todayLocal = () => shiftLocal(0);
 
 const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic" };
 
@@ -102,7 +112,7 @@ const RECENT_JOBS = 5;
 
 export default function AddReceipt({
   jobNumbers = [], jobNumber: initial, onBack, onSaved, onOwnMaterial,
-  suppliers = [], pastReceipts = [],
+  suppliers = [], pastReceipts = [], jobAddresses = {},
 }) {
   const anchored = initial ? String(initial) : "";
   const chips = jobNumbers.map(String);
@@ -115,17 +125,23 @@ export default function AddReceipt({
   // Most recent means highest: ServiceM8 job numbers run up, and the statement
   // hands us numbers with no dates attached.
   const [jobQuery, setJobQuery] = useState("");
+  // Steven, 13 Oct 2026: "people don't remember job numbers but they remember
+  // addresses". So the list is picked from, not recalled, and the search box
+  // takes either - a street name finds the job as surely as its number does.
+  const [jobOpen, setJobOpen] = useState(false);
+  const [abnOpen, setAbnOpen] = useState(false);
+  const addressOf = (n) => String(jobAddresses?.[String(n)] || "").trim();
   const recent = useMemo(
     () => [...chips].sort((a, b) => Number(b) - Number(a)).slice(0, RECENT_JOBS),
     [chips.join(",")],
   );
-  const digits = jobQuery.replace(/D/g, "");
+  const query = jobQuery.trim().toLowerCase();
   const matches = useMemo(() => (
-    digits
-      ? chips.filter((n) => n.includes(digits))
-          .sort((a, b) => Number(b) - Number(a)).slice(0, 12)
+    query
+      ? chips.filter((n) => n.includes(query) || addressOf(n).toLowerCase().includes(query))
+          .sort((a, b) => Number(b) - Number(a)).slice(0, 25)
       : []
-  ), [chips.join(","), digits]);
+  ), [chips.join(","), query, jobAddresses]);
   const [jobNumber, setJobNumber] = useState(
     anchored || (chips.length === 1 ? chips[0] : ""),
   );
@@ -445,41 +461,58 @@ export default function AddReceipt({
           <SectionLabel>Job{needsJob && photo ? " — which one?" : ""}</SectionLabel>
           {chips.length > 1 ? (
             <>
-              {/* Whatever is on show, the job already chosen stays on show with
-                  it — otherwise picking an old one by searching makes it vanish
-                  the moment the box is cleared. */}
-              <View style={s.chips}>
-                {(digits
-                  ? matches
-                  : (jobNumber && !recent.includes(jobNumber)
-                      ? [jobNumber, ...recent]
-                      : recent)
-                ).map((n) => (
-                  <Pressable key={n} onPress={() => setJobNumber(n)} style={[s.chip, n === jobNumber && s.chipOn]}>
-                    <Text style={[s.chipText, mono, n === jobNumber && { color: C.ink }]}>#{n}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              {chips.length > RECENT_JOBS ? (
-                <>
-                  <View style={{ height: 8 }} />
+              {/* Closed, it is one line: the job you are filing against. Open,
+                  it is the list, newest first, with the address beside every
+                  number. A row is a whole line rather than a chip because an
+                  address does not fit in a chip and the address is the half
+                  anybody actually recognises. */}
+              <Pressable onPress={() => setJobOpen((v) => !v)} style={s.jobSelect}>
+                <View style={{ flex: 1 }}>
+                  {jobNumber ? (
+                    <>
+                      <Text style={[s.jobSelectNumber, mono]}>#{jobNumber}</Text>
+                      {addressOf(jobNumber)
+                        ? <Text style={s.jobSelectAddress} numberOfLines={1}>{addressOf(jobNumber)}</Text>
+                        : null}
+                    </>
+                  ) : (
+                    <Text style={s.jobSelectEmpty}>Choose the job</Text>
+                  )}
+                </View>
+                <Text style={s.jobChevron}>{jobOpen ? "⌃" : "⌄"}</Text>
+              </Pressable>
+
+              {jobOpen ? (
+                <View style={s.jobList}>
                   <Field
                     onUse={(r) => (lastField.current = r.current)}
                     value={jobQuery}
                     onChangeText={setJobQuery}
-                    placeholder={`Search ${chips.length} jobs`}
-                    keyboardType="number-pad"
+                    placeholder={`Search ${chips.length} jobs — number or address`}
                     returnKeyType="done"
-                    mono
+                    autoCorrect={false}
                   />
-                  <Text style={s.note}>
-                    {digits
-                      ? (matches.length
-                          ? `${matches.length} job${matches.length === 1 ? "" : "s"} with ${digits} in the number.`
-                          : `No job of yours has ${digits} in its number.`)
-                      : `Your ${RECENT_JOBS} most recent. Search for an older one.`}
-                  </Text>
-                </>
+                  <ScrollView style={s.jobScroll} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                    {(query
+                      ? matches
+                      : [...chips].sort((a, b) => Number(b) - Number(a))
+                    ).map((n) => (
+                      <Pressable
+                        key={n}
+                        onPress={() => { setJobNumber(n); setJobOpen(false); setJobQuery(""); }}
+                        style={[s.jobOption, n === jobNumber && s.jobOptionOn]}
+                      >
+                        <Text style={[s.jobOptionNumber, mono]}>#{n}</Text>
+                        <Text style={s.jobOptionAddress} numberOfLines={1}>
+                          {addressOf(n) || "—"}
+                        </Text>
+                      </Pressable>
+                    ))}
+                    {query && !matches.length ? (
+                      <Text style={s.note}>Nothing of yours matches “{jobQuery.trim()}”.</Text>
+                    ) : null}
+                  </ScrollView>
+                </View>
               ) : null}
             </>
           ) : anchored || chips.length === 1 ? (
@@ -544,29 +577,17 @@ export default function AddReceipt({
         </View>
 
         <View>
-          <SectionLabel>Supplier ABN{read?.abn ? " · read" : ""}</SectionLabel>
+          <SectionLabel>Invoice number{read?.invoiceNumber ? " · read" : ""}</SectionLabel>
           <Field
             onUse={(r) => (lastField.current = r.current)}
-            value={abn}
-            onChangeText={(v) => { mark("abn"); setAbn(v); setAbnName(""); setAbnError(""); }}
-            onEndEditing={() => lookupAbn(abn)}
-            placeholder="11 digits, from the top of the docket"
-            keyboardType="number-pad"
-            mono
+            value={invoiceNumber}
+            onChangeText={(v) => { mark("invoiceNumber"); setInvoiceNumber(v); }}
+            placeholder="Off the top of the docket"
           />
-          {abnBusy ? (
-            <Text style={s.note}>Checking the register…</Text>
-          ) : abnName ? (
-            <Text style={s.note}>Register says: {abnName}</Text>
-          ) : abnError ? (
-            <Text style={s.warn}>{abnError}</Text>
-          ) : (
-            <Text style={s.note}>
-              What actually identifies the supplier — the same docket can never be claimed twice
-              under two spellings. If the photo is too poor to read, type this and the register
-              fills in the name.
-            </Text>
-          )}
+          <Text style={s.note}>
+            This is what stops the same docket being filed twice. It sat at the bottom
+            of this page marked optional, where nobody saw it (Steven, 13 Oct 2026).
+          </Text>
         </View>
 
         <View>
@@ -583,6 +604,35 @@ export default function AddReceipt({
 
         <View>
           <SectionLabel>Date{read?.date ? " · read" : ""}</SectionLabel>
+          {/*
+            * Taps, not a wheel. Steven asked for a date picker; the ones worth
+            * having are native modules, and adding one would mean a new build
+            * and an App Store trip for a field that has three real answers:
+            * today, yesterday, or whatever the docket itself says.
+            *
+            * It is not a field to delete either, however much it looks like
+            * one. The server requires a date, and on a docket with NO invoice
+            * number the date and the amount are what stand in for one in the
+            * duplicate check - two identical dockets from one supplier would
+            * otherwise be indistinguishable.
+            */}
+          <View style={s.chips}>
+            {[
+              ["Today", shiftLocal(0)],
+              ["Yesterday", shiftLocal(-1)],
+              ...(read?.date && read.date !== shiftLocal(0) && read.date !== shiftLocal(-1)
+                ? [["On the docket", read.date]] : []),
+            ].map(([label, value]) => (
+              <Pressable
+                key={label}
+                onPress={() => { mark("date"); setDate(value); }}
+                style={[s.chip, date === value && s.chipOn]}
+              >
+                <Text style={[s.chipText, date === value && { color: C.ink }]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={{ height: 8 }} />
           <Field
             onUse={(r) => (lastField.current = r.current)}
             value={date}
@@ -592,14 +642,47 @@ export default function AddReceipt({
           />
         </View>
 
+        {/*
+          * The ABN last, and folded away. It identifies a supplier better than
+          * a name ever will and the reader still lifts it off every photo - but
+          * nobody types eleven digits off a docket, and asking for them where
+          * the invoice number belonged was the confusing part of this page
+          * (Steven, 13 Oct 2026: "I don't need a supplier ABN, I mean they're
+          * not going to type it in").
+          */}
         <View>
-          <SectionLabel>Invoice number{read?.invoiceNumber ? " · read" : " (optional)"}</SectionLabel>
-          <Field
-            onUse={(r) => (lastField.current = r.current)}
-            value={invoiceNumber}
-            onChangeText={(v) => { mark("invoiceNumber"); setInvoiceNumber(v); }}
-            placeholder="Needed for a credit"
-          />
+          <Pressable onPress={() => setAbnOpen((v) => !v)} hitSlop={8}>
+            <Text style={s.link}>
+              {abnOpen ? "Hide the supplier ABN" : abn ? `Supplier ABN  ${prettyAbn(abn)}` : "Add the supplier ABN"}
+            </Text>
+          </Pressable>
+          {abnOpen ? (
+            <>
+              <View style={{ height: 8 }} />
+              <Field
+                onUse={(r) => (lastField.current = r.current)}
+                value={abn}
+                onChangeText={(v) => { mark("abn"); setAbn(v); setAbnName(""); setAbnError(""); }}
+                onEndEditing={() => lookupAbn(abn)}
+                placeholder="11 digits, from the top of the docket"
+                keyboardType="number-pad"
+                mono
+              />
+              {abnBusy ? (
+                <Text style={s.note}>Checking the register…</Text>
+              ) : abnName ? (
+                <Text style={s.note}>Register says: {abnName}</Text>
+              ) : abnError ? (
+                <Text style={s.warn}>{abnError}</Text>
+              ) : (
+                <Text style={s.note}>
+                  Filled from the photo when it is legible. Typing it is for a docket too
+                  poor to read — eleven checksummed digits cannot be fumbled into a
+                  plausible but wrong supplier the way a name can.
+                </Text>
+              )}
+            </>
+          ) : null}
         </View>
 
         {error ? (
@@ -698,6 +781,23 @@ const s = StyleSheet.create({
   chipOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   chipText: { color: C.muted, fontSize: 13.5, fontWeight: "700" },
   chipAbn: { color: C.muted, fontSize: 11.5, fontWeight: "400" },
+  jobSelect: {
+    minHeight: S.touch, backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
+    borderRadius: R.button, paddingHorizontal: 14, paddingVertical: 10,
+    flexDirection: "row", alignItems: "center", gap: 10,
+  },
+  jobSelectNumber: { color: C.ink, fontSize: 15.5, fontWeight: "800" },
+  jobSelectAddress: { color: C.muted, fontSize: 12.5, marginTop: 2 },
+  jobSelectEmpty: { color: C.muted, fontSize: 14.5 },
+  jobChevron: { color: C.muted, fontSize: 16, fontWeight: "800" },
+  jobList: { marginTop: 8, gap: 8 },
+  // Tall enough to show that there is a list, short enough that the camera
+  // button is never pushed off the screen behind it.
+  jobScroll: { maxHeight: 260, borderColor: C.line, borderWidth: 1, borderRadius: R.card },
+  jobOption: { paddingHorizontal: 14, paddingVertical: 11, borderBottomColor: C.line, borderBottomWidth: 1 },
+  jobOptionOn: { backgroundColor: C.selectBg },
+  jobOptionNumber: { color: C.ink, fontSize: 14.5, fontWeight: "800" },
+  jobOptionAddress: { color: C.muted, fontSize: 12.5, marginTop: 2 },
   jobRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   jobNumber: { color: C.ink, fontSize: 16, fontWeight: "800" },
   flagTitle: { color: C.warnChipInk, fontSize: 14, fontWeight: "800" },

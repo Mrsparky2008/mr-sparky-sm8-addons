@@ -496,6 +496,11 @@ function Shell() {
             <View style={s.fill}>
               <AddReceipt
                 jobNumbers={(top.data?.statement?.jobs || []).map((j) => j.jobNumber)}
+                // The address beside every number. Nobody recognises #167705;
+                // everybody recognises the street they were standing in.
+                jobAddresses={Object.fromEntries(
+                  Object.entries(top.data?.meta || {}).map(([n, m]) => [n, m?.suburb || ""]),
+                )}
                 onBack={pop}
                 onSaved={() => resetTab("pay")}
                 onOwnMaterial={(jobNumber) => push({ name: "ownmaterial", jobNumber })}
