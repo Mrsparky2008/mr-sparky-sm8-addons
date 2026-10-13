@@ -121,6 +121,21 @@ h2 = house.resize((hw, hh), Image.LANCZOS)
 fav.paste(h2, ((S - hw) // 2, (S - hh) // 2), h2)
 fav.resize((48, 48), Image.LANCZOS).save(os.path.join(ASSETS, "favicon.png"))
 
-for f in ("icon.png", "adaptive-icon.png", "splash-icon.png", "favicon.png"):
+# The header mark, 30px on screen beside the screen title. The house and plug
+# only - the words are unreadable that small and the house IS the logo at that
+# size, the same call the favicon makes.
+#
+# 0.80: Steven, 13 Oct 2026, "make the yellow bigger, let it grow closer to the
+# edges, maybe 4px border or 3px". At 30px that leaves about three pixels of
+# blue each side, which is the margin he asked for - and there is no mask here
+# to eat it, because the tile draws its own corners.
+mark = Image.new("RGB", (144, 144), BLUE)
+mw = int(144 * 0.80)
+mh = int(house.size[1] * (mw / house.size[0]))
+m2 = house.resize((mw, mh), Image.LANCZOS)
+mark.paste(m2, ((144 - mw) // 2, (144 - mh) // 2), m2)
+mark.save(os.path.join(ASSETS, "mark.png"))
+
+for f in ("icon.png", "adaptive-icon.png", "splash-icon.png", "favicon.png", "mark.png"):
     p = os.path.join(ASSETS, f)
     print(f"  wrote {f:20} {Image.open(p).size}")
