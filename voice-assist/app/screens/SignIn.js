@@ -2,9 +2,17 @@
 // one identity per person and nothing new to remember.
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
-import { Cta, Logo } from "../components/ui";
+import { Cta } from "../components/ui";
+
+/*
+ * The app icon, not the horizontal banner. That banner is made for a van and
+ * a letterhead - white and yellow blocks on a white page - and on a dark
+ * phone screen it is a rectangle pasted onto navy. This is the thing he just
+ * tapped to get here (Steven, 14 Oct 2026).
+ */
+const ICON = require("../assets/icon.png");
 import { C, R, S, T } from "../lib/theme";
 import {
   friendlyAuthError, hasStoredSession, setNewPassword, signIn, storedEmail, unlock,
@@ -107,7 +115,7 @@ export default function SignIn({ onSignedIn }) {
   if (booting) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Logo width={200} />
+        <Image source={ICON} style={s.icon} resizeMode="cover" />
         <ActivityIndicator color={C.brand} style={{ marginTop: 28 }} />
       </View>
     );
@@ -125,7 +133,7 @@ export default function SignIn({ onSignedIn }) {
         keyboardDismissMode="interactive"
       >
         <View style={s.logoWrap}>
-          <Logo width={224} />
+          <Image source={ICON} style={s.icon} resizeMode="cover" />
         </View>
 
         {challenge ? (
@@ -151,6 +159,7 @@ export default function SignIn({ onSignedIn }) {
           <>
             <Field
               label="Email" value={email} onChangeText={setEmail}
+              placeholder="you@example.com.au"
               keyboardType="email-address" autoCapitalize="none" autoComplete="email"
               textContentType="username" returnKeyType="next"
               onSubmitEditing={() => passwordRef.current?.focus()}
@@ -163,11 +172,10 @@ export default function SignIn({ onSignedIn }) {
             />
             {!!error && <Text style={s.error}>{error}</Text>}
             <Cta label={busy ? "Signing in…" : "Sign in"} onPress={submit} disabled={busy} />
-            <Text style={s.note}>One sign-in per phone — Face ID unlocks it after that.</Text>
+            <Text style={s.note}>Once only on this phone. Face ID after that.</Text>
           </>
         )}
 
-        <Text style={s.footer}>Same login as the Mr Sparky portal</Text>
       </ScrollView>
     </View>
   );
@@ -192,7 +200,8 @@ const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.bg },
   centre: { alignItems: "center", justifyContent: "center" },
   scroll: { padding: S.screen, paddingTop: 60, paddingBottom: 40 },
-  logoWrap: { alignItems: "center", marginBottom: 36 },
+  logoWrap: { alignItems: "center", marginBottom: 40 },
+  icon: { width: 138, height: 138, borderRadius: 31 },
   lead: { ...T.body, textAlign: "center", marginBottom: S.gap },
   input: {
     minHeight: S.touch, backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
@@ -205,5 +214,4 @@ const s = StyleSheet.create({
   note: { ...T.small, textAlign: "center", marginTop: 14 },
   linkWrap: { paddingVertical: 14, alignItems: "center" },
   link: { color: C.neutral, fontSize: 13.5, fontWeight: "600" },
-  footer: { ...T.small, textAlign: "center", marginTop: 34, opacity: 0.75 },
 });
