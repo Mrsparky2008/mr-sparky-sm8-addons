@@ -175,7 +175,21 @@ function Shell() {
           + "Use the Mr Sparky tools against that job number unless I say otherwise, "
           + "and do not ask me for it."
         : "If it is about a specific job, ask for the job number and use the Mr Sparky tools.",
-      'Do NOTHING yet - reply with exactly one line, "Ready when you are.", and wait for me to speak.',
+      /*
+        * The FIRST line does the asking. Steven, 13 Oct 2026: the universal
+        * button "opens up a chat but it's pretty useless... the prompt should
+        * be, which job do you need help with?"
+        *
+        * He is right: "Ready when you are" puts the next move back on a man
+        * who has just pressed a button to get help. When the screen knew the
+        * job it should say so and get on with it; when it did not, it should
+        * ask the one question it needs rather than wait to be told.
+        */
+      hereJob
+        ? 'Do NOTHING else yet - reply with exactly one line, '
+          + `"On #${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. What do you need?", `
+          + "and wait."
+        : 'Do NOTHING else yet - reply with exactly one line, "Which job do you need help with?", and wait.',
     ].join("\n\n");
     Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(primer));
   }, [hereJob?.number, hereJob?.address]);
