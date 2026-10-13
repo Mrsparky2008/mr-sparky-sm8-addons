@@ -16,6 +16,7 @@
 // the token has to be minted by a client the authoriser accepts as an audience.
 import { getIdToken } from "./auth";
 import { PORTAL } from "./config";
+import { deviceHeaders } from "./device";
 
 export class PortalError extends Error {
   constructor(message, { status = 0, code = "", demo = false, mobile = null, stage = null } = {}) {
@@ -56,6 +57,11 @@ async function call(method, path, body) {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
+      // Which phone this is. The portal remembers the ones it has seen and
+      // asks for a code by text when it meets a new one - the bank's "we
+      // don't recognise this device", and the half of device binding that
+      // was missing (Steven, 13 Oct 2026).
+      ...(await deviceHeaders()),
       ...(body ? { "Content-Type": "application/json" } : null),
     },
     body: body ? JSON.stringify(body) : undefined,
