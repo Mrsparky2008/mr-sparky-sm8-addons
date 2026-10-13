@@ -1,9 +1,12 @@
 // Shared furniture for every screen. Kept deliberately small — these are the
 // pieces DESIGN.md names, nothing more.
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { C, R, S, T, mono, oneLine, statusChip } from "../lib/theme";
 
 export { Logo } from "./Logo";
+
+// The brand mark, cut from the same artwork as the app icon.
+const MARK = require("../assets/mark.png");
 
 export function Header({ title, meta, onBack, onMeta }) {
   const metaBody = meta ? (
@@ -16,9 +19,18 @@ export function Header({ title, meta, onBack, onMeta }) {
           <Text style={s.backText}>‹</Text>
         </Pressable>
       ) : (
-        <View style={s.brandTile}>
-          <Text style={s.brandTileText}>AI</Text>
-        </View>
+        /*
+         * The mark, not the letters "AI". Steven, 13 Oct 2026: "should that be
+         * the Mr Sparky logo?" It should - that tile has said AI since the app
+         * was called AI Assist, and it is the last place on screen still
+         * saying so.
+         *
+         * The house and plug only. The words are unreadable at 30px and the
+         * house IS the logo at that size, which is the same call the favicon
+         * made. Cut by scripts/make_icon.py from the same artwork, so it can
+         * never drift from the app icon.
+         */
+        <Image source={MARK} style={s.brandTile} resizeMode="cover" />
       )}
       <Text style={[T.title, { flex: 1 }]} numberOfLines={1}>{title}</Text>
       {/* Tappable when it names the signed-in person: the account sheet lives
@@ -198,11 +210,7 @@ const s = StyleSheet.create({
   // Named apart from the grid `tile` below on purpose: both used to be called
   // `tile` in this one object, so the grid style silently won and the header's
   // 30px brand badge was rendering as a full-width 84px panel on every screen.
-  brandTile: {
-    width: 30, height: 30, borderRadius: 8, backgroundColor: C.brand,
-    alignItems: "center", justifyContent: "center",
-  },
-  brandTileText: { color: "#fff", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 },
+  brandTile: { width: 30, height: 30, borderRadius: 8 },
   back: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
   backText: { color: C.ink, fontSize: 30, lineHeight: 32, fontWeight: "600" },
   meta: { color: C.muted, fontSize: 12.5 },
