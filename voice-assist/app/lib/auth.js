@@ -215,6 +215,37 @@ export async function signOut() {
 }
 
 /** Turn Cognito's error codes into something worth reading on a phone. */
+/* ---- Resetting a forgotten password ------------------------------------- */
+/*
+ * Steven, 14 Oct 2026: "build a reset password option."
+ *
+ * It was the one thing missing from the screen a locked-out man stares at,
+ * and the only way back in was asking Steven. Cognito does it in two steps and
+ * the app never sees the code: Cognito emails it, the man types it back.
+ *
+ * Deliberately NOT routed through the portal. A reset has to work for somebody
+ * the portal might refuse - that is the whole point of being locked out - so
+ * it talks to Cognito directly, exactly as sign-in does.
+ */
+export async function startReset(email) {
+  await cognito("ForgotPassword", {
+    ClientId: CLIENT_ID,
+    Username: String(email || "").trim(),
+  });
+  return { ok: true };
+}
+
+/** The code they were emailed, plus whatever they want the password to be. */
+export async function finishReset(email, code, newPassword) {
+  await cognito("ConfirmForgotPassword", {
+    ClientId: CLIENT_ID,
+    Username: String(email || "").trim(),
+    ConfirmationCode: String(code || "").trim(),
+    Password: newPassword,
+  });
+  return { ok: true };
+}
+
 export function friendlyAuthError(err) {
   switch (err?.code) {
     case "NotAuthorizedException":
@@ -228,6 +259,14 @@ export function friendlyAuthError(err) {
       return "Too many tries. Give it a minute.";
     case "InvalidPasswordException":
       return "That password is too weak — 8+ characters with a number.";
+    // The reset codes. Said plainly, because a man reading these has already
+    // forgotten one thing tonight.
+    case "CodeMismatchException":
+      return "That code isn't right. Check the email again.";
+    case "ExpiredCodeException":
+      return "That code has expired. Send yourself a new one.";
+    case "UserNotConfirmedException":
+      return "That account was never finished. Ask Steven.";
     default:
       return err?.message || "Couldn't sign in. Check your signal and try again.";
   }

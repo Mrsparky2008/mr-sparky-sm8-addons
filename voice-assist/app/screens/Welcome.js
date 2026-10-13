@@ -51,22 +51,32 @@ export default function Welcome({ onSignIn, onApply }) {
         </Text>
       </View>
 
+      {/*
+        * SIGN IN IS THE BUTTON, applying is the line. Steven, 14 Oct 2026:
+        * "swap the options — easier to sign in, and on text to sign up."
+        *
+        * I had it the other way round on the grounds that a first-timer is
+        * applying. His read is better: applying happens ONCE in a man's life
+        * with this app, and signing in happens every time he has changed
+        * phone, signed out, or been logged out. The solid button belongs to
+        * the thing done repeatedly.
+        */}
       <View style={s.bottom}>
         <Pressable
-          onPress={onApply}
+          onPress={onSignIn}
           accessibilityRole="button"
           style={({ pressed }) => [s.cta, pressed && { opacity: 0.85 }]}
         >
-          <Text style={s.ctaText}>Start my application</Text>
+          <Text style={s.ctaText}>Sign in</Text>
         </Pressable>
 
         <Pressable
-          onPress={onSignIn}
+          onPress={onApply}
           accessibilityRole="button"
           hitSlop={8}
           style={({ pressed }) => [s.secondary, pressed && { opacity: 0.6 }]}
         >
-          <Text style={s.secondaryText}>Already on the network? Sign in</Text>
+          <Text style={s.secondaryText}>New here? Start an application</Text>
         </Pressable>
 
         {/* What it will cost him before he starts, rather than three fields in. */}
@@ -82,7 +92,7 @@ export default function Welcome({ onSignIn, onApply }) {
 const s = StyleSheet.create({
   wrap: { flex: 1, paddingHorizontal: S.screen },
   middle: { flex: 1, alignItems: "center", justifyContent: "center" },
-  icon: { width: 156, height: 156, borderRadius: 35 },
+  icon: { width: 196, height: 196, borderRadius: 44 },
   tagline: {
     ...T.small,
     fontSize: 15,
@@ -91,7 +101,10 @@ const s = StyleSheet.create({
     marginTop: 26,
     maxWidth: 264,
   },
-  bottom: { paddingBottom: 20 },
+  // Lifted off the bottom edge rather than hard against it. Steven: "lift
+  // them higher, or [make] the logo 50% bigger" - both, so the dead band in
+  // the middle closes from each end instead of one.
+  bottom: { paddingBottom: 52 },
   cta: {
     backgroundColor: C.brand,
     borderRadius: 15,
