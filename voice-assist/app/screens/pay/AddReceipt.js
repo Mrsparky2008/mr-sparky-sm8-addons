@@ -72,39 +72,6 @@ const prettyAbn = (abn) => {
   return d.length === 11 ? `${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : d;
 };
 
-/**
- * Who this could be, from what has been typed so far. Two sources: the
- * office's supplier list (name, aliases, ABN, legal name), and this
- * contractor's own past receipts - a supplier they have filed before comes
- * back with the ABN they filed it under (Steven, 9 Sep 2026: "pull up the
- * full name and ABN from the db if available"). Never a fuzzy guess: the text
- * has to appear in the name or the name in the text.
- */
-function suggestSuppliers(text, suppliers, pastReceipts) {
-  const hay = normalise(text);
-  if (hay.length < 2) return [];
-  const out = [];
-  const seen = new Set();
-  const add = (row) => {
-    const key = `${row.abn || ""}|${normalise(row.name)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(row);
-  };
-  for (const sup of suppliers || []) {
-    const names = [sup.name, ...(sup.aliases || [])].map(normalise).filter((n) => n.length >= 2);
-    if (names.some((n) => n.includes(hay) || hay.includes(n))) {
-      add({ name: sup.name, abn: sup.abn || "", legalName: sup.legalName || "", from: "list" });
-    }
-  }
-  for (const r of pastReceipts || []) {
-    const n = normalise(r.supplier);
-    if (n.length >= 2 && (n.includes(hay) || hay.includes(n))) {
-      add({ name: r.supplier, abn: r.abn || "", legalName: "", from: "past" });
-    }
-  }
-  return out.slice(0, 5);
-}
 
 // How many job chips to show before asking someone to search. Five covers
 // "the job I was just on" without turning the screen into a phone book.
@@ -130,6 +97,18 @@ export default function AddReceipt({
   // takes either - a street name finds the job as surely as its number does.
   const [jobOpen, setJobOpen] = useState(false);
   const [abnOpen, setAbnOpen] = useState(false);
+  /*
+   * The supplier list, open rather than guessed at. Steven, 13 Oct 2026: he
+   * wanted the WHOLE list - "you still have to type it in". Suggestions only
+   * appeared after two characters, which is no use to a man who knows the
+   * supplier by sight and not by spelling, standing at a counter.
+   *
+   * Typing still works, and has to: a docket from somewhere nobody has filed
+   * before is an ordinary Tuesday, and the reader fills this field off the
+   * photo anyway.
+   */
+  const [supOpen, setSupOpen] = useState(false);
+  const [supQuery, setSupQuery] = useState("");
   const addressOf = (n) => String(jobAddresses?.[String(n)] || "").trim();
   const recent = useMemo(
     () => [...chips].sort((a, b) => Number(b) - Number(a)).slice(0, RECENT_JOBS),
@@ -178,15 +157,41 @@ export default function AddReceipt({
 
   // The supplier's ABN — the docket's real identity.
   const [abn, setAbn] = useState("");
-  // A supplier picked off the suggestions closes the list; typing reopens it.
+  // Whether the supplier came off the list (and so brought an ABN with it) or
+  // was typed. Nothing hangs on it now except not claiming an ABN we were not
+  // given.
   const [picked, setPicked] = useState(false);
-  const suggestions = picked ? [] : suggestSuppliers(supplier, suppliers, pastReceipts);
   // Only what the READER missed, never what the person has since typed.
   const thinRead = !read ? [] : [
     !read.supplier && "supplier",
     !read.amountIncGst && "amount",
     !read.invoiceNumber && "invoice number",
   ].filter(Boolean);
+  // Everyone on the office list, plus anyone this contractor has filed before.
+  const allSuppliers = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    const add = (row) => {
+      const key = normalise(row.name);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push(row);
+    };
+    for (const sup of suppliers || []) {
+      add({ name: sup.name, abn: sup.abn || "", legalName: sup.legalName || "", from: "list" });
+    }
+    for (const r of pastReceipts || []) {
+      if (r?.supplier) add({ name: r.supplier, abn: r.abn || "", legalName: "", from: "past" });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }, [suppliers, pastReceipts]);
+
+  const supMatches = useMemo(() => {
+    const q = normalise(supQuery);
+    if (!q) return allSuppliers;
+    return allSuppliers.filter((r) => normalise(r.name).includes(q) || (r.abn || "").includes(supQuery.trim()));
+  }, [allSuppliers, supQuery]);
+
   const pickSupplier = (row) => {
     mark("supplier"); setSupplier(row.name); setPicked(true);
     if (row.abn) {
@@ -582,24 +587,71 @@ export default function AddReceipt({
 
         <View>
           <SectionLabel>Supplier{read?.supplier ? " · read" : ""}</SectionLabel>
-          <Field
-            onUse={(r) => (lastField.current = r.current)}
-            value={supplier}
-            onChangeText={(v) => { mark("supplier"); setSupplier(v); setPicked(false); }}
-            placeholder="Middy's, Lawrence & Hanson…"
-          />
-          {suggestions.length ? (
-            <View style={[s.chips, { marginTop: 8 }]}>
-              {suggestions.map((row) => (
-                <Pressable key={`${row.abn}|${row.name}`} onPress={() => pickSupplier(row)} style={s.chip}>
-                  <Text style={s.chipText}>
-                    {row.name}
-                    {row.abn ? <Text style={[s.chipAbn, mono]}>  {prettyAbn(row.abn)}</Text> : null}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
+          {allSuppliers.length ? (
+            <>
+              <Pressable onPress={() => setSupOpen((v) => !v)} style={s.jobSelect}>
+                <View style={{ flex: 1 }}>
+                  {supplier ? (
+                    <>
+                      <Text style={s.jobSelectNumber} numberOfLines={1}>{supplier}</Text>
+                      {abn ? <Text style={[s.jobSelectAddress, mono]}>ABN {prettyAbn(abn)}</Text> : null}
+                    </>
+                  ) : (
+                    <Text style={s.jobSelectEmpty}>Choose the supplier</Text>
+                  )}
+                </View>
+                <Text style={s.jobChevron}>{supOpen ? "⌃" : "⌄"}</Text>
+              </Pressable>
+
+              {supOpen ? (
+                <View style={s.jobList}>
+                  <Field
+                    onUse={(r) => (lastField.current = r.current)}
+                    value={supQuery}
+                    onChangeText={setSupQuery}
+                    placeholder="Search, or type one that is not listed"
+                    returnKeyType="done"
+                    autoCorrect={false}
+                  />
+                  <ScrollView style={s.jobScroll} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                    {/* Somewhere nobody has filed before is an ordinary
+                        Tuesday, so what was typed is always offered, first. */}
+                    {supQuery.trim() && !supMatches.some((r) => normalise(r.name) === normalise(supQuery)) ? (
+                      <Pressable
+                        onPress={() => {
+                          mark("supplier"); setSupplier(supQuery.trim()); setPicked(false);
+                          setSupOpen(false); setSupQuery("");
+                        }}
+                        style={s.jobOption}
+                      >
+                        <Text style={s.jobOptionNumber}>Use “{supQuery.trim()}”</Text>
+                        <Text style={s.jobOptionAddress}>not on the list</Text>
+                      </Pressable>
+                    ) : null}
+                    {supMatches.map((row) => (
+                      <Pressable
+                        key={`${row.abn}|${row.name}`}
+                        onPress={() => { pickSupplier(row); setSupOpen(false); setSupQuery(""); }}
+                        style={[s.jobOption, normalise(row.name) === normalise(supplier) && s.jobOptionOn]}
+                      >
+                        <Text style={s.jobOptionNumber} numberOfLines={1}>{row.name}</Text>
+                        <Text style={[s.jobOptionAddress, mono]}>
+                          {row.abn ? prettyAbn(row.abn) : (row.from === "past" ? "you have filed this one before" : "—")}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <Field
+              onUse={(r) => (lastField.current = r.current)}
+              value={supplier}
+              onChangeText={(v) => { mark("supplier"); setSupplier(v); setPicked(false); }}
+              placeholder="Middy's, Lawrence & Hanson…"
+            />
+          )}
         </View>
 
         <View>
@@ -805,7 +857,6 @@ const s = StyleSheet.create({
   },
   chipOn: { borderColor: C.brand, backgroundColor: C.selectBg },
   chipText: { color: C.muted, fontSize: 13.5, fontWeight: "700" },
-  chipAbn: { color: C.muted, fontSize: 11.5, fontWeight: "400" },
   jobSelect: {
     minHeight: S.touch, backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
     borderRadius: R.button, paddingHorizontal: 14, paddingVertical: 10,
