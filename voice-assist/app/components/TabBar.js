@@ -15,7 +15,13 @@ import Icon from "./icons";
 import { C, R, S, mono } from "../lib/theme";
 
 export const TABS = {
-  work: { icon: "wrench", label: "Work" },
+  /*
+   * "Jobs", not "Work". Steven, 13 Oct 2026, working through the bar after
+   * Available arrived: Work and Jobs are the same word to a tradesman, and
+   * with both in the bar he has to learn which is which. This tab shows HIS
+   * jobs, so it says Jobs; the other one is not his yet, so it says Available.
+   */
+  work: { icon: "wrench", label: "Jobs" },
   /*
    * Steven, 13 Oct 2026, circling the AI Assist tab: "this button can go."
    *
