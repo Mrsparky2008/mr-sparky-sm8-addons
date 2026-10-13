@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Cta, Empty, Header, StatusDot } from "../components/ui";
 import { C, R, S, T, mono, oneLine, suburb } from "../lib/theme";
-import { fetchDiary } from "../lib/api";
+import { fetchDiary, fetchJobs } from "../lib/api";
 
 const DAY_START = 7;
 const DAY_END = 18;
@@ -60,6 +60,20 @@ export default function Diary({ onBack, onOpenJob }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [picking, setPicking] = useState(false);
+  /*
+   * THE STATUS OF EACH JOB IN THE DAY.
+   *
+   * Steven, 13 Oct 2026: "the icon still not showing before the job number."
+   * He was right - the badge was there and the data was not. The diary comes
+   * from the ai-assist Lambda, which returns a booking and an address and no
+   * status, and that Lambda exists in no repo (section 3), so it was not the
+   * thing to open at eleven at night.
+   *
+   * The jobs list already knows every status, so one extra call builds the
+   * lookup. Failing is silent: a day with no badges is the day as it was
+   * yesterday, and a wrong letter would be worse than none.
+   */
+  const [statusOf, setStatusOf] = useState({});
 
   useEffect(() => {
     let dead = false;
@@ -72,6 +86,17 @@ export default function Diary({ onBack, onOpenJob }) {
         if (!date && d?.date) setToday(d.date);
       })
       .catch((e) => { if (!dead) setError(e.message || "Couldn't load the day"); });
+
+    fetchJobs()
+      .then((list) => {
+        if (dead) return;
+        const map = {};
+        for (const j of list || []) {
+          if (j?.job_number) map[String(j.job_number)] = j.status;
+        }
+        setStatusOf(map);
+      })
+      .catch(() => {});
     return () => { dead = true; };
   }, [date]);
 
@@ -147,7 +172,7 @@ export default function Diary({ onBack, onOpenJob }) {
                   <View style={s.eventTop}>
                     {/* The same badge, in the same place, as the jobs list and
                         as ServiceM8. A shape you read without reading. */}
-                    <StatusDot status={r.job?.status} size={20} />
+                    <StatusDot status={r.job?.status || statusOf[String(r.job?.number)]} size={20} />
                     <Text style={[s.eventNum, mono]}>#{r.job?.number || "—"}</Text>
                     <Text style={s.eventSuburb} numberOfLines={1}>{suburb(r.job?.address) || oneLine(r.job?.address)}</Text>
                     {r.job?.number ? <Text style={s.chev}>›</Text> : null}
