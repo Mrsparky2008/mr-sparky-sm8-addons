@@ -197,10 +197,33 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                 <Text style={s.name}>{primary?.name || "—"}</Text>
                 <StatusChip status={data.status} />
               </View>
-              <Text style={s.address}>{oneLine(data.job?.address) || "—"}</Text>
+              {/*
+                * The address IS the navigate button, the way ServiceM8 does
+                * it. Steven, 13 Oct 2026, with their job card open: "click on
+                * address to navigate, number to call."
+                *
+                * He is right and the two buttons I added an hour ago were the
+                * wrong answer: a row of buttons under a line of text he was
+                * already looking at, to do the thing that line of text IS.
+                * Hold it to change which maps app.
+                */}
+              {oneLine(data.job?.address) ? (
+                <Pressable
+                  onPress={() => navigateTo(data.job?.address)}
+                  onLongPress={() => navigateTo(data.job?.address, { ask: true })}
+                  delayLongPress={450}
+                  hitSlop={6}
+                >
+                  <Text style={s.address}>{oneLine(data.job.address)}</Text>
+                  <Text style={s.addressHint}>Tap to navigate · hold to change app</Text>
+                </Pressable>
+              ) : (
+                <Text style={s.address}>—</Text>
+              )}
               {!!primary?.phone && (
                 <Pressable onPress={() => Linking.openURL(`tel:${primary.phone}`)} hitSlop={6}>
                   <Text style={[s.phone, mono]}>{primary.phone}</Text>
+                  <Text style={s.addressHint}>Tap to call</Text>
                 </Pressable>
               )}
               {contacts.filter((c) => c !== primary && c.phone).map((c, i) => (
@@ -208,26 +231,6 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                   <Text style={s.otherContact}>{c.name} · <Text style={[s.phone, mono]}>{c.phone}</Text></Text>
                 </Pressable>
               ))}
-              {/* The two things done standing in a driveway, as targets rather
-                  than as text you have to hit exactly. */}
-              <View style={s.actions}>
-                {!!primary?.phone && (
-                  <Pressable
-                    onPress={() => Linking.openURL(`tel:${primary.phone}`)}
-                    style={s.action}
-                  >
-                    <Text style={s.actionText}>Call</Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  onPress={() => navigateTo(data.job?.address)}
-                  onLongPress={() => navigateTo(data.job?.address, { ask: true })}
-                  delayLongPress={450}
-                  style={s.action}
-                >
-                  <Text style={s.actionText}>Navigate</Text>
-                </Pressable>
-              </View>
             </Card>
 
             {/* Value rows, ServiceM8's own shape. Billing shows INC GST here
@@ -380,14 +383,11 @@ const s = StyleSheet.create({
   card: { marginBottom: S.gap },
   topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   name: { color: C.ink, fontSize: 17, fontWeight: "800", flex: 1 },
-  address: { ...T.body, fontSize: 14, marginTop: 4 },
+  // Tinted, because it does something. A line of text that navigates and
+  // looks exactly like a line of text that does not is a button nobody finds.
+  address: { ...T.body, color: C.infoChipInk, fontSize: 15, fontWeight: "600", marginTop: 4 },
+  addressHint: { color: C.muted, fontSize: 11, marginTop: 3 },
   phone: { color: C.earth, fontSize: 15, fontWeight: "700", marginTop: 8 },
-  actions: { flexDirection: "row", gap: 9, marginTop: 14 },
-  action: {
-    flex: 1, minHeight: S.touch, alignItems: "center", justifyContent: "center",
-    borderColor: C.line, borderWidth: 1, borderRadius: R.button, paddingVertical: 12,
-  },
-  actionText: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
   otherContact: { ...T.small, marginTop: 8 },
 
   billing: { paddingBottom: 12, paddingTop: 2 },
