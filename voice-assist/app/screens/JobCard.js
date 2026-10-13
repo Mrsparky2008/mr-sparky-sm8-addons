@@ -131,6 +131,22 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
    * agreeing, and this one would disagree about wages.
    */
   const [mine, setMine] = useState(null);
+  /*
+   * ACCEPTING A JOB FROM THE APP, instead of from the Telegram group.
+   *
+   * The endpoint has been deployed since 4 Oct and nothing has ever called
+   * it. This is the half of "one app, not three" that lets Telegram be
+   * switched off (decision 10) - until a job can be TAKEN here, the group has
+   * to stay.
+   *
+   * Every decision is the portal's: canAccessJobs, whether employees may
+   * accept at all, whether somebody already has it. The phone asks and is
+   * told. The gate cannot be edited by holding the phone, and the button only
+   * appears to somebody the portal says may use it.
+   */
+  const [canTake, setCanTake] = useState(false);
+  const [accepting, setAccepting] = useState(false);
+  const [accepted, setAccepted] = useState(false);
 
   // Swipe left/right through the category you came from, so working a list
   // of quotes doesn't mean Back-tap-Back-tap (Steven, 30 Aug 2026). Arrows
@@ -171,6 +187,8 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
     setError("");
     setShowBilling(false);
     setMine(null);
+    setAccepted(false);
+    setCanTake(false);
     fetchJob(jobNumber)
       .then((d) => { if (!dead) setData(d); })
       .catch((e) => { if (!dead) setError(e.message || "Couldn't load this job"); });
@@ -183,10 +201,41 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
         const row = (st?.statement?.jobs || []).find(
           (j) => String(j.jobNumber) === String(jobNumber));
         setMine(row || null);
+        // Whether this man may take work at all. The portal decides; this
+        // only decides whether he is shown a button he would be refused.
+        setCanTake(!!st?.profile?.canClaim);
       })
       .catch(() => {});
     return () => { dead = true; };
   }, [jobNumber]);
+
+  async function accept() {
+    setAccepting(true);
+    try {
+      await portal.acceptJob({ jobNumber });
+      setAccepted(true);
+      // Re-read, so the screen shows the job as his rather than claiming it.
+      portal.statement()
+        .then((st) => {
+          const row = (st?.statement?.jobs || []).find(
+            (j) => String(j.jobNumber) === String(jobNumber));
+          if (row) setMine(row);
+        })
+        .catch(() => {});
+    } catch (e) {
+      /*
+       * 409 is not an error. Somebody tapped a second earlier, and the portal
+       * says who. A man who missed a job by a moment deserves to be told
+       * that, not shown a red failure.
+       */
+      Alert.alert(
+        e?.status === 409 ? "Too late" : "It would not go through",
+        e?.message || "Try again in a minute.",
+      );
+    } finally {
+      setAccepting(false);
+    }
+  }
 
   const lines = data?.billing || [];
   const exGst = lines.reduce((t, l) => t + (Number(l.qty) > 0 ? Number(l.qty) : 1) * (Number(l.price) || 0), 0);
@@ -258,6 +307,33 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                 </Pressable>
               ))}
             </Card>
+
+            {/*
+              * Take it. Shown only to somebody the portal says may claim, and
+              * never on a job already his - but the real decision is the
+              * server's every time: canAccessJobs, whether employees may
+              * accept, and whether somebody beat him to it.
+              *
+              * Ships visible rather than behind a switch because it appears
+              * for nobody who cannot use it, and the one man it appears for
+              * tonight is Steven (section 15).
+              */}
+            {canTake && !mine && !accepted ? (
+              <Cta
+                label={accepting ? "Taking it…" : "Accept this job"}
+                tone="earth"
+                disabled={accepting}
+                onPress={accept}
+                sub="It is allocated to you in ServiceM8 straight away."
+              />
+            ) : null}
+            {accepted ? (
+              <Card style={[s.card, { borderColor: C.earth }]}>
+                <Text style={[T.body, { color: C.ink, fontWeight: "700" }]}>
+                  Yours. Allocated in ServiceM8.
+                </Text>
+              </Card>
+            ) : null}
 
             {/* Value rows, ServiceM8's own shape. Billing shows INC GST here
                 because that is the number ServiceM8's job card shows — the

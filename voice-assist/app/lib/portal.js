@@ -314,3 +314,15 @@ export const registerPush = ({ token, apnsToken, platform, bundleId, apnsEnviron
  */
 export const unregisterPush = ({ token }) =>
   del("/api/push/register", { token });
+
+/* ---- Accepting a job ---------------------------------------------------- */
+/*
+ * Taking a job from the app instead of from the Telegram group.
+ *
+ * The decision is entirely the portal's: canAccessJobs, whether employees may
+ * accept at all, and whether somebody already took it. The phone asks and is
+ * told. 409 means it is gone - that is a race nobody loses money over, and it
+ * has to read as "Jason got there first", never as an error.
+ */
+export const acceptJob = ({ jobNumber }) =>
+  post("/api/jobs/accept", { jobNumber });
