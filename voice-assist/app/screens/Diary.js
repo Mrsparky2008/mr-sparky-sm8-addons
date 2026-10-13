@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Cta, Empty, Header, StatusDot } from "../components/ui";
 import { C, R, S, T, mono, oneLine, suburb } from "../lib/theme";
-import { fetchDiary, fetchJobs } from "../lib/api";
+import { fetchDiary, fetchJob } from "../lib/api";
 
 const DAY_START = 7;
 const DAY_END = 18;
@@ -69,9 +69,22 @@ export default function Diary({ onBack, onOpenJob }) {
    * status, and that Lambda exists in no repo (section 3), so it was not the
    * thing to open at eleven at night.
    *
-   * The jobs list already knows every status, so one extra call builds the
-   * lookup. Failing is silent: a day with no badges is the day as it was
-   * yesterday, and a wrong letter would be worse than none.
+   * First attempt read the jobs LIST and looked each booking up in it. That
+   * missed anything the list does not carry - #167165 is months old and was
+   * not in it - so half the day stayed blank, which is worse than all of it
+   * being blank because it reads as "that one has no status".
+   *
+   * So each job in the day is asked directly. There are never more than a
+   * handful of bookings, they are fetched in parallel, and the answer is
+   * always right rather than usually right.
+   *
+   * Steven, 13 Oct 2026, on why this screen matters more than the list: "on
+   * the day-to-day calendar you don't know if you go to a job that's a work
+   * order, what your day looks like. If it's going to be one or the other I'd
+   * rather the day." He is right - the jobs list is already grouped BY
+   * status, so the badge there is decoration. Here it is information.
+   *
+   * Failing is silent. A wrong letter would be worse than none.
    */
   const [statusOf, setStatusOf] = useState({});
 
@@ -87,18 +100,32 @@ export default function Diary({ onBack, onOpenJob }) {
       })
       .catch((e) => { if (!dead) setError(e.message || "Couldn't load the day"); });
 
-    fetchJobs()
-      .then((list) => {
+    return () => { dead = true; };
+  }, [date]);
+
+  // The day's own job numbers, settled, so the effect below does not re-run
+  // every render on a new array that happens to hold the same numbers.
+  const dayJobNumbers = (data?.bookings || [])
+    .map((b) => b?.job?.number)
+    .filter(Boolean)
+    .map(String)
+    .join(",");
+
+  useEffect(() => {
+    let dead = false;
+    const numbers = dayJobNumbers ? dayJobNumbers.split(",") : [];
+    if (!numbers.length) { setStatusOf({}); return undefined; }
+    Promise.all(numbers.map((n) =>
+      fetchJob(n).then((d) => [n, d?.status]).catch(() => [n, null])))
+      .then((pairs) => {
         if (dead) return;
         const map = {};
-        for (const j of list || []) {
-          if (j?.job_number) map[String(j.job_number)] = j.status;
-        }
+        for (const [n, st] of pairs) if (st) map[n] = st;
         setStatusOf(map);
       })
       .catch(() => {});
     return () => { dead = true; };
-  }, [date]);
+  }, [dayJobNumbers]);
 
   const shown = data?.date || date;
   const isToday = !!shown && !!today && shown === today;
