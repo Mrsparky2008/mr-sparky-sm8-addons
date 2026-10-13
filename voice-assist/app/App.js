@@ -171,7 +171,7 @@ function Shell() {
         + "standards, NSW regs and compliance, cable sizing and calcs, product and fault "
         + "questions, safe work method thinking. Short, practical, tradie-plain.",
       hereJob
-        ? `I am on job #${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. `
+        ? `I am on job ${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. `
           + "Use the Mr Sparky tools against that job number unless I say otherwise, "
           + "and do not ask me for it."
         : "If it is about a specific job, ask for the job number and use the Mr Sparky tools.",
@@ -187,7 +187,7 @@ function Shell() {
         */
       hereJob
         ? 'Do NOTHING else yet - reply with exactly one line, '
-          + `"On #${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. What do you need?", `
+          + `"On ${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. What do you need?", `
           + "and wait."
         : 'Do NOTHING else yet - reply with exactly one line, "Which job do you need help with?", and wait.',
     ].join("\n\n");

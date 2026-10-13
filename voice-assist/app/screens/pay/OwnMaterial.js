@@ -101,8 +101,8 @@ export default function OwnMaterial({ jobNumber: initial, onBack, onSaved }) {
         {saved ? (
           <Text style={s.ok}>
             {saved.unchanged
-              ? `Already declared $${Number(saved.amountIncGst).toFixed(2)} on #${saved.jobNumber} — nothing to change.`
-              : `Declared $${Number(saved.amountIncGst).toFixed(2)} on #${saved.jobNumber}. It comes back on top of your split, same as a receipted expense.`}
+              ? `Already declared $${Number(saved.amountIncGst).toFixed(2)} on ${saved.jobNumber} — nothing to change.`
+              : `Declared $${Number(saved.amountIncGst).toFixed(2)} on ${saved.jobNumber}. It comes back on top of your split, same as a receipted expense.`}
           </Text>
         ) : null}
 

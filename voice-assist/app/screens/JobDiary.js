@@ -82,7 +82,7 @@ export default function JobDiary({ jobNumber, bookings = [], notes = [], noteFee
 
   return (
     <View style={s.screen}>
-      <Header title="Job diary" meta={`#${jobNumber}`} onBack={onBack} />
+      <Header title="Job diary" meta={String(jobNumber)} onBack={onBack} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={s.list} keyboardShouldPersistTaps="handled">
         <View style={[s.section, s.addRow]}>

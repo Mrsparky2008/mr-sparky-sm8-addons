@@ -86,7 +86,7 @@ export default function AllJobs({ onOpenJob, onBack }) {
               <Card style={{ marginBottom: 10 }}>
                 <View style={s.rowTop}>
                   <StatusDot status={j.status} />
-                  <Text style={[s.number, mono, { flex: 1 }]}>#{j.job_number}</Text>
+                  <Text style={[s.number, mono, { flex: 1 }]}>{j.job_number}</Text>
                   <StatusChip status={j.status} />
                 </View>
                 <Text style={s.address} numberOfLines={1}>{oneLine(j.address) || "—"}</Text>

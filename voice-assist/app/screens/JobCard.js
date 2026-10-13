@@ -247,7 +247,7 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
 
   return (
     <View style={s.screen} {...pan.panHandlers}>
-      <Header title={`Job #${jobNumber}`} onBack={onBack} />
+      <Header title={`Job ${jobNumber}`} onBack={onBack} />
       {list.length > 1 ? (
         <View style={s.pager}>
           <Pressable onPress={prev ? () => onSibling(prev) : undefined} hitSlop={10} style={s.pagerBtn}>

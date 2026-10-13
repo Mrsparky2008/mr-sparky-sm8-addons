@@ -159,7 +159,7 @@ export default function JobMaterial({ jobNumber, onBack, onAddReceipt }) {
 
   return (
     <View style={{ flex: 1 }}>
-      <Header title={`Materials · #${jobNumber}`} onBack={onBack} />
+      <Header title={`Materials · ${jobNumber}`} onBack={onBack} />
       {!data && !error ? (
         <View style={s.center}><ActivityIndicator color={C.brand} /></View>
       ) : error ? (

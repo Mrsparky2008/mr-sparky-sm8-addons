@@ -200,7 +200,7 @@ export default function Diary({ onBack, onOpenJob }) {
                     {/* The same badge, in the same place, as the jobs list and
                         as ServiceM8. A shape you read without reading. */}
                     <StatusDot status={r.job?.status || statusOf[String(r.job?.number)]} size={20} />
-                    <Text style={[s.eventNum, mono]}>#{r.job?.number || "—"}</Text>
+                    <Text style={[s.eventNum, mono]}>{r.job?.number || "—"}</Text>
                     <Text style={s.eventSuburb} numberOfLines={1}>{suburb(r.job?.address) || oneLine(r.job?.address)}</Text>
                     {r.job?.number ? <Text style={s.chev}>›</Text> : null}
                   </View>

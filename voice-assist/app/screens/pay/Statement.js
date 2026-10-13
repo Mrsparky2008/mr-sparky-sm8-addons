@@ -26,7 +26,7 @@ export default function Statement({ data, onBack, onOpenJob }) {
                 <Row
                   key={j.jobNumber}
                   onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : undefined}
-                  label={`#${j.jobNumber}  ${meta[j.jobNumber]?.suburb || ""}`.trim()}
+                  label={`${j.jobNumber}  ${meta[j.jobNumber]?.suburb || ""}`.trim()}
                   value={money(j.payableIncGst)}
                   last={i === ready.length - 1}
                 />
@@ -43,7 +43,7 @@ export default function Statement({ data, onBack, onOpenJob }) {
                 <Row
                   key={j.jobNumber}
                   onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : undefined}
-                  label={`#${j.jobNumber}`}
+                  label={String(j.jobNumber)}
                   value={HELD[j.outcome] || j.outcome}
                   dim
                   last={i === held.length - 1}
@@ -61,7 +61,7 @@ export default function Statement({ data, onBack, onOpenJob }) {
                 <Row
                   key={j.jobNumber}
                   onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : undefined}
-                  label={`#${j.jobNumber}  ${meta[j.jobNumber]?.suburb || ""}`.trim()}
+                  label={`${j.jobNumber}  ${meta[j.jobNumber]?.suburb || ""}`.trim()}
                   value={money(j.payableIncGst)}
                   dim
                   last={i === onClaims.length - 1}

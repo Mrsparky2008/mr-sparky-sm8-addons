@@ -144,7 +144,7 @@ export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
                 key={n}
                 on={chosen.has(n)}
                 onPress={() => toggle(n)}
-                label={`#${n}  ${meta[n]?.suburb || ""}`.trim()}
+                label={`${n}  ${meta[n]?.suburb || ""}`.trim()}
                 value={money(jobsById[n]?.payableIncGst)}
                 /* The whole row still ticks. The chevron is its own target,
                    so looking at a job cannot accidentally deselect it - which

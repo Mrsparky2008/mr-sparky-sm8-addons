@@ -334,13 +334,13 @@ export default function AddReceipt({
       const r = await postJobTask(jobNumber, {
         name: `Receipt query — ${invoiceNumber.trim() || supplier.trim() || "docket"}`,
         details: [
-          `A receipt was refused on job #${jobNumber}: ${error?.message || "already filed"}`,
+          `A receipt was refused on job ${jobNumber}: ${error?.message || "already filed"}`,
           `Supplier: ${supplier.trim() || "(not read)"}${abn ? `, ABN ${abn}` : ""}.`,
           `Invoice: ${invoiceNumber.trim() || "(none on the docket)"}. Amount: $${amount || "?"}.`,
           "",
           "They say it belongs on this job.",
           otherJob
-            ? `To fix: portal > their statement > job #${otherJob} > Receipts > Move, and put it on #${jobNumber}. `
+            ? `To fix: portal > their statement > job ${otherJob} > Receipts > Move, and put it on ${jobNumber}. `
               + "Voiding is only for a row that should never have existed."
             : "To fix: find the receipt in the portal under Receipts and Move it onto this job.",
         ].join("\n"),
@@ -377,7 +377,7 @@ export default function AddReceipt({
 
       // If the paper named a different job and it's being filed here anyway,
       // that goes on the record too — so nobody has to reconstruct it later.
-      const trail = mismatch ? `Docket quotes job #${docket.jobNumber}.` : "";
+      const trail = mismatch ? `Docket quotes job ${docket.jobNumber}.` : "";
       const noteOut = [note.trim(), trail].filter(Boolean).join(" ");
 
       await portal.saveReceipt({
@@ -479,20 +479,20 @@ export default function AddReceipt({
           <Card style={{ borderColor: C.active }}>
             <Text style={s.flagTitle}>This docket names a different job</Text>
             <Text style={[T.small, { marginTop: 4 }]}>
-              {docket.label ? `The paper says “${docket.label}”` : `The paper says job #${docket.jobNumber}`}
+              {docket.label ? `The paper says “${docket.label}”` : `The paper says job ${docket.jobNumber}`}
               {docket.known
-                ? ` — #${docket.jobNumber}, ${[docket.address, docket.status].filter(Boolean).join(" · ")}.`
-                : ` — and there's no job #${docket.jobNumber} in ServiceM8.`}
-              {` You're filing it to #${jobNumber}.`}
+                ? ` — ${docket.jobNumber}, ${[docket.address, docket.status].filter(Boolean).join(" · ")}.`
+                : ` — and there's no job ${docket.jobNumber} in ServiceM8.`}
+              {` You're filing it to ${jobNumber}.`}
             </Text>
             <View style={s.flagRow}>
               {docket.known ? (
                 <Pressable onPress={() => setJobNumber(docket.jobNumber)} style={[s.flagBtn, s.flagBtnOn]}>
-                  <Text style={s.flagBtnOnText}>File to #{docket.jobNumber}</Text>
+                  <Text style={s.flagBtnOnText}>File to {docket.jobNumber}</Text>
                 </Pressable>
               ) : null}
               <Pressable onPress={() => setAckDocket(true)} style={s.flagBtn}>
-                <Text style={s.flagBtnText}>Keep #{jobNumber}</Text>
+                <Text style={s.flagBtnText}>Keep {jobNumber}</Text>
               </Pressable>
             </View>
           </Card>
@@ -511,7 +511,7 @@ export default function AddReceipt({
                 <View style={{ flex: 1 }}>
                   {jobNumber ? (
                     <>
-                      <Text style={[s.jobSelectNumber, mono]}>#{jobNumber}</Text>
+                      <Text style={[s.jobSelectNumber, mono]}>{jobNumber}</Text>
                       {addressOf(jobNumber)
                         ? <Text style={s.jobSelectAddress} numberOfLines={1}>{addressOf(jobNumber)}</Text>
                         : null}
@@ -543,7 +543,7 @@ export default function AddReceipt({
                         onPress={() => { setJobNumber(n); setJobOpen(false); setJobQuery(""); }}
                         style={[s.jobOption, n === jobNumber && s.jobOptionOn]}
                       >
-                        <Text style={[s.jobOptionNumber, mono]}>#{n}</Text>
+                        <Text style={[s.jobOptionNumber, mono]}>{n}</Text>
                         <Text style={s.jobOptionAddress} numberOfLines={1}>
                           {addressOf(n) || "—"}
                         </Text>
@@ -558,11 +558,11 @@ export default function AddReceipt({
             </>
           ) : anchored || chips.length === 1 ? (
             <View style={s.jobRow}>
-              <Text style={[s.jobNumber, mono]}>#{jobNumber || anchored}</Text>
+              <Text style={[s.jobNumber, mono]}>{jobNumber || anchored}</Text>
               {jobNumber === anchored ? <Text style={T.small}>opened from this job</Text> : null}
               {anchored && jobNumber !== anchored ? (
                 <Pressable onPress={() => setJobNumber(anchored)} hitSlop={8}>
-                  <Text style={s.link}>back to #{anchored}</Text>
+                  <Text style={s.link}>back to {anchored}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -579,7 +579,7 @@ export default function AddReceipt({
           {needsJob && photo ? (
             <Text style={s.warn}>
               {docket?.jobNumber
-                ? `The docket says #${docket.jobNumber}, which isn't a job in ServiceM8 — pick the right one.`
+                ? `The docket says ${docket.jobNumber}, which isn't a job in ServiceM8 — pick the right one.`
                 // A photo that could not be read cannot be said to have
                 // nothing on it (Steven, 9 Sep 2026: "if it's too blurry you
                 // couldn't say the job number's not there").
@@ -590,7 +590,7 @@ export default function AddReceipt({
           ) : null}
           {mismatch && ackDocket ? (
             <Text style={s.note}>
-              Filed to #{jobNumber}; the docket's #{docket.jobNumber} goes on the record with it.
+              Filed to {jobNumber}; the docket's {docket.jobNumber} goes on the record with it.
             </Text>
           ) : null}
         </View>
@@ -831,7 +831,7 @@ export default function AddReceipt({
                 which is every job you are standing on. Say what it means. */}
             {/not your job/i.test(error.message || "") ? (
               <Text style={[T.small, { marginTop: 6 }]}>
-                Job #{jobNumber} isn't on your statement yet — the portal only counts a job once
+                Job {jobNumber} isn't on your statement yet — the portal only counts a job once
                 it's Completed with your Form 001. The fix is deployed portal-side; if you're
                 seeing this, that deploy hasn't landed.
               </Text>

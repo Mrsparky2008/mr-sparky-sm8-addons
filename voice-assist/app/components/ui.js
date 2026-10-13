@@ -34,7 +34,7 @@ export function JobChip({ job, onPress }) {
   const body = (
     <View style={s.jobChip}>
       <Text style={s.jobChipMuted}>Job </Text>
-      <Text style={[s.jobChipNum, mono]}>#{job.job_number}</Text>
+      <Text style={[s.jobChipNum, mono]}>{job.job_number}</Text>
       <Text style={s.jobChipMuted}> · {job.suburb || oneLine(job.address)}</Text>
     </View>
   );

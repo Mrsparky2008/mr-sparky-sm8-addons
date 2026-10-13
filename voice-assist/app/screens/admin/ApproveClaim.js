@@ -146,7 +146,7 @@ export default function ApproveClaim({ claim: summary, onBack, onDone }) {
                   <Pressable key={w.jobNumber} onPress={() => setOpenJob(open ? null : w.jobNumber)}>
                     <View style={[s.flag, hard ? s.flagHard : s.flagSoft]}>
                       <View style={s.flagTop}>
-                        <Text style={[s.flagJob, mono]}>#{w.jobNumber}</Text>
+                        <Text style={[s.flagJob, mono]}>{w.jobNumber}</Text>
                         <Text style={s.flagWhat}>
                           {hard ? "same docket used elsewhere" : "receipt queried"}
                         </Text>

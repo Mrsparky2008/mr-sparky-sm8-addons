@@ -57,7 +57,7 @@ export default function ClaimDetail({ claim, onBack, onViewRcti }) {
             {jobs.map((l, i) => (
               <Row
                 key={l.jobNumber}
-                label={`#${l.jobNumber}`}
+                label={String(l.jobNumber)}
                 value={money(l.amountIncGst)}
                 last={i === jobs.length - 1 && !helping.length}
               />
@@ -65,7 +65,7 @@ export default function ClaimDetail({ claim, onBack, onViewRcti }) {
             {helping.map((l, i) => (
               <Row
                 key={`H${l.jobNumber}`}
-                label={`#${l.jobNumber} — helping ${l.frozen?.helpedName || ""}`.trim()}
+                label={`${l.jobNumber} — helping ${l.frozen?.helpedName || ""}`.trim()}
                 value={money(l.amountIncGst)}
                 last={i === helping.length - 1}
               />

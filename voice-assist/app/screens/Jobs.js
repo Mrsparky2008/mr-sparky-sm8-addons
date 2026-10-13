@@ -184,7 +184,7 @@ function JobRow({ job, onPress, hideStatus }) {
               the word is noise, but the badge is not: it keeps the rows
               lined up with every other list. */}
           <StatusDot status={job.status} />
-          <Text style={[s.number, mono, { flex: 1 }]}>#{job.job_number}</Text>
+          <Text style={[s.number, mono, { flex: 1 }]}>{job.job_number}</Text>
           {hideStatus ? null : <StatusChip status={job.status} />}
         </View>
         <Text style={s.address} numberOfLines={1}>{oneLine(job.address) || suburb(job.address) || "—"}</Text>
