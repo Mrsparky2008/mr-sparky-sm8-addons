@@ -16,7 +16,16 @@ import { C, R, S, mono } from "../lib/theme";
 
 export const TABS = {
   work: { icon: "wrench", label: "Work" },
-  assist: { icon: "claude", label: "AI Assist", tint: "#D97757" },
+  /*
+   * Steven, 13 Oct 2026, circling the AI Assist tab: "this button can go."
+   *
+   * It opened a chat and little else, and the slot was the only one in the bar
+   * not doing a job. Available is the one that is time-critical - first to tap
+   * takes it - so it earns a permanent place under the thumb. The blue AI
+   * Assist button on the job card stays; that is the one that carries the job
+   * with it and does the work.
+   */
+  available: { icon: "spark", label: "Available", tint: "#2F9E57" },
   day: { icon: "board", label: "My day" },
   pay: { icon: "dollar", label: "Money" },
   admin: { icon: "chart", label: "Business" },

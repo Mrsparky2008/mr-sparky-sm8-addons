@@ -48,6 +48,7 @@ import JobBreakdown from "./screens/pay/JobBreakdown";
 import ClaimsList from "./screens/pay/ClaimsList";
 import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
+import Available from "./screens/Available";
 import AddReceipt from "./screens/pay/AddReceipt";
 import OwnMaterial from "./screens/pay/OwnMaterial";
 import JobMaterial from "./screens/JobMaterial";
@@ -141,58 +142,11 @@ function Shell() {
   // offsider - standards, regs, calcs - standing at ease until spoken to.
   // (The job card's own button carries the per-job quoting prompt.)
   /*
-   * The job you are looking at, if you are looking at one.
-   *
-   * Steven, 13 Oct 2026: "when I launch the AI Assist button from a job it
-   * doesn't know which job number it's been launched from, so I have to tell
-   * it... the button is in the bottom banner and that's universal, not job
-   * specific. Link it to the open job on the page if there is such a way."
-   *
-   * There is: the BUTTON is universal but the SCREEN under it is not. The top
-   * of whichever stack is showing knows exactly which job is open, so the
-   * primer is built from that - rather than asking a man standing in a
-   * switchboard room to read a number off his own screen and type it back.
+   * openAssist is GONE with the tab it served. Steven, 13 Oct 2026, circling
+   * it: "this button can go." It opened a chat that then had to ask which job
+   * you meant, and the blue button on the job card does the same thing knowing
+   * the answer. Two doors to one room, one of them blindfolded.
    */
-  const stackTop = (() => {
-    const stack = Array.isArray(stacks[tab]) ? stacks[tab] : [stacks[tab]];
-    return stack[stack.length - 1];
-  })();
-  const hereJob = stackTop?.name === "job" && stackTop.job?.job_number
-    ? { number: String(stackTop.job.job_number), address: oneLine(stackTop.job.address || "") }
-    // Receipts, materials and the diary all open against a job by number, and
-    // it is the same job.
-    : (stackTop?.jobNumber ? { number: String(stackTop.jobNumber), address: "" } : null);
-
-  const openAssist = useCallback(() => {
-    const primer = [
-      "Mr Sparky offsider.",
-      "You are the on-the-tools offsider for a licensed electrician on the Mr Sparky "
-        + "Network in Sydney. Help with whatever the day throws up: AS/NZS 3000 and other "
-        + "standards, NSW regs and compliance, cable sizing and calcs, product and fault "
-        + "questions, safe work method thinking. Short, practical, tradie-plain.",
-      hereJob
-        ? `I am on job ${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. `
-          + "Use the Mr Sparky tools against that job number unless I say otherwise, "
-          + "and do not ask me for it."
-        : "If it is about a specific job, ask for the job number and use the Mr Sparky tools.",
-      /*
-        * The FIRST line does the asking. Steven, 13 Oct 2026: the universal
-        * button "opens up a chat but it's pretty useless... the prompt should
-        * be, which job do you need help with?"
-        *
-        * He is right: "Ready when you are" puts the next move back on a man
-        * who has just pressed a button to get help. When the screen knew the
-        * job it should say so and get on with it; when it did not, it should
-        * ask the one question it needs rather than wait to be told.
-        */
-      hereJob
-        ? 'Do NOTHING else yet - reply with exactly one line, '
-          + `"On ${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. What do you need?", `
-          + "and wait."
-        : 'Do NOTHING else yet - reply with exactly one line, "Which job do you need help with?", and wait.',
-    ].join("\n\n");
-    Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(primer));
-  }, [hereJob?.number, hereJob?.address]);
 
   // Deep link from the ServiceM8 job card: mrsparky-aiassist://job/167483.
   // The add-on is the doorway, this is the room — it opens the job card for
@@ -373,7 +327,7 @@ function Shell() {
    */
   const can = who?.can || {};
   const tabs = [
-    "work", "assist", "day",
+    "work", "available", "day",
     ...(can.money === false ? [] : ["pay"]),
     ...(who?.isAdmin && can.admin !== false ? ["admin"] : []),
   ];
@@ -482,6 +436,14 @@ function Shell() {
               <JobMaterial jobNumber={top.jobNumber} onBack={pop} />
             </View>
           ) : null}
+        </View>
+
+        {/* ---- Available --------------------------------------------------
+            Jobs nobody has taken. Its own pane rather than a stack, because
+            there is one screen and tapping a row opens the job in WORK -
+            where every other job on the phone already lives. */}
+        <View style={[s.fill, tab !== "available" && s.hidden]} pointerEvents={tab === "available" ? "auto" : "none"}>
+          <Available onOpenJob={(j) => { setTab("work"); openJob(j.job_number); }} />
         </View>
 
         {/* ---- Money ------------------------------------------------------
@@ -667,7 +629,6 @@ function Shell() {
         onChange={(t) => {
           // Two of these are ACTIONS, not places: AI Assist opens Claude and
           // My day jumps to the Work tab's diary. Neither becomes "current".
-          if (t === "assist") { openAssist(); return; }
           if (t === "day") { setTab("work"); setWorkView("today"); return; }
           /*
            * Tapping the tab you are already on takes you back to the top of

@@ -326,3 +326,11 @@ export const unregisterPush = ({ token }) =>
  */
 export const acceptJob = ({ jobNumber }) =>
   post("/api/jobs/accept", { jobNumber });
+
+/*
+ * The jobs that are going, that nobody has taken.
+ *
+ * Empty for somebody who cannot claim, rather than a refusal - "nothing going
+ * right now" is the honest answer for him and the common one for everybody.
+ */
+export const availableJobs = () => get("/api/jobs/available");
