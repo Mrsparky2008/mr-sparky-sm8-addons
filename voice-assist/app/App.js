@@ -67,7 +67,7 @@ import * as portal from "./lib/portal";
 import { usePush, disable as disablePush } from "./lib/push";
 
 import { IS_DEV_APP } from "./lib/config";
-import { C, S, suburb } from "./lib/theme";
+import { C, S, oneLine, suburb } from "./lib/theme";
 
 const ROOTS = { work: { name: "work" }, pay: { name: "money" }, admin: { name: "bizhub" } };
 
@@ -140,18 +140,45 @@ function Shell() {
   // AI Assist in the bar: opens Claude on the tech's own seat as the general
   // offsider - standards, regs, calcs - standing at ease until spoken to.
   // (The job card's own button carries the per-job quoting prompt.)
+  /*
+   * The job you are looking at, if you are looking at one.
+   *
+   * Steven, 13 Oct 2026: "when I launch the AI Assist button from a job it
+   * doesn't know which job number it's been launched from, so I have to tell
+   * it... the button is in the bottom banner and that's universal, not job
+   * specific. Link it to the open job on the page if there is such a way."
+   *
+   * There is: the BUTTON is universal but the SCREEN under it is not. The top
+   * of whichever stack is showing knows exactly which job is open, so the
+   * primer is built from that - rather than asking a man standing in a
+   * switchboard room to read a number off his own screen and type it back.
+   */
+  const stackTop = (() => {
+    const stack = Array.isArray(stacks[tab]) ? stacks[tab] : [stacks[tab]];
+    return stack[stack.length - 1];
+  })();
+  const hereJob = stackTop?.name === "job" && stackTop.job?.job_number
+    ? { number: String(stackTop.job.job_number), address: oneLine(stackTop.job.address || "") }
+    // Receipts, materials and the diary all open against a job by number, and
+    // it is the same job.
+    : (stackTop?.jobNumber ? { number: String(stackTop.jobNumber), address: "" } : null);
+
   const openAssist = useCallback(() => {
     const primer = [
       "Mr Sparky offsider.",
       "You are the on-the-tools offsider for a licensed electrician on the Mr Sparky "
         + "Network in Sydney. Help with whatever the day throws up: AS/NZS 3000 and other "
         + "standards, NSW regs and compliance, cable sizing and calcs, product and fault "
-        + "questions, safe work method thinking. Short, practical, tradie-plain. If it is "
-        + "about a specific job, ask for the job number and use the Mr Sparky tools.",
+        + "questions, safe work method thinking. Short, practical, tradie-plain.",
+      hereJob
+        ? `I am on job #${hereJob.number}${hereJob.address ? ` - ${hereJob.address}` : ""}. `
+          + "Use the Mr Sparky tools against that job number unless I say otherwise, "
+          + "and do not ask me for it."
+        : "If it is about a specific job, ask for the job number and use the Mr Sparky tools.",
       'Do NOTHING yet - reply with exactly one line, "Ready when you are.", and wait for me to speak.',
     ].join("\n\n");
     Linking.openURL("https://claude.ai/new?q=" + encodeURIComponent(primer));
-  }, []);
+  }, [hereJob?.number, hereJob?.address]);
 
   // Deep link from the ServiceM8 job card: mrsparky-aiassist://job/167483.
   // The add-on is the doorway, this is the room — it opens the job card for
