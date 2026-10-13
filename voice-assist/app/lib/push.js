@@ -22,6 +22,7 @@ import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
+import Constants from "expo-constants";
 import * as portal from "./portal";
 
 /*
@@ -97,7 +98,34 @@ export async function enable() {
     apnsToken = typeof device?.data === "string" ? device.data : null;
   } catch { /* the Expo token still registers; direct push waits */ }
 
-  await portal.registerPush({ token, apnsToken, platform: Platform.OS });
+  /*
+   * WHICH APPLE, AND IT IS NOT ONE APPLE.
+   *
+   * APNs has two environments and a token minted in one is refused by the
+   * other with BadDeviceToken — which reads as a dead phone rather than as
+   * the wrong host, and is the usual way a day disappears.
+   *
+   *   TestFlight and App Store  ->  api.push.apple.com
+   *   a development build       ->  api.sandbox.push.apple.com
+   *
+   * The dev profile also builds a SEPARATE app with its own bundle id, so its
+   * topic is not the one in the secret either. Neither of those can be worked
+   * out from the token, so both are sent WITH it and stored beside it. Working
+   * it out at send time means guessing months later about a phone nobody can
+   * reach.
+   */
+  const bundleId = Constants.expoConfig?.ios?.bundleIdentifier || null;
+  const variant = Constants.expoConfig?.extra?.variant || null;
+
+  await portal.registerPush({
+    token,
+    apnsToken,
+    platform: Platform.OS,
+    bundleId,
+    // The portal decides; this is what it decides FROM. Production unless
+    // this is plainly a development build.
+    apnsEnvironment: variant === "dev" || __DEV__ ? "sandbox" : "production",
+  });
   return { token, why: "" };
 }
 

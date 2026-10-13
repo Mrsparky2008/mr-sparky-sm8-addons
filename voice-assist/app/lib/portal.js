@@ -298,8 +298,8 @@ export const voidReceipt = ({ jobNumber, receiptId, reason }) =>
  * rather than the person, because a man can carry two phones and a phone can
  * change hands.
  */
-export const registerPush = ({ token, apnsToken, platform }) =>
-  post("/api/push/register", { token, apnsToken, platform });
+export const registerPush = ({ token, apnsToken, platform, bundleId, apnsEnvironment }) =>
+  post("/api/push/register", { token, apnsToken, platform, bundleId, apnsEnvironment });
 
 /*
  * Signing out on a phone being handed back has to stop other people's jobs
