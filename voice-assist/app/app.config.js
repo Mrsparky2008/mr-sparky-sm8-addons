@@ -67,11 +67,11 @@ export default ({ config }) => ({
     // The iOS build number for the current runtime. EAS numbers builds
     // remotely, so the JS bundle cannot read it natively without
     // expo-application (not in the build). Kept honest by hand: runtime
-    // 2.3.0 = build 32. BUMP THIS whenever a new native build ships.
+    // 2.4.0 = build 33. BUMP THIS whenever a new native build ships.
     //
     // EAS assigns the number when the build STARTS, so it cannot be known
     // when the source is uploaded. Build 31 therefore shipped saying 29;
-    // an OTA to production@2.3.0 corrects it, and reaches only build 32.
-    iosBuild: "32",
+    // an OTA to production@2.4.0 corrects it, and reaches only build 33.
+    iosBuild: "33",
   },
 });
