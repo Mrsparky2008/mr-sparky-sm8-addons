@@ -28,29 +28,25 @@
 // the only question being asked - "is this the same phone as last time" - and
 // says nothing about the phone itself.
 import * as SecureStore from "expo-secure-store";
+import * as Crypto from "expo-crypto";
 import { Platform } from "react-native";
 
 const KEY_DEVICE = "msai.device";
 
 /*
- * A v4-shaped id without a native crypto module.
+ * A real random id, from the platform's own secure generator.
  *
- * expo-crypto would give a proper random source and is NOT worth another App
- * Store trip for this: the id is a LABEL, not a secret. The portal is the
- * authority on which ids it has seen and confirmed by SMS, so an attacker
- * who invents one gets "unknown device" and is asked for a code - which is
- * exactly the wall this exists to put up. Guessing would only help somebody
- * who already had the password AND could predict an id somebody else minted.
+ * The first cut built one out of Math.random because expo-crypto is a native
+ * module and that meant another App Store trip. Steven, 13 Oct 2026: "if
+ * expo-crypto needs to be installed then let's install it. I don't want to be
+ * going back and fixing things."
  *
- * Swap this for expo-crypto's randomUUID the next time a native build goes
- * out for another reason.
+ * Right call, and the reasoning for the shortcut was the weaker half of the
+ * argument: the id is only a label, but a label an attacker can PREDICT is a
+ * label they can wear. Math.random is seeded, repeatable under the right
+ * conditions, and never meant for anything anyone might try to guess.
  */
-function mintId() {
-  const bits = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0");
-  const t = Date.now().toString(16).padStart(12, "0");
-  const raw = (bits() + bits() + bits() + bits() + t).slice(0, 32);
-  return [raw.slice(0, 8), raw.slice(8, 12), raw.slice(12, 16), raw.slice(16, 20), raw.slice(20, 32)].join("-");
-}
+const mintId = () => Crypto.randomUUID();
 
 let cached = null;
 
