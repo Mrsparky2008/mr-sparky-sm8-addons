@@ -611,8 +611,7 @@ export default function AddReceipt({
             placeholder="Off the top of the docket"
           />
           <Text style={s.note}>
-            This is what stops the same docket being filed twice. It sat at the bottom
-            of this page marked optional, where nobody saw it (Steven, 13 Oct 2026).
+            What stops the same docket being filed twice.
           </Text>
         </View>
 

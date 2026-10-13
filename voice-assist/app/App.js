@@ -628,6 +628,15 @@ function Shell() {
           // My day jumps to the Work tab's diary. Neither becomes "current".
           if (t === "assist") { openAssist(); return; }
           if (t === "day") { setTab("work"); setWorkView("today"); return; }
+          /*
+           * Tapping the tab you are already on takes you back to the top of
+           * it. Steven, 13 Oct 2026: "I feel like the thumb works better from
+           * the bottom" - four screens deep in Money, the way out was the
+           * chevron in the far top left, which is the hardest corner of a
+           * phone to reach one-handed. It is also what iOS does everywhere
+           * else, so it is what a thumb already expects.
+           */
+          if (t === tab) { resetTab(t); return; }
           setTab(t);
         }}
         badges={{ admin: waiting }}
