@@ -28,7 +28,8 @@
         "NSPhotoLibraryAddUsageDescription": "Mr Sparky can save job photos to your library.",
         "NSCameraUsageDescription": "Mr Sparky can take photos to attach to job cards.",
         "NSFaceIDUsageDescription": "Face ID unlocks Mr Sparky so you only sign in once on this phone.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["comgooglemaps", "waze"]
       }
     },
     "android": {

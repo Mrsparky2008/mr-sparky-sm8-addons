@@ -12,38 +12,64 @@ import { fetchJob } from "../lib/api";
 const GST = 0.1;
 
 /*
- * Navigate. Steven, 13 Oct 2026, looking at the redesign: "can it do that
- * though, call and navigate with Google Maps or Maps".
+ * Navigate, the way ServiceM8 does it: offer the apps he actually has.
  *
- * Both, and he picks. Tradesmen have opinions about this and iOS gives no way
- * to change the default maps app, so asking once beats choosing for him.
+ * Steven, 13 Oct 2026: "ServiceM8 has the same thing. You go navigate and it
+ * tells you which app you want to use." iOS gives no way to change the default
+ * maps app and tradesmen have opinions, so asking is right - but offering
+ * Google Maps to a phone without Google Maps is not asking, it is guessing.
  *
- * Neither link needs a native module, which is the point - this ships over
- * the air rather than waiting for a build. maps.apple.com opens Apple Maps on
- * the phone, and the google.com/maps/dir link opens the Google Maps app when
- * it is installed and Safari when it is not. The comgooglemaps:// scheme
- * would be the "proper" way and is deliberately not used: it has to be
- * declared in Info.plist, which is native, and it fails silently on a phone
- * without the app.
+ * canOpenURL only answers truthfully for schemes declared in
+ * LSApplicationQueriesSchemes (app.json). Undeclared, iOS says no to
+ * everything, which is why this needed a build rather than an over-the-air
+ * publish: the honest answer is compiled in.
+ *
+ * Apple Maps is always there and cannot be removed, so it is never checked.
+ * Falling back to the google.com/maps/dir link when nothing is installed
+ * keeps the old behaviour on a phone still running an older build.
  */
-function navigateTo(address) {
+async function navigateTo(address) {
   const where = encodeURIComponent(oneLine(address || "").trim());
   if (!where) {
     Alert.alert("No address", "ServiceM8 has no address on this job.");
     return;
   }
   const open = (url) => Linking.openURL(url).catch(() => {
-    Alert.alert("Couldn't open maps", "Try the other one.");
+    Alert.alert("Couldn't open it", "Try another one.");
   });
-  Alert.alert(
-    "Navigate",
-    oneLine(address),
-    [
-      { text: "Apple Maps", onPress: () => open(`http://maps.apple.com/?daddr=${where}&dirflg=d`) },
-      { text: "Google Maps", onPress: () => open(`https://www.google.com/maps/dir/?api=1&destination=${where}&travelmode=driving`) },
-      { text: "Cancel", style: "cancel" },
-    ],
-  );
+
+  const has = async (scheme) => {
+    try { return await Linking.canOpenURL(scheme); } catch { return false; }
+  };
+  const [google, waze] = await Promise.all([
+    has("comgooglemaps://"),
+    has("waze://"),
+  ]);
+
+  const options = [
+    { text: "Apple Maps", onPress: () => open(`http://maps.apple.com/?daddr=${where}&dirflg=d`) },
+  ];
+  if (google) {
+    options.push({
+      text: "Google Maps",
+      onPress: () => open(`comgooglemaps://?daddr=${where}&directionsmode=driving`),
+    });
+  }
+  if (waze) {
+    options.push({ text: "Waze", onPress: () => open(`waze://?q=${where}&navigate=yes`) });
+  }
+  // Nothing detected means an older build, where iOS refuses to answer at all.
+  // The web link opens Google Maps if it is there and Safari if it is not, so
+  // the question still gets asked rather than silently narrowing to Apple.
+  if (!google && !waze) {
+    options.push({
+      text: "Google Maps",
+      onPress: () => open(`https://www.google.com/maps/dir/?api=1&destination=${where}&travelmode=driving`),
+    });
+  }
+  options.push({ text: "Cancel", style: "cancel" });
+
+  Alert.alert("Navigate", oneLine(address), options);
 }
 
 // The dossier returns contacts as "JOB: Name 0400..." strings, and ServiceM8
