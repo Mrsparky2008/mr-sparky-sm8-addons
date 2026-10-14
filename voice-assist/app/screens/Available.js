@@ -50,7 +50,7 @@ function daysAgo(n) {
   return `${d} days ago`;
 }
 
-export default function Available({ onOpenJob, visible = true, onCount }) {
+export default function Available({ onOpenJob, visible = true, onCount, mayAccept = true }) {
   const [jobs, setJobs] = useState(null);
   const [taken, setTaken] = useState([]);
   const [windowDays, setWindowDays] = useState(0);
@@ -165,33 +165,78 @@ export default function Available({ onOpenJob, visible = true, onCount }) {
         ) : jobs.length === 0 ? (
           <Empty>Nothing going right now. You will be told the moment there is.</Empty>
         ) : (
-          jobs.map((j) => (
-            <Card key={String(j.jobNumber)} style={{ marginBottom: 10 }}>
-              <View style={s.top}>
-                <StatusDot status={j.status} />
-                <Text style={[s.number, mono, { flex: 1 }]}>{j.jobNumber}</Text>
-                {Number(j.valueIncGst) ? (
-                  <Text style={[s.value, mono]}>{money(j.valueIncGst)}</Text>
+          <>
+            {/*
+              * THE REASON, ONCE, AT THE TOP - not repeated on every row. A man
+              * reads it the first time and then it is noise, and it must never
+              * push a job off the screen.
+              *
+              * It says who CAN take it, because that is what he needs to do
+              * next: tell the man who can.
+              */}
+            {!mayAccept ? (
+              /*
+               * NOT a Banner. Banner only has warn and alert tones, and both
+               * are orange - which would read as something being wrong. Nothing
+               * is wrong: this is how his account is set up, and it is worth
+               * saying once in a normal voice.
+               */
+              <View style={s.note}>
+                <Text style={s.noteText}>
+                  You can see what is going, but taking a job is not switched on
+                  for you yet. Tell the man you work for and he can take it.
+                </Text>
+              </View>
+            ) : null}
+
+            {jobs.map((j) => (
+              <Card key={String(j.jobNumber)} style={{ marginBottom: 10 }}>
+                <View style={s.top}>
+                  <StatusDot status={j.status} />
+                  <Text style={[s.number, mono, { flex: 1 }]}>{j.jobNumber}</Text>
+                  {Number(j.valueIncGst) ? (
+                    <Text style={[s.value, mono]}>{money(j.valueIncGst)}</Text>
+                  ) : null}
+                </View>
+                <Text style={s.address} numberOfLines={2}>
+                  {oneLine(j.address) || j.suburb || "—"}
+                </Text>
+                {j.description ? (
+                  <Text style={s.what} numberOfLines={2}>{oneLine(j.description)}</Text>
                 ) : null}
-              </View>
-              <Text style={s.address} numberOfLines={2}>{oneLine(j.address) || j.suburb || "—"}</Text>
-              {j.description ? (
-                <Text style={s.what} numberOfLines={2}>{oneLine(j.description)}</Text>
-              ) : null}
-              <View style={s.foot}>
-                <Text style={s.ago}>{ago(j.postedAt)}</Text>
-                <Pressable
-                  onPress={() => take(j)}
-                  disabled={!!taking}
-                  style={[s.take, !!taking && { opacity: 0.5 }]}
-                >
-                  <Text style={s.takeText}>
-                    {taking === String(j.jobNumber) ? "Taking it…" : "Take it"}
-                  </Text>
-                </Pressable>
-              </View>
-            </Card>
-          ))
+                <View style={s.foot}>
+                  <Text style={s.ago}>{ago(j.postedAt)}</Text>
+                  {/*
+                    * GREYED, NOT HIDDEN. Steven, 14 Oct 2026, on employees:
+                    * "leave it as the available job, but it's all grayed out
+                    * for them until we decide... a tick on the employee side if
+                    * he's allowed to accept jobs or not."
+                    *
+                    * The right call, and not the obvious one. Hiding the button
+                    * would make the screen read as a list of jobs nobody can
+                    * take, which is a broken screen. Greyed with a reason is a
+                    * man seeing work his crew could pick up and knowing exactly
+                    * why he is not the one to do it - so he rings the man he
+                    * works for instead of ringing the office.
+                    */}
+                  <Pressable
+                    onPress={() => take(j)}
+                    disabled={!!taking || !mayAccept}
+                    accessibilityState={{ disabled: !mayAccept }}
+                    style={[
+                      s.take,
+                      !!taking && { opacity: 0.5 },
+                      !mayAccept && s.takeOff,
+                    ]}
+                  >
+                    <Text style={[s.takeText, !mayAccept && s.takeTextOff]}>
+                      {taking === String(j.jobNumber) ? "Taking it…" : "Take it"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </Card>
+            ))}
+          </>
         )}
 
         {/*
@@ -241,6 +286,16 @@ const s = StyleSheet.create({
     backgroundColor: C.earth, borderRadius: R.button,
   },
   takeText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  // A dead button must LOOK dead. The portal's own screens had this exact bug
+  // in reverse - an Approve that rendered identically whether it worked or not,
+  // and Steven clicked it and nothing happened (CLAUDE.md section 23).
+  takeOff: { backgroundColor: "transparent", borderWidth: 1, borderColor: C.line },
+  takeTextOff: { color: C.muted, fontWeight: "700" },
+  note: {
+    backgroundColor: C.infoChipBg,
+    borderRadius: R.button, padding: 13, marginBottom: 12,
+  },
+  noteText: { color: C.infoChipInk, fontSize: 13.5, lineHeight: 20, fontWeight: "600" },
   refused: { marginTop: 10, gap: 7 },
   refusedTitle: { color: C.ink, fontSize: 15.5, fontWeight: "800" },
   refusedWhy: { ...T.small, lineHeight: 19 },

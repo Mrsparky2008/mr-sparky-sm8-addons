@@ -304,10 +304,15 @@ export const voidReceipt = ({ jobNumber, receiptId, reason }) =>
  * rather than the person, because a man can carry two phones and a phone can
  * change hands.
  */
-export const registerPush = ({ token, apnsToken, platform, bundleId, apnsEnvironment, canShowAlerts }) =>
-  post("/api/push/register", {
-    token, apnsToken, platform, bundleId, apnsEnvironment, canShowAlerts,
-  });
+/*
+ * Passed straight through rather than destructured field by field. The old
+ * signature named each one, so adding `model`, `osVersion` and
+ * `tookOverHandset` in push.js silently dropped all three here - the call
+ * looked right, the fields never left the phone, and nothing would have failed
+ * loudly enough to notice. A registration is already a flat bag of facts about
+ * one handset; naming them twice bought nothing but a place to forget one.
+ */
+export const registerPush = (device) => post("/api/push/register", { ...device });
 
 /*
  * Signing out on a phone being handed back has to stop other people's jobs
@@ -336,6 +341,22 @@ export const acceptJob = ({ jobNumber }) =>
  * right now" is the honest answer for him and the common one for everybody.
  */
 export const availableJobs = () => get("/api/jobs/available");
+
+/*
+ * THE CREW'S WORK, in one list.
+ *
+ * Steven, 13 Oct 2026: "in Multiskill it will show the jobs that belong to
+ * Jason, Andrew and John in one tab... they can grab jobs from others because
+ * they all work together." Confirmed 14 Oct as the fourth tab, in place of
+ * Money, which an employee never sees.
+ *
+ * Who the crew IS is entirely the portal's answer - `employeesOf` and the
+ * `worksForId` on each person. The phone asks "what is my crew doing" and
+ * renders the reply; it has no idea who Jason's men are and must never work it
+ * out, because that is the rule that keeps one man's money off another man's
+ * screen.
+ */
+export const teamJobs = () => get("/api/jobs/team");
 
 /*
  * Ring my own phone, now.

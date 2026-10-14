@@ -49,6 +49,7 @@ import ClaimsList from "./screens/pay/ClaimsList";
 import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
 import Available from "./screens/Available";
+import Team from "./screens/Team";
 import AddReceipt from "./screens/pay/AddReceipt";
 import OwnMaterial from "./screens/pay/OwnMaterial";
 import JobMaterial from "./screens/JobMaterial";
@@ -131,7 +132,15 @@ function Shell() {
     });
   }, [tab]);
 
+  /*
+   * Tapping the tab you are already on goes back to the top of it. Only three
+   * tabs HAVE a top: Available and Team are a single screen each with no stack,
+   * so resetting them used to write `[undefined]` into state - harmless, since
+   * neither pane reads it, but it is junk that would bite whoever next assumed
+   * stacks[tab] meant something for every tab.
+   */
   const resetTab = useCallback((which) => {
+    if (!ROOTS[which]) return;
     setStacks((s) => ({ ...s, [which]: [ROOTS[which]] }));
   }, []);
 
@@ -402,6 +411,15 @@ function Shell() {
      */
     ...(can.available === false ? [] : ["available"]),
     "day",
+    /*
+     * TEAM sits where Money sits for a subbie, so the bar stays four wide for
+     * everybody. Steven, 14 Oct 2026: "the available, the jobs, the day, and
+     * the team."
+     *
+     * Portal-decided, like the rest. Off unless it says on, because a man with
+     * no crew opening a Team tab learns nothing and wonders what he is missing.
+     */
+    ...(can.team ? ["team"] : []),
     ...(can.money === false ? [] : ["pay"]),
     ...(who?.isAdmin && can.admin !== false ? ["admin"] : []),
   ];
@@ -520,9 +538,31 @@ function Shell() {
           <Available
             visible={tab === "available"}
             onCount={setGoingNow}
+            /*
+             * WHETHER HE MAY TAKE ONE, decided by the portal and nothing else.
+             * Steven, 14 Oct 2026: "a tick on the employee side if he's allowed
+             * to accept jobs or not."
+             *
+             * Defaults to ALLOWED, so every subbie on the app today is
+             * unaffected and a portal that has not grown the field yet behaves
+             * exactly as before. Only an explicit false greys the buttons.
+             */
+            mayAccept={can.acceptJobs !== false}
             onOpenJob={(j) => { setTab("work"); openJob(j.job_number); }}
           />
         </View>
+
+        {/* ---- Team -------------------------------------------------------
+            What the rest of the crew is carrying. Same shape as Available:
+            one screen, no stack, and tapping a row opens the job in WORK
+            where every other job on this phone already lives. Mounted only
+            when the portal gave him the tab, so a man with no crew is not
+            quietly running a screen he cannot see. */}
+        {can.team ? (
+          <View style={[s.fill, tab !== "team" && s.hidden]} pointerEvents={tab === "team" ? "auto" : "none"}>
+            <Team onOpenJob={(j) => { setTab("work"); openJob(j.job_number); }} />
+          </View>
+        ) : null}
 
         {/* ---- Money ------------------------------------------------------
             The hub loads the statement once; every bucket screen renders a

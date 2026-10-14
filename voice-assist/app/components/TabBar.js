@@ -33,6 +33,16 @@ export const TABS = {
    */
   available: { icon: "spark", label: "Available", tint: "#2F9E57" },
   day: { icon: "board", label: "My day" },
+  /*
+   * THE CREW'S WORK. Steven, 14 Oct 2026: "I prefer the team tab... the
+   * available, the jobs, the day, and the team."
+   *
+   * It fills the slot Money leaves for an employee, who never sees Money
+   * because the money on a job he finishes is his employer's. The portal
+   * decides who gets it (`can.team`), so the bar stays four wide for everyone -
+   * a subbie gets Money in this position, an employee gets Team.
+   */
+  team: { icon: "people", label: "Team" },
   pay: { icon: "dollar", label: "Money" },
   admin: { icon: "chart", label: "Business" },
 };
