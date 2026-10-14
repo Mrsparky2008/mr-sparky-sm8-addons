@@ -383,7 +383,25 @@ function Shell() {
    */
   const can = who?.can || {};
   const tabs = [
-    "work", "available", "day",
+    "work",
+    /*
+     * AVAILABLE is listed the same way as the others so the portal can take it
+     * away without an App Store trip.
+     *
+     * It did not exist when `capabilities()` was written, so that function has
+     * no opinion about it and an employee is shown it today. Whether that is
+     * right is Steven's call and not settled: an employee cannot accept a job
+     * at all until `employeesCanAccept` is turned on, and a tab full of work he
+     * is refused when he taps it is worse than no tab. But the day it IS turned
+     * on, Available is the whole point of giving him the app.
+     *
+     * So it defaults to shown - no behaviour change for anybody today - and
+     * obeys `available: false` the moment the portal starts sending it. That
+     * turns a decision about people into one field on their side rather than a
+     * release on mine.
+     */
+    ...(can.available === false ? [] : ["available"]),
+    "day",
     ...(can.money === false ? [] : ["pay"]),
     ...(who?.isAdmin && can.admin !== false ? ["admin"] : []),
   ];
