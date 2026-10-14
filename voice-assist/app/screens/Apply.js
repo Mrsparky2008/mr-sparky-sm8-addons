@@ -28,7 +28,6 @@ import {
 } from "../lib/demo";
 import { C, R, S, T } from "../lib/theme";
 
-const MOBILE = /^0\d{9}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODE_LENGTH = 6;
 const TITLES = new Set(["mr", "mrs", "ms", "miss", "dr", "prof", "sir", "mx"]);
@@ -50,17 +49,59 @@ const sameName = (a, b) => {
   return Boolean(flat(a)) && flat(a) === flat(b);
 };
 
+/*
+ * EVERY WAY A MAN WRITES HIS OWN NUMBER, reduced to one.
+ *
+ * Steven hit this himself on 14 Oct 2026: signup refused +61412998204. The old
+ * rule was /^0\d{9}$/, which rejects the form a phone DISPLAYS, the form our
+ * own ServiceM8 records use (61414525740 for Steven), and anything pasted off
+ * a contact card.
+ *
+ * His actual objection was the message, not the rule: "it can be confused as
+ * broken if it says enter a 10-digit number." He is right, and that is the
+ * worse half. A man types his own number correctly, is told it is wrong, and is
+ * invited to go and count digits. There is nothing he can do that feels like a
+ * fix, so he decides the app is broken - at the one screen where giving up
+ * costs us a contractor.
+ *
+ * So: strip everything that is not a digit, fold +61 and 61 down to 0, and
+ * judge what is left. Spaces, brackets, dashes and a leading plus all stop
+ * mattering.
+ */
+const localMobile = (raw) => {
+  const d = String(raw || "").replace(/\D/g, "");
+  if (d.startsWith("61")) return `0${d.slice(2)}`;
+  if (d.startsWith("0")) return d;
+  // Bare "412998204" - nine digits, no trunk code. Common when a number is
+  // read aloud or copied out of a spreadsheet that ate the leading zero.
+  return d.length === 9 && d.startsWith("4") ? `0${d}` : d;
+};
+
 /** "0412345678" -> "0412 345 678", for reading a number back to someone. */
 const prettyMobile = (m) => {
-  const d = String(m || "").replace(/\D/g, "");
-  return d.length === 10 ? `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7)}` : m;
+  const d = localMobile(m);
+  return d.length === 10 ? `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7)}` : String(m || "");
 };
+
+/** Australian landline area codes. Worth its own message - see below. */
+const LANDLINE = /^0[2378]\d{8}$/;
 
 function validate(v) {
   const e = {};
   if (String(v.name || "").trim().length < 2) e.name = "Enter your full name";
-  if (!MOBILE.test(String(v.mobile || "").replace(/\s/g, ""))) {
-    e.mobile = "Enter a 10-digit Australian mobile";
+  const mob = localMobile(v.mobile);
+  if (!mob) {
+    e.mobile = "Enter your mobile number";
+  } else if (LANDLINE.test(mob)) {
+    /*
+     * A landline is not a typo and must not be told it looks like one. The next
+     * step sends a CODE BY TEXT, so a landline can never complete signup no
+     * matter how many times he retypes it - and he will retype it, because he
+     * knows the number is right.
+     */
+    e.mobile = "That is a landline. The code comes by text, so we need a mobile.";
+  } else if (!/^04\d{8}$/.test(mob)) {
+    e.mobile = "That does not look like an Australian mobile";
   }
   if (!EMAIL.test(String(v.email || "").trim())) e.email = "Enter a valid email address";
   if (String(v.licence || "").trim().length < 4) {
@@ -284,7 +325,18 @@ export default function Apply({ onBack, onDone }) {
     setBusy(true);
     setNotice("");
     try {
-      await startSignup({ ...values, business });
+      /*
+       * NORMALISE ONCE, HERE, and keep it. The mobile is the key for every
+       * step that follows - verify, password, Telegram, earnings - so all of
+       * them have to agree about what the number is. The portal normalises on
+       * the way in (toE164 on every one of those routes), so sending it as
+       * typed would also work; storing one form is what makes the number we
+       * read BACK to him on the next screen come out as "0412 998 204" rather
+       * than however he happened to type it.
+       */
+      const tidy = { ...values, mobile: localMobile(values.mobile) };
+      setValues(tidy);
+      await startSignup({ ...tidy, business });
       setStep("code");
     } catch (e) {
       if (isFieldError(e)) setErrors(e.errors);
