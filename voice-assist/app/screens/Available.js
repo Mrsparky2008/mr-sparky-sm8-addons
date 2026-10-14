@@ -19,7 +19,7 @@
 // The portal decides, always. This screen never works out whether he may
 // claim: an empty list is the honest answer for somebody who cannot, and a
 // refusal on tap is the honest answer when somebody beat him to it.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View,
@@ -41,8 +41,19 @@ function ago(iso) {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
-export default function Available({ onOpenJob }) {
+/** "today" / "yesterday" / "3 days ago", and nothing at all if we cannot tell. */
+function daysAgo(n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return "";
+  const d = Number(n);
+  if (d <= 0) return "today";
+  if (d === 1) return "yesterday";
+  return `${d} days ago`;
+}
+
+export default function Available({ onOpenJob, visible = true, onCount }) {
   const [jobs, setJobs] = useState(null);
+  const [taken, setTaken] = useState([]);
+  const [windowDays, setWindowDays] = useState(0);
   const [busy, setBusy] = useState(false);
   const [taking, setTaking] = useState("");
   const [refused, setRefused] = useState("");
@@ -51,7 +62,23 @@ export default function Available({ onOpenJob }) {
     setBusy(true);
     setRefused("");
     portal.availableJobs()
-      .then((d) => setJobs(Array.isArray(d?.jobs) ? d.jobs : []))
+      .then((d) => {
+        const open = Array.isArray(d?.jobs) ? d.jobs : [];
+        setJobs(open);
+        setTaken(Array.isArray(d?.taken) ? d.taken : []);
+        setWindowDays(Number(d?.windowDays) || 0);
+        /*
+         * The red dot on the tab. The portal returns `badge` alongside the
+         * list so the two can never disagree - it is not a second opinion, so
+         * this does not add up the rows itself.
+         *
+         * Reported on EVERY read, including when it is zero. A dot that only
+         * ever goes up sticks forever advertising work somebody else took
+         * twenty minutes ago, and the first time a man taps a 3 and finds an
+         * empty screen is the last time he believes the dot.
+         */
+        if (onCount) onCount(Number.isFinite(Number(d?.badge)) ? Number(d.badge) : open.length);
+      })
       .catch((e) => {
         setJobs([]);
         // THE RULE OUT OF THE PUSH FAILURES (CLAUDE.md section 29): a failure to
@@ -73,10 +100,27 @@ export default function Available({ onOpenJob }) {
         if (Number(e?.status) >= 400) {
           setRefused(e?.message || "The portal would not answer.");
         }
+        // A list we could not read is not a list of none. Leave the dot alone
+        // rather than clearing it on a flat signal.
       })
       .finally(() => setBusy(false));
-  }, []);
+  }, [onCount]);
+
+  /*
+   * ON MOUNT, not on first view. This screen is mounted hidden behind the
+   * other tabs from the moment he signs in, and the dot has to be on the bar
+   * BEFORE he thinks to look here - a badge you only get by visiting the tab
+   * it is on is telling you something you already know.
+   *
+   * Then again each time he comes back to it. Between those it is a snapshot,
+   * which is true of every badge on his home screen.
+   */
   useEffect(() => { load(); }, [load]);
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    if (visible && !wasVisible.current) load();
+    wasVisible.current = visible;
+  }, [visible, load]);
 
   async function take(job) {
     setTaking(String(job.jobNumber));
@@ -149,6 +193,35 @@ export default function Available({ onOpenJob }) {
             </Card>
           ))
         )}
+
+        {/*
+          * WHAT WENT, and it matters most on the screen that has nothing on
+          * it. "Nothing going right now" is the truth, but on a tab he has
+          * never seen carry a single job it is indistinguishable from broken -
+          * and the fastest way to lose him is a screen he does not believe.
+          * Ten recent takes say: this works, it is watching, and here is what
+          * you were not quick enough for.
+          *
+          * No value and no address beyond the suburb. That is the portal's
+          * decision and it is the right one - Telegram never put a price on an
+          * accept either, and "Jason just took $3,118" is a league table
+          * rather than news.
+          */}
+        {!refused && taken.length ? (
+          <View style={s.takenWrap}>
+            <Text style={s.takenHead}>
+              {windowDays ? `TAKEN IN THE LAST ${windowDays} DAYS` : "TAKEN RECENTLY"}
+            </Text>
+            {taken.map((t) => (
+              <View key={`${t.jobNumber}-${t.takenAt}`} style={s.takenRow}>
+                <Text style={[s.takenNum, mono]}>{t.jobNumber}</Text>
+                <Text style={s.takenWhere} numberOfLines={1}>{t.suburb || "—"}</Text>
+                <Text style={s.takenWho} numberOfLines={1}>{t.takenBy}</Text>
+                <Text style={s.takenAgo}>{daysAgo(t.agoDays)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -177,4 +250,16 @@ const s = StyleSheet.create({
     borderRadius: R.button, borderWidth: 1, borderColor: C.line,
   },
   againText: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
+  // Quieter than the live rows in every way - this is context, not work. It
+  // must never compete with a job that is still going.
+  takenWrap: { marginTop: 26, borderTopColor: C.line, borderTopWidth: 1, paddingTop: 14 },
+  takenHead: {
+    color: C.muted, fontSize: 10.5, fontWeight: "800",
+    letterSpacing: 0.7, marginBottom: 8,
+  },
+  takenRow: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 7 },
+  takenNum: { color: C.muted, fontSize: 12.5, fontWeight: "700" },
+  takenWhere: { flex: 1, color: C.muted, fontSize: 12.5 },
+  takenWho: { color: C.ink, fontSize: 12.5, fontWeight: "700", opacity: 0.8 },
+  takenAgo: { color: C.muted, fontSize: 11.5, minWidth: 64, textAlign: "right" },
 });

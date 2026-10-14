@@ -102,6 +102,7 @@ function Shell() {
   const [stacks, setStacks] = useState(ROOTS);
   const [workView, setWorkView] = useState("jobs");   // jobs | today
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
+  const [goingNow, setGoingNow] = useState(0);        // jobs nobody has taken yet
   const [account, setAccount] = useState(false);      // the who-am-I / sign-out sheet
 
   const stack = Array.isArray(stacks[tab]) ? stacks[tab] : [stacks[tab]];
@@ -443,7 +444,11 @@ function Shell() {
             there is one screen and tapping a row opens the job in WORK -
             where every other job on the phone already lives. */}
         <View style={[s.fill, tab !== "available" && s.hidden]} pointerEvents={tab === "available" ? "auto" : "none"}>
-          <Available onOpenJob={(j) => { setTab("work"); openJob(j.job_number); }} />
+          <Available
+            visible={tab === "available"}
+            onCount={setGoingNow}
+            onOpenJob={(j) => { setTab("work"); openJob(j.job_number); }}
+          />
         </View>
 
         {/* ---- Money ------------------------------------------------------
@@ -641,7 +646,7 @@ function Shell() {
           if (t === tab) { resetTab(t); return; }
           setTab(t);
         }}
-        badges={{ admin: waiting }}
+        badges={{ admin: waiting, available: goingNow }}
       />
 
       <AccountSheet
