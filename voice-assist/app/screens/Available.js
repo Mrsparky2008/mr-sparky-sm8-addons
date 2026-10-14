@@ -45,15 +45,35 @@ export default function Available({ onOpenJob }) {
   const [jobs, setJobs] = useState(null);
   const [busy, setBusy] = useState(false);
   const [taking, setTaking] = useState("");
+  const [refused, setRefused] = useState("");
 
   const load = useCallback(() => {
     setBusy(true);
+    setRefused("");
     portal.availableJobs()
       .then((d) => setJobs(Array.isArray(d?.jobs) ? d.jobs : []))
-      // Nothing to show and no alarm. A man who cannot claim, a portal that
-      // has not got the route yet, and a quiet morning all look the same from
-      // here, and all three mean "nothing for you right now".
-      .catch(() => setJobs([]))
+      .catch((e) => {
+        setJobs([]);
+        // THE RULE OUT OF THE PUSH FAILURES (CLAUDE.md section 29): a failure to
+        // REACH the server stays silent, because a man in a basement should
+        // still have a working app — but a server that ANSWERS and says no must
+        // never be silent.
+        //
+        // This screen was breaking that rule, and its own comment admitted it:
+        // "a man who cannot claim, a portal that has not got the route yet, and
+        // a quiet morning all look the same from here." They did. Only one of
+        // the three means "nothing for you right now"; the other two are a man
+        // staring at an empty tab believing there is no work going.
+        //
+        // fetch throws with no status when the phone cannot get out of the
+        // basement. A PortalError carries the status the portal actually sent,
+        // so the two are trivially distinguishable — they were just being
+        // treated identically, which is exactly how push stayed broken for
+        // hours.
+        if (Number(e?.status) >= 400) {
+          setRefused(e?.message || "The portal would not answer.");
+        }
+      })
       .finally(() => setBusy(false));
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -87,6 +107,17 @@ export default function Available({ onOpenJob }) {
       >
         {jobs === null ? (
           <ActivityIndicator color={C.brand} style={{ marginTop: 40 }} />
+        ) : refused ? (
+          // The portal answered and said no. Say which, and offer the only
+          // thing that ever helps — asking again — rather than an empty list
+          // that reads as a quiet morning.
+          <Card style={s.refused}>
+            <Text style={s.refusedTitle}>This list could not be loaded</Text>
+            <Text style={s.refusedWhy}>{refused}</Text>
+            <Pressable onPress={load} style={s.again} disabled={busy}>
+              <Text style={s.againText}>{busy ? "Trying…" : "Try again"}</Text>
+            </Pressable>
+          </Card>
         ) : jobs.length === 0 ? (
           <Empty>Nothing going right now. You will be told the moment there is.</Empty>
         ) : (
@@ -137,4 +168,13 @@ const s = StyleSheet.create({
     backgroundColor: C.earth, borderRadius: R.button,
   },
   takeText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  refused: { marginTop: 10, gap: 7 },
+  refusedTitle: { color: C.ink, fontSize: 15.5, fontWeight: "800" },
+  refusedWhy: { ...T.small, lineHeight: 19 },
+  again: {
+    marginTop: 7, alignSelf: "flex-start", minHeight: S.touch - 8,
+    paddingHorizontal: 18, justifyContent: "center",
+    borderRadius: R.button, borderWidth: 1, borderColor: C.line,
+  },
+  againText: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
 });
