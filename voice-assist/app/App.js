@@ -24,7 +24,7 @@
 // Talking to the assistant now happens in Claude itself, opened by a link.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, SafeAreaView, StyleSheet, View } from "react-native";
 
 import { StatusBar } from "expo-status-bar";
 import * as Linking from "expo-linking";
@@ -224,19 +224,74 @@ function Shell() {
     }
   }, []);
 
+  /*
+   * SIGN OUT, in the order that cannot strand him.
+   *
+   * Steven, 14 Oct 2026: he pressed Sign out, nothing happened, and he
+   * force-closed the app and signed in again instead.
+   *
+   * The old order was the cause. `await disablePush(...)` came FIRST, "before
+   * anything else", on the reasoning that a phone being handed back must stop
+   * ringing - right about the goal, wrong about the order. It put a network
+   * call in front of the only part that actually signs him out, inside a
+   * function nothing awaited, with no try/catch anywhere. A portal that hung
+   * or threw took the whole sign-out with it and said nothing, while the sheet
+   * had already closed as though it had worked.
+   *
+   * So: END THE SESSION FIRST. It is all local and it cannot fail. Then tell
+   * the portal, as a courtesy, with a time limit - because a phone being handed
+   * over must not stay signed in waiting for a server that is not answering.
+   */
   async function handleSignOut() {
-    // Before anything else: a phone being handed back must stop ringing with
-    // other people's jobs.
-    await disablePush(alerts.token.current);
-    await signOut();
+    // 1. The screen goes back to the front door immediately. No await above
+    //    this line, ever.
     setStacks(ROOTS);
     setTab("work");
     setWho(null);
     setWaiting(0);
+    setGoingNow(0);
     setDemoSignedIn(false);
     setWhoPending(false);
     emailRef.current = null;
     setEmail(null);
+
+    // 2. The credentials. Local, and the one failure worth reporting.
+    let cleared = true;
+    try {
+      const r = await signOut();
+      cleared = r?.cleared !== false;
+    } catch {
+      cleared = false;
+    }
+
+    // 3. Retire the push registration. A courtesy to the portal and a real
+    //    protection - a handset must not keep ringing with the last man's
+    //    jobs - but never a reason to still be signed in. Five seconds, then
+    //    we stop waiting; the portal retires a device on a 410 from Apple
+    //    anyway, so the worst case is it learns later rather than never.
+    const token = alerts?.token?.current;
+    if (token) {
+      await Promise.race([
+        disablePush(token).catch(() => {}),
+        new Promise((r) => setTimeout(r, 5000)),
+      ]);
+    }
+
+    /*
+     * Only now, and only if the keychain would not let go. Everything else has
+     * already happened, so this is information rather than an apology: the
+     * consequence is that the next launch may sign him back in, which matters
+     * most in the exact case he is doing it for - handing the phone to somebody
+     * else.
+     */
+    if (!cleared) {
+      Alert.alert(
+        "Signed out, but check this phone",
+        "This phone would not let go of the saved sign-in, so opening the app "
+        + "again may sign you straight back in. If you are handing it over, "
+        + "delete the app.",
+      );
+    }
   }
 
   if (!email) {

@@ -112,6 +112,26 @@ export async function signIn(email, password) {
     return { needsNewPassword: true, session: result.Session, email: email.trim() };
   }
 
+  /*
+   * DID SOMEBODY ELSE HAVE THIS PHONE?
+   *
+   * Read BEFORE the new email overwrites it, because this is the only moment
+   * the answer exists.
+   *
+   * The network session, 14 Oct 2026, on the sign-out bug: "force-closing and
+   * signing in as somebody else is the path people will actually take, so it
+   * should be as safe as the tidy one rather than merely usually safe." Quite
+   * right - a man who cannot find Sign out, or whose sign-out failed, hands the
+   * phone over with his registration still on it, and the next person signing
+   * in is the only event that proves it happened.
+   *
+   * The app does not act on this itself: which row wins is the portal's data
+   * model, not the app's to guess at. It reports the fact at registration and
+   * the portal decides. No email travels - just whether the person changed.
+   */
+  const before = (await SecureStore.getItemAsync(KEY_EMAIL)) || "";
+  handsetChanged = Boolean(before) && before !== email.trim().toLowerCase();
+
   const auth = keep(result);
   if (auth.RefreshToken) {
     await SecureStore.setItemAsync(KEY_REFRESH, auth.RefreshToken, {
@@ -119,7 +139,19 @@ export async function signIn(email, password) {
     });
     await SecureStore.setItemAsync(KEY_EMAIL, email.trim().toLowerCase());
   }
-  return { ok: true, email: cachedEmail || email.trim() };
+  return { ok: true, email: cachedEmail || email.trim(), handsetChanged };
+}
+
+/*
+ * True when the person who just signed in is not the person who was signed in
+ * on this handset before. Read once by push registration and then cleared, so
+ * it describes this sign-in and never a stale one.
+ */
+let handsetChanged = false;
+export function tookOverHandset() {
+  const was = handsetChanged;
+  handsetChanged = false;
+  return was;
 }
 
 /** Finish a NEW_PASSWORD_REQUIRED challenge with the password they picked. */
@@ -206,12 +238,44 @@ export async function getIdToken() {
   return idToken;
 }
 
+/*
+ * SIGNING OUT MUST NOT BE ABLE TO FAIL.
+ *
+ * Steven, 14 Oct 2026: he tried to sign out, nothing happened, and he
+ * force-closed the app and signed in again instead. The portal log agrees -
+ * no DELETE arrived while he was trying.
+ *
+ * The old version was four awaits in a row with no try/catch, called from a
+ * Pressable with nothing awaiting IT. So any one of them throwing - a keychain
+ * that would not open, a portal call that hung - abandoned the rest, surfaced
+ * as an unhandled rejection nobody sees, and left him signed in on a screen
+ * that had just closed the sheet as though it had worked.
+ *
+ * Now: memory is cleared FIRST and unconditionally, because that part cannot
+ * fail and is what actually ends the session in this process. Then each stored
+ * item is deleted on its own, so one failing does not take the other with it.
+ *
+ * It RETURNS whether the stored credentials really went, and the caller says
+ * so. That is the one failure with a consequence worth telling him about: if
+ * the refresh token survives in the keychain, the next launch signs him
+ * straight back in, and a man who believes he has signed out of a phone he is
+ * handing over deserves to be told we are not certain he has.
+ */
 export async function signOut() {
   idToken = null;
   idTokenExp = 0;
   cachedEmail = "";
-  await SecureStore.deleteItemAsync(KEY_REFRESH);
-  await SecureStore.deleteItemAsync(KEY_EMAIL);
+
+  const gone = [];
+  for (const key of [KEY_REFRESH, KEY_EMAIL]) {
+    try {
+      await SecureStore.deleteItemAsync(key);
+      gone.push(true);
+    } catch {
+      gone.push(false);
+    }
+  }
+  return { cleared: gone.every(Boolean) };
 }
 
 /** Turn Cognito's error codes into something worth reading on a phone. */

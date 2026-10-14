@@ -24,6 +24,7 @@ import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 import * as portal from "./portal";
+import { tookOverHandset } from "./auth";
 
 /*
  * An alert that arrives while the app is open should still be seen. The default
@@ -130,12 +131,40 @@ export async function enable() {
    * registration and refreshed every time, because he can revoke it in
    * Settings months later and nothing would otherwise notice.
    */
+  /*
+   * WHICH PHONE THIS IS, IN WORDS.
+   *
+   * The network session, 14 Oct 2026, building the device list: Apple stopped
+   * giving apps the user-set device name without an entitlement, so a list of
+   * handsets reads "iPhone", "iPhone", "iPhone". Two phones on one account are
+   * then told apart only by a date, which is no use to whoever has to decide
+   * which one to revoke.
+   *
+   * Model and OS need no entitlement and are enough: "iPhone 15 Pro, iOS 18.2"
+   * is a man's own phone to him and distinguishable to an admin. Nothing here
+   * identifies a person - it is the same string every app on the handset can
+   * read.
+   */
+  const model = Device.modelName || null;
+  const osVersion = Device.osVersion
+    ? `${Device.osName || Platform.OS} ${Device.osVersion}`
+    : null;
+
   await portal.registerPush({
     token,
     apnsToken,
     platform: Platform.OS,
     canShowAlerts: true,
     bundleId,
+    model,
+    osVersion,
+    /*
+     * This handset had a DIFFERENT person signed in immediately before, which
+     * means the last one left without a clean sign-out. Reported, never acted
+     * on here: whether that retires his row is the portal's call, because the
+     * portal owns what a device row is keyed on.
+     */
+    tookOverHandset: tookOverHandset(),
     // The portal decides; this is what it decides FROM. Production unless
     // this is plainly a development build.
     apnsEnvironment: variant === "dev" || __DEV__ ? "sandbox" : "production",
