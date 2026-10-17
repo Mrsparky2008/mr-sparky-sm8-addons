@@ -27,8 +27,8 @@ import {
   ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { Card } from "./ui";
-import { C, R, S, T } from "../lib/theme";
-import { ago } from "../lib/when";
+import { C, R, S, T, money, mono } from "../lib/theme";
+import { ago, at } from "../lib/when";
 import * as portal from "../lib/portal";
 
 export default function PassJob({ jobNumber, onDone }) {
@@ -38,6 +38,23 @@ export default function PassJob({ jobNumber, onDone }) {
   const [notLive, setNotLive] = useState(false);
   const [refused, setRefused] = useState("");
   const [sending, setSending] = useState("");
+  /*
+   * WHAT IS BEING HANDED OVER WITH THE JOB, and NOTHING IS TICKED BY DEFAULT.
+   *
+   * Steven, 17 Oct 2026, on the hole under all of this: "$300 is very obvious,
+   * but it could be something like $30 on a $500 job. So this guy buys $30
+   * worth of material, keeps it, and the other guy buys a second set and uses
+   * it... it's just unfair, and that person may or may not have missed it."
+   *
+   * Nobody misses $340. Everybody misses $34. So the list is PUT IN FRONT OF
+   * HIM at the one moment he is thinking about the job anyway.
+   *
+   * Defaulting to all-ticked would write down a handover nobody thought about,
+   * which is the same $30 going missing with a record saying it did not.
+   * Ticking nothing records what it means - he was shown the list and handed
+   * none of it over. Unticked is an ANSWER, not a blank.
+   */
+  const [handed, setHanded] = useState(() => new Set());
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
 
@@ -67,8 +84,17 @@ export default function PassJob({ jobNumber, onDone }) {
 
   // On mount, so the row can say "Offered to Jason" without being opened.
   useEffect(() => { load(); }, [load]);
+  // A different job is a different list. Ticks never travel between jobs.
+  useEffect(() => { setHanded(new Set()); }, [jobNumber]);
 
   const offer = state?.offer || null;
+  const material = Array.isArray(state?.material) ? state.material : null;
+
+  const toggle = (id) => setHanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   async function send(body, key) {
     setSending(key);
@@ -146,12 +172,54 @@ export default function PassJob({ jobNumber, onDone }) {
               <ActivityIndicator color={C.brand} style={{ marginVertical: 24 }} />
             ) : (
               <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+                {material && material.length ? (
+                  <View style={s.matBox}>
+                    <Text style={s.matHead}>Material already on this job</Text>
+                    <Text style={[T.small, { marginBottom: 6 }]}>
+                      Tick anything you are handing over with it. Leave it
+                      unticked if you are keeping it.
+                    </Text>
+                    {material.map((m) => {
+                      const on = handed.has(m.id);
+                      return (
+                        <Pressable
+                          key={String(m.id)}
+                          style={s.matRow}
+                          onPress={() => toggle(m.id)}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: on }}
+                        >
+                          <View style={[s.tick, on && s.tickOn]}>
+                            {on ? <Text style={s.tickMark}>✓</Text> : null}
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.matName} numberOfLines={1}>
+                              {m.supplier || "Supplier unknown"}
+                              {m.invoiceNumber ? ` · ${m.invoiceNumber}` : ""}
+                            </Text>
+                            {m.date ? <Text style={T.small}>{at(m.date)}</Text> : null}
+                          </View>
+                          <Text style={[s.matAmt, mono]}>{money(m.amountIncGst)}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : material ? (
+                  /*
+                   * An EMPTY list is a different thing from no list, and it is
+                   * worth one line. It says the question was asked and the
+                   * answer was none - rather than leaving him to wonder
+                   * whether anything was checked at all.
+                   */
+                  <Text style={[T.small, s.matNone]}>No material bought on this job yet.</Text>
+                ) : null}
+
                 {(state?.contractors || []).map((c) => (
                   <Pressable
                     key={String(c.id)}
                     style={s.pick}
                     disabled={!!sending}
-                    onPress={() => send({ toId: c.id }, String(c.id))}
+                    onPress={() => send({ toId: c.id, handedOverIds: [...handed] }, String(c.id))}
                   >
                     <Text style={s.pickName}>{c.name}</Text>
                     <Text style={s.chev}>{sending === String(c.id) ? "..." : "›"}</Text>
@@ -171,7 +239,7 @@ export default function PassJob({ jobNumber, onDone }) {
                 <Pressable
                   style={[s.pick, s.network]}
                   disabled={!!sending}
-                  onPress={() => send({ toNetwork: true }, "network")}
+                  onPress={() => send({ toNetwork: true, handedOverIds: [...handed] }, "network")}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={s.pickName}>Put It Back On The Network</Text>
@@ -220,6 +288,23 @@ const s = StyleSheet.create({
   sheetTitle: { color: C.ink, fontSize: 17, fontWeight: "800" },
   sheetNote: { marginBottom: 10 },
   refused: { color: C.active, fontSize: 13.5, marginBottom: 8 },
+  matBox: { marginBottom: 12 },
+  matHead: { color: C.ink, fontSize: 14.5, fontWeight: "800", marginBottom: 2 },
+  matNone: { marginBottom: 12 },
+  matRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    minHeight: S.touch, borderBottomWidth: 1, borderBottomColor: C.line,
+  },
+  // Glove-sized and square, like every other tick in the app.
+  tick: {
+    width: 22, height: 22, borderRadius: 6,
+    borderWidth: 1, borderColor: C.line,
+    alignItems: "center", justifyContent: "center",
+  },
+  tickOn: { backgroundColor: C.brand, borderColor: C.brand },
+  tickMark: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  matName: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
+  matAmt: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
   pick: {
     flexDirection: "row", alignItems: "center", gap: 10,
     minHeight: S.touch, borderBottomWidth: 1, borderBottomColor: C.line,

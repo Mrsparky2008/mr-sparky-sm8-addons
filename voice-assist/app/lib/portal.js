@@ -441,5 +441,24 @@ export const passTargets = (jobNumber) => get(`/api/jobs/passto${qs({ jobNumber 
  *   { cancel: true }    take the offer back before he answers. His call the
  *                       same night: nothing has moved, so nothing is undone.
  */
-export const passJob = ({ jobNumber, toId, toNetwork, cancel }) =>
-  post("/api/jobs/pass", { jobNumber, toId, toNetwork, cancel });
+export const passJob = ({ jobNumber, toId, toNetwork, cancel, handedOverIds }) =>
+  post("/api/jobs/pass", { jobNumber, toId, toNetwork, cancel, handedOverIds });
+
+/*
+ * `handedOverIds` is WHICH MATERIAL GOES WITH THE JOB, and an empty array is a
+ * real answer rather than a missing one.
+ *
+ * Steven, 17 Oct 2026: "$300 is very obvious, but it could be something like
+ * $30 on a $500 job. So this guy buys $30 worth of material, keeps it, and the
+ * other guy buys a second set and uses it." Nobody misses $340; everybody
+ * misses $34 - so the list is shown at the one moment he is already thinking
+ * about the job.
+ *
+ * The INVOICE DATE says who bought it and only a PERSON can say whether the
+ * goods changed hands. Those two are never mixed: the first is derivable, the
+ * second never will be, which is why this is a tick and not a calculation.
+ *
+ * Nothing is ticked by default and that must not be "improved". A default of
+ * all-of-it writes down a handover nobody thought about, which is the same $30
+ * going missing with a record saying it did not.
+ */
