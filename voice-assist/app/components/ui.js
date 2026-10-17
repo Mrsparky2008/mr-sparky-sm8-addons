@@ -1,11 +1,17 @@
 // Shared furniture for every screen. Kept deliberately small — these are the
 // pieces DESIGN.md names, nothing more.
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { C, R, S, T, mono, oneLine, statusChip } from "../lib/theme";
 
 export { Logo } from "./Logo";
 
-export function Header({ title, meta, onBack }) {
+// The brand mark, cut from the same artwork as the app icon.
+const MARK = require("../assets/mark.png");
+
+export function Header({ title, meta, onBack, onMeta }) {
+  const metaBody = meta ? (
+    <Text style={[s.meta, mono, onMeta && { color: C.infoChipInk }]}>{meta}{onMeta ? " ›" : ""}</Text>
+  ) : null;
   return (
     <View style={s.header}>
       {onBack ? (
@@ -13,12 +19,23 @@ export function Header({ title, meta, onBack }) {
           <Text style={s.backText}>‹</Text>
         </Pressable>
       ) : (
-        <View style={s.tile}>
-          <Text style={s.tileText}>AI</Text>
-        </View>
+        /*
+         * The mark, not the letters "AI". Steven, 13 Oct 2026: "should that be
+         * the Mr Sparky logo?" It should - that tile has said AI since the app
+         * was called AI Assist, and it is the last place on screen still
+         * saying so.
+         *
+         * The house and plug only. The words are unreadable at 30px and the
+         * house IS the logo at that size, which is the same call the favicon
+         * made. Cut by scripts/make_icon.py from the same artwork, so it can
+         * never drift from the app icon.
+         */
+        <Image source={MARK} style={s.brandTile} resizeMode="cover" />
       )}
       <Text style={[T.title, { flex: 1 }]} numberOfLines={1}>{title}</Text>
-      {meta ? <Text style={[s.meta, mono]}>{meta}</Text> : null}
+      {/* Tappable when it names the signed-in person: the account sheet lives
+          behind it, because "who is logged in" belongs where the name is. */}
+      {onMeta ? <Pressable onPress={onMeta} hitSlop={10}>{metaBody}</Pressable> : metaBody}
     </View>
   );
 }
@@ -29,7 +46,7 @@ export function JobChip({ job, onPress }) {
   const body = (
     <View style={s.jobChip}>
       <Text style={s.jobChipMuted}>Job </Text>
-      <Text style={[s.jobChipNum, mono]}>#{job.job_number}</Text>
+      <Text style={[s.jobChipNum, mono]}>{job.job_number}</Text>
       <Text style={s.jobChipMuted}> · {job.suburb || oneLine(job.address)}</Text>
     </View>
   );
@@ -42,6 +59,62 @@ export function StatusChip({ status }) {
   return (
     <View style={[s.status, { backgroundColor: bg }]}>
       <Text style={[s.statusText, { color: ink }]}>{status}</Text>
+    </View>
+  );
+}
+
+/*
+ * ServiceM8's letter badge: an orange Q, a blue W, a green C.
+ *
+ * Steven, 13 Oct 2026, with both apps side by side: "can we add an orange Q
+ * and blue W before each, C green for completed, similar to SM8."
+ *
+ * The colours were already the same (statusChip, 30 Aug 2026 - "I switch apps
+ * and get lost looking for a WO in the blue section"). This is the other half
+ * of that: a shape you read without reading, in the same place in the row, so
+ * a man scanning a list is not re-learning a layout every time he changes
+ * app. It is the concept copied, not the feature.
+ */
+const STATUS_LETTER = {
+  "quote": "Q",
+  "work order": "W",
+  "completed": "C",
+  "unsuccessful": "U",
+};
+
+/*
+ * White on a SOLID colour, not dark ink on a pale one. Steven, 13 Oct 2026:
+ * "I prefer the white text in the coloured circle... make the letters a little
+ * bit bigger, they go closer to the edges."
+ *
+ * The pale chip colours are made to sit behind a tinted label on dark; white
+ * on them is weak. So the badge gets the full-strength version of each status
+ * colour, which both carries white properly and reads as the same colour from
+ * further away than the pale one did.
+ */
+const DOT_FILL = {
+  "quote": C.active,      // orange
+  "work order": C.neutral, // blue
+  "completed": C.earth,    // green
+  "unsuccessful": "#D94F4E",
+};
+
+export function StatusDot({ status, size = 22 }) {
+  const key = String(status || "").toLowerCase();
+  const letter = STATUS_LETTER[key];
+  if (!letter) return null;
+  return (
+    <View
+      style={[
+        s.dot,
+        { width: size, height: size, borderRadius: size / 2, backgroundColor: DOT_FILL[key] },
+      ]}
+      // The letter is a shorthand, so the row still has to SAY what it is to
+      // anybody who cannot see the colour.
+      accessible
+      accessibilityLabel={status}
+    >
+      <Text style={[s.dotText, { fontSize: size * 0.64 }]}>{letter}</Text>
     </View>
   );
 }
@@ -85,7 +158,9 @@ export function Empty({ children }) {
 export function Row({ icon, label, value, onPress, dim, last }) {
   const body = (
     <View style={[s.row, last && { borderBottomWidth: 0 }]}>
-      {!!icon && <Text style={s.rowIcon}>{icon}</Text>}
+      {!!icon && (typeof icon === "string"
+        ? <Text style={s.rowIcon}>{icon}</Text>
+        : <View style={s.rowIconBox}>{icon}</View>)}
       <Text style={[s.rowLabel, dim && { color: C.muted }]}>{label}</Text>
       {!!value && <Text style={[s.rowValue, mono]}>{value}</Text>}
       {!!onPress && <Text style={s.chevron}>›</Text>}
@@ -98,7 +173,7 @@ export function Row({ icon, label, value, onPress, dim, last }) {
 export function Tile({ icon, label, onPress, tone }) {
   return (
     <Pressable onPress={onPress} style={[s.tile, tone === "brand" && { borderColor: C.brand }]}>
-      <Text style={s.tileIcon}>{icon}</Text>
+      {typeof icon === "string" ? <Text style={s.tileIcon}>{icon}</Text> : <View style={s.tileIconBox}>{icon}</View>}
       <Text style={s.tileLabel}>{label}</Text>
     </Pressable>
   );
@@ -108,16 +183,50 @@ export function TileGrid({ children }) {
   return <View style={s.grid}>{children}</View>;
 }
 
+/** Two or three peers of one screen — Jobs/Today, not navigation. */
+export function Segment({ options, value, onChange }) {
+  return (
+    <View style={s.segment}>
+      {options.map((o) => {
+        const on = o.key === value;
+        return (
+          <Pressable
+            key={o.key}
+            onPress={() => onChange(o.key)}
+            style={[s.segmentItem, on && s.segmentItemOn]}
+          >
+            <Text style={[s.segmentText, on && { color: C.ink }]}>{o.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * A strip that states something about the whole screen. tone "active" is the
+ * drafting warning; "warn" is the test-build stripe, which exists so nobody
+ * ever approves a real claim believing they are in a sandbox.
+ */
+export function Banner({ children, tone = "active" }) {
+  const ink = tone === "warn" ? C.yellow : C.active;
+  const bg = tone === "warn" ? "rgba(254,218,0,.12)" : C.warnChipBg;
+  return (
+    <View style={[s.banner, { backgroundColor: bg }]}>
+      <Text style={[s.bannerText, { color: ink }]}>{children}</Text>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   header: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingHorizontal: S.screen, paddingTop: 6, paddingBottom: 12,
   },
-  tile: {
-    width: 30, height: 30, borderRadius: 8, backgroundColor: C.brand,
-    alignItems: "center", justifyContent: "center",
-  },
-  tileText: { color: "#fff", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 },
+  // Named apart from the grid `tile` below on purpose: both used to be called
+  // `tile` in this one object, so the grid style silently won and the header's
+  // 30px brand badge was rendering as a full-width 84px panel on every screen.
+  brandTile: { width: 30, height: 30, borderRadius: 8 },
   back: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
   backText: { color: C.ink, fontSize: 30, lineHeight: 32, fontWeight: "600" },
   meta: { color: C.muted, fontSize: 12.5 },
@@ -133,6 +242,8 @@ const s = StyleSheet.create({
   status: { borderRadius: R.chip, paddingHorizontal: 9, paddingVertical: 3 },
   statusText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase" },
 
+  dot: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  dotText: { color: "#FFFFFF", fontWeight: "800", letterSpacing: 0.2 },
   card: {
     backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
     borderRadius: R.card, padding: S.card,
@@ -153,8 +264,13 @@ const s = StyleSheet.create({
     paddingVertical: 12, borderBottomColor: C.line, borderBottomWidth: 1,
   },
   rowIcon: { fontSize: 16, width: 22, textAlign: "center" },
+  rowIconBox: { width: 22, alignItems: "center" },
+  tileIconBox: { height: 24, justifyContent: "center" },
+  // The value is flexible too, or a long company name squeezes the label
+  // into a one-letter-per-line column (seen live on My Details, 29 Aug 2026).
+  // Long values wrap right-aligned; the label always keeps its share.
   rowLabel: { flex: 1, color: C.ink, fontSize: 15 },
-  rowValue: { color: C.muted, fontSize: 15 },
+  rowValue: { flex: 1.6, color: C.muted, fontSize: 15, textAlign: "right" },
   chevron: { color: C.muted, fontSize: 22, lineHeight: 24, marginLeft: 2 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
@@ -165,4 +281,18 @@ const s = StyleSheet.create({
   },
   tileIcon: { fontSize: 22 },
   tileLabel: { color: C.ink, fontSize: 14.5, fontWeight: "700" },
+
+  segment: {
+    flexDirection: "row", gap: 2, backgroundColor: C.panel,
+    borderColor: C.line, borderWidth: 1, borderRadius: R.button, padding: 3,
+  },
+  segmentItem: {
+    flex: 1, minHeight: 38, alignItems: "center", justifyContent: "center",
+    borderRadius: R.button - 4,
+  },
+  segmentItemOn: { backgroundColor: C.line },
+  segmentText: { color: C.muted, fontSize: 13, fontWeight: "800", letterSpacing: 0.4 },
+
+  banner: { borderRadius: R.card, paddingHorizontal: 12, paddingVertical: 8 },
+  bannerText: { fontSize: 10.5, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" },
 });

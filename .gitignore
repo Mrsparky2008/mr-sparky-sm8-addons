@@ -6,3 +6,8 @@ voice-assist/expo-token.txt
 credentials.json
 *.p12
 *.mobileprovision
+
+# deploy bundle, rebuilt by voice-assist/backend/deploy.mjs — tracking it meant
+# every deploy dirtied the tree and the NEXT git pull aborted, which once left
+# a deploy silently shipping the previous commit.
+voice-assist/backend/function.zip

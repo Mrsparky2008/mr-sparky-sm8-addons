@@ -2,12 +2,21 @@
 // one identity per person and nothing new to remember.
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
-import { Cta, Logo } from "../components/ui";
+import { Cta } from "../components/ui";
+
+/*
+ * The app icon, not the horizontal banner. That banner is made for a van and
+ * a letterhead - white and yellow blocks on a white page - and on a dark
+ * phone screen it is a rectangle pasted onto navy. This is the thing he just
+ * tapped to get here (Steven, 14 Oct 2026).
+ */
+const ICON = require("../assets/icon.png");
 import { C, R, S, T } from "../lib/theme";
 import {
-  friendlyAuthError, hasStoredSession, setNewPassword, signIn, storedEmail, unlock,
+  finishReset, friendlyAuthError, hasStoredSession, setNewPassword, signIn,
+  startReset, storedEmail, unlock,
 } from "../lib/auth";
 
 export default function SignIn({ onSignedIn }) {
@@ -21,6 +30,20 @@ export default function SignIn({ onSignedIn }) {
   // the first time Steven sets a tech up, this is what they land on.
   const [challenge, setChallenge] = useState(null);
   const [newPassword, setNewPasswordValue] = useState("");
+
+  /*
+   * Resetting a forgotten password. Steven, 14 Oct 2026: "build a reset
+   * password option."
+   *
+   * Two steps, one screen: ask for the code, then take the code and the new
+   * password together. "" is off, "sent" means Cognito has emailed one.
+   *
+   * It does NOT confirm whether an account exists. Cognito will tell you,
+   * which turns a sign-in screen into a way of finding out who is on the
+   * network, so the message after sending is the same either way.
+   */
+  const [reset, setReset] = useState("");
+  const [code, setCode] = useState("");
 
   const passwordRef = useRef(null);
 
@@ -107,10 +130,40 @@ export default function SignIn({ onSignedIn }) {
   if (booting) {
     return (
       <View style={[s.screen, s.centre]}>
-        <Logo width={200} />
+        <Image source={ICON} style={s.icon} resizeMode="cover" />
         <ActivityIndicator color={C.brand} style={{ marginTop: 28 }} />
       </View>
     );
+  }
+
+  async function sendCode() {
+    const who = email.trim();
+    if (!who) { setError("Put your email in first."); return; }
+    setBusy(true); setError("");
+    try {
+      await startReset(who);
+      setReset("sent");
+    } catch (err) {
+      // A wrong email still reads as sent - see the note on the state above.
+      if (err?.code === "UserNotFoundException") setReset("sent");
+      else setError(friendlyAuthError(err));
+    } finally { setBusy(false); }
+  }
+
+  async function applyReset() {
+    if (!code.trim() || !newPassword) { setError("Both the code and a new password."); return; }
+    setBusy(true); setError("");
+    try {
+      await finishReset(email.trim(), code, newPassword);
+      // Straight in rather than handing him back to a form he has just filled
+      // in. He proved who he was twice over to get here.
+      const res = await signIn(email.trim(), newPassword);
+      if (res?.ok) { onSignedIn(res.email); return; }
+      setReset(""); setCode(""); setNewPasswordValue("");
+      setPassword(newPassword);
+    } catch (err) {
+      setError(friendlyAuthError(err));
+    } finally { setBusy(false); }
   }
 
   // Keyboard handling is iOS's own (automaticallyAdjustKeyboardInsets) rather
@@ -125,10 +178,56 @@ export default function SignIn({ onSignedIn }) {
         keyboardDismissMode="interactive"
       >
         <View style={s.logoWrap}>
-          <Logo width={224} />
+          <Image source={ICON} style={s.icon} resizeMode="cover" />
         </View>
 
-        {challenge ? (
+        {reset ? (
+          <>
+            {reset === "sent" ? (
+              <>
+                <Text style={s.lead}>
+                  If that email has an account, a code is on its way to it.
+                </Text>
+                <Field
+                  label="Code from the email" value={code} onChangeText={setCode}
+                  keyboardType="number-pad" autoFocus returnKeyType="next"
+                  placeholder="6 digits"
+                />
+                <Field
+                  label="New password" value={newPassword} onChangeText={setNewPasswordValue}
+                  secureTextEntry autoCapitalize="none" textContentType="newPassword"
+                  returnKeyType="go" onSubmitEditing={applyReset}
+                  placeholder="8+ characters with a number"
+                />
+                {!!error && <Text style={s.error}>{error}</Text>}
+                <Cta label={busy ? "Setting…" : "Set it and sign in"} onPress={applyReset} disabled={busy} />
+                <Pressable onPress={sendCode} disabled={busy} style={s.linkWrap}>
+                  <Text style={s.link}>Send another code</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={s.lead}>
+                  We will email you a code to set a new password.
+                </Text>
+                <Field
+                  label="Email" value={email} onChangeText={setEmail}
+                  keyboardType="email-address" autoCapitalize="none" autoComplete="email"
+                  textContentType="username" returnKeyType="go" onSubmitEditing={sendCode}
+                  placeholder="you@example.com.au"
+                />
+                {!!error && <Text style={s.error}>{error}</Text>}
+                <Cta label={busy ? "Sending…" : "Email me a code"} onPress={sendCode} disabled={busy} />
+              </>
+            )}
+            <Pressable
+              onPress={() => { setReset(""); setCode(""); setNewPasswordValue(""); setError(""); }}
+              style={s.linkWrap}
+            >
+              <Text style={s.link}>Back to signing in</Text>
+            </Pressable>
+          </>
+        ) : challenge ? (
           <>
             <Text style={s.lead}>Pick a password for this account.</Text>
             <Field
@@ -151,10 +250,17 @@ export default function SignIn({ onSignedIn }) {
           <>
             <Field
               label="Email" value={email} onChangeText={setEmail}
+              placeholder="you@example.com.au"
               keyboardType="email-address" autoCapitalize="none" autoComplete="email"
               textContentType="username" returnKeyType="next"
               onSubmitEditing={() => passwordRef.current?.focus()}
             />
+            {/* Beside the password, not under the button: a man looks for the
+                way out at the field that beat him, and burying it means he
+                has already failed twice before he finds it. */}
+            <Pressable onPress={() => { setReset("ask"); setError(""); }} hitSlop={8} style={s.resetWrap}>
+              <Text style={s.link}>Reset password</Text>
+            </Pressable>
             <Field
               inputRef={passwordRef}
               label="Password" value={password} onChangeText={setPassword}
@@ -163,11 +269,10 @@ export default function SignIn({ onSignedIn }) {
             />
             {!!error && <Text style={s.error}>{error}</Text>}
             <Cta label={busy ? "Signing in…" : "Sign in"} onPress={submit} disabled={busy} />
-            <Text style={s.note}>One sign-in per phone — Face ID unlocks it after that.</Text>
+            <Text style={s.note}>Once only on this phone. Face ID after that.</Text>
           </>
         )}
 
-        <Text style={s.footer}>Same login as the Mr Sparky portal</Text>
       </ScrollView>
     </View>
   );
@@ -192,7 +297,9 @@ const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.bg },
   centre: { alignItems: "center", justifyContent: "center" },
   scroll: { padding: S.screen, paddingTop: 60, paddingBottom: 40 },
-  logoWrap: { alignItems: "center", marginBottom: 36 },
+  logoWrap: { alignItems: "center", marginBottom: 40 },
+  resetWrap: { alignSelf: "flex-end", marginTop: -4, marginBottom: 4 },
+  icon: { width: 138, height: 138, borderRadius: 31 },
   lead: { ...T.body, textAlign: "center", marginBottom: S.gap },
   input: {
     minHeight: S.touch, backgroundColor: C.panel, borderColor: C.line, borderWidth: 1,
@@ -205,5 +312,4 @@ const s = StyleSheet.create({
   note: { ...T.small, textAlign: "center", marginTop: 14 },
   linkWrap: { paddingVertical: 14, alignItems: "center" },
   link: { color: C.neutral, fontSize: 13.5, fontWeight: "600" },
-  footer: { ...T.small, textAlign: "center", marginTop: 34, opacity: 0.75 },
 });

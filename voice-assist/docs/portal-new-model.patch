@@ -1,0 +1,2267 @@
+diff --git a/api/index.mjs b/api/index.mjs
+index 8225242..b60769c 100644
+--- a/api/index.mjs
++++ b/api/index.mjs
+@@ -12,7 +12,7 @@
+  *  - Secrets are read from Secrets Manager at cold start, never from env vars.
+  *  - ServiceM8 access is GET-only (lib/servicem8.mjs implements nothing else).
+  */
+-import { buildStatement } from '../lib/commission.mjs';
++import { buildStatement, round2 } from '../lib/commission.mjs';
+ import * as sm8 from '../lib/servicem8.mjs';
+ import * as sheets from '../lib/sheets.mjs';
+ import { loadSettings, gstDivisor, contractorFor, contractorById, canIssueRcti } from '../lib/settings.mjs';
+@@ -34,6 +34,7 @@ import * as rcti from '../lib/rcti.mjs';
+ import * as business from '../lib/business.mjs';
+ import * as approval from '../lib/approval.mjs';
+ import * as abr from '../lib/abr.mjs';
++import * as compliance from '../lib/compliance.mjs';
+ 
+ const SECRET_ID = process.env.PORTAL_SECRET_ID || 'mr-sparky/portal';
+ const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 5 * 60 * 1000);
+@@ -142,7 +143,10 @@ async function loadData(settings) {
+         suburb: (j.job_address || '').split(',').slice(-3, -2).join('').trim() || (j.job_address || '').slice(0, 28),
+       }));
+ 
+-    cache = { at: Date.now(), data: { jobs: all, claims, pipelineJobs, allJobStatus: conv.statusIndex(everyJob), claimedOn: conv.claimIndex(claims) }, inflight: null };
++    // Which jobs have a JSA response — the compliance measure's "done" set.
++    // Empty until settings carry the JSA form uuid; compliance ships dark.
++    const jsaDone = compliance.formDoneKeys(forms, settings.compliance?.jsaFormUuid);
++    cache = { at: Date.now(), data: { jobs: all, claims, pipelineJobs, allJobStatus: conv.statusIndex(everyJob), claimedOn: conv.claimIndex(claims), jsaDone }, inflight: null };
+     return cache.data;
+   })().catch((e) => { cache.inflight = null; throw e; });
+   return cache.inflight;
+@@ -155,9 +159,56 @@ const involves = (contractor, forms) => {
+     names.includes(String(f['Job Completed By'] || '').toLowerCase().trim()));
+ };
+ 
++/** The changeover date from settings — the Form 001 era ends here. */
++const cutoffOf = (settings) => settings.changeover?.cutoffDate || null;
++
++/**
++ * Post-cutoff ownership: whoever completed the job owns it, read straight
++ * off ServiceM8's completer UUID. No form, no name matching, nothing kept in
++ * sync — the office reallocation that hands a job to someone else is the same
++ * event that changes this field.
++ */
++const ownsByCompletion = (job, person, cutoff) =>
++  !!(cutoff && job.date >= cutoff && person.sm8StaffUuid
++     && job.completedByUuid === person.sm8StaffUuid);
++
++/**
++ * Dress post-cutoff jobs in new-model figures, on CLONES — the job list is a
++ * shared cache and receipts are per-contractor, so mutating in place would
++ * leak one contractor's material figure into another's statement.
++ *
++ * Material under the new model: the sum of this job's payable receipts
++ * (voided excluded, credit notes negative, no photo = recorded but not paid)
++ * plus what the tech declared as own material with no receipt. The Job_Cost
++ * sheet still rules everything before the cutoff and is untouched here.
++ */
++function withNewModelFigures({ jobs, receiptRows, ownMaterialRows, cutoff }) {
++  if (!cutoff) return jobs;
++  const rByJob = receipts.byJob(receiptRows);
++  const matByJob = Object.fromEntries((ownMaterialRows || []).map((m) => [String(m.jobNumber), m]));
++  return jobs.map(({ job, forms }) => {
++    if (!job.date || job.date < cutoff) return { job, forms };
++    const evidenced = receipts.payableMaterialIncGst(rByJob[String(job.jobNumber)] || []);
++    const declared = Number(matByJob[String(job.jobNumber)]?.amountIncGst) || 0;
++    return {
++      forms,
++      job: {
++        ...job,
++        expenseIncGst: evidenced,
++        ownMaterialIncGst: declared,
++        // Receipts are live data, not a sheet someone may not have typed into
++        // yet — "unconfirmed" is an old-model concept.
++        expenseUnknown: false,
++        materialsUnconfirmed: false,
++      },
++    };
++  });
++}
++
+ async function statementFor(name, personId = null) {
+   const settings = await current();
+   const GST = gstOf(settings);
++  const cutoff = cutoffOf(settings);
+   // By id where we have one: two people may share a name (an owner login and a
+   // subcontractor login for the same person), and a name lookup returns only
+   // the first of them.
+@@ -171,20 +222,22 @@ async function statementFor(name, personId = null) {
+   // as "waiting on Form 001" rather than silently not existing. (Job 167570
+   // vanished exactly this way.) The claim is only used to make the job
+   // VISIBLE; the engine still refuses to pay it until the form arrives.
++  // After the cutoff the completer UUID is the attribution, and the claim
++  // fallback covers jobs whose completer field came back empty.
+   const own = all.filter(({ job, forms }) => involves(contractor, forms)
++    || ownsByCompletion(job, person, cutoff)
+     || (forms.length === 0 && person.telegramId
+         && loaded.claimedOn[job.jobNumber]?.telegramId === person.telegramId));
+-  const statement = buildStatement({ contractor, jobs: own, allJobs: all, gstDivisor: GST, duplicatePolicy: settings.formPolicy?.duplicates || 'last' });
+ 
+-  const [claims, adjustments, retentionBalance, receiptRows] = await Promise.all([
++  // Receipts and declared own material come BEFORE the statement now: under
++  // the new model they are the material figure, not a cross-check after it.
++  const [claims, adjustments, retentionBalance, receiptRows, ownMaterialRows] = await Promise.all([
+     store.listClaims(contractor.id),
+     store.listAdjustments(contractor.id),
+     store.getRetention(contractor.id),
+     store.listReceipts(contractor.id).catch(() => []),
++    store.listOwnMaterial(contractor.id).catch(() => []),
+   ]);
+-  const receiptsByJob = receipts.byJob(receiptRows);
+-  const pending = pendingFor(adjustments, contractor.id);
+-  const already = claimedJobNumbers(claims);
+ 
+   // Conversion and the rung it earns. Every threshold comes from settings —
+   // the contractor's own ladder where one is set, the system template otherwise.
+@@ -204,6 +257,34 @@ async function statementFor(name, personId = null) {
+       })
+     : null;
+ 
++  // Compliance: 2 points of the rung hang on ≥80% of jobs completing every
++  // required item, measured on the same window as conversion and floored at
++  // the changeover. Null until there is something to measure — no penalty
++  // during the qualifying period — and dark until settings name the JSA form.
++  const compliancePolicy = compliance.policyFor(settings);
++  const complianceState = record.claimed >= ladder.minimumClaims
++    ? compliance.complianceAssessment({
++        policy: compliancePolicy,
++        rate: compliance.complianceRate({
++          jobs: own.map((x) => x.job), policy: compliancePolicy,
++          jsaDone: loaded.jsaDone || new Set(),
++          windowStart: conv.windowStart(ladder.windowDays), cutoffDate: cutoff,
++        }),
++      })
++    : null;
++
++  const statement = buildStatement({
++    contractor,
++    jobs: withNewModelFigures({ jobs: own, receiptRows, ownMaterialRows, cutoff }),
++    allJobs: all, gstDivisor: GST,
++    duplicatePolicy: settings.formPolicy?.duplicates || 'last',
++    cutoffDate: cutoff,
++    compliance: complianceState,
++  });
++  const receiptsByJob = receipts.byJob(receiptRows);
++  const pending = pendingFor(adjustments, contractor.id);
++  const already = claimedJobNumbers(claims);
++
+   return {
+     claims: claims.map((c) => ({
+       claimId: c.claimId, status: c.status, submittedAt: c.submittedAt,
+@@ -246,6 +327,22 @@ async function statementFor(name, personId = null) {
+       }];
+     })),
+     conversion: record,
++    // The paperwork dial beside the conversion dial. Null = unmeasured (dark
++    // or qualifying), so the client never shows a penalty nobody earned.
++    compliance: complianceState,
++    ownMaterial: Object.fromEntries((ownMaterialRows || []).map((m) => [String(m.jobNumber), {
++      amountIncGst: m.amountIncGst, declaredAt: m.declaredAt,
++    }])),
++    // EVERY receipt this contractor has filed, whatever job it landed on —
++    // the per-job `receipts` map above only covers jobs on the statement,
++    // and a docket is filed from a Work Order weeks before the job gets
++    // there. This is what the job card's materials list reads.
++    myReceipts: receiptRows.map((r) => ({
++      id: r.id, jobNumber: r.jobNumber, supplier: r.supplier, amountIncGst: r.amountIncGst,
++      date: r.date, invoiceNumber: r.invoiceNumber, imageKey: r.imageKey || null,
++      voided: !!r.voided, disputed: !!r.disputed,
++    })),
++    ownMaterialCapIncGst: receipts.ownMaterialCapFor(settings, contractor.id),
+     ladder: assessment ? {
+       ...assessment,
+       rungs: ladder.rungs.map((r, i) => ({
+@@ -405,6 +502,16 @@ export async function handler(event) {
+         return json(400, { error: 'The declaration must be accepted before a claim can be submitted' });
+       }
+ 
++      // Unsigned means unable to claim: with no signed terms there is nothing
++      // to be paid under. Dark until settings.contracts.required is switched
++      // on, so nobody is locked out before contracts exist to sign.
++      if (settings.contracts?.required) {
++        const contract = await store.currentContract(contractor.id).catch(() => null);
++        if (!contract) {
++          return json(403, { error: 'No signed contract on file — the office needs to lock one in before claims can be submitted' });
++        }
++      }
++
+       const data = await statementFor(target);
+       const wanted = new Set((body.jobNumbers || []).map(String));
+       const wantHelp = !!body.includeHelpingHand;
+@@ -725,6 +832,43 @@ export async function handler(event) {
+       return json(201, { receipt, reuse: check.reuse ? check : null });
+     }
+ 
++    // "Own material, no receipt" — the tech's declared van-stock material for
++    // one job. Bought earlier in bulk, so no per-job docket exists or ever
++    // can; an honesty-based figure, capped. The CAP is the rule the tech has
++    // to live inside ($50 default, per-contractor, zero = receipts only) so
++    // it is enforced here; the 5%-of-invoice check is a review FLAG on the
++    // approval panel, deliberately not a gate — a refusal on site just
++    // teaches under-declaring and loses the data.
++    if (path === '/api/material/declare' && method === 'POST') {
++      const body = safeJson(event.body, event.isBase64Encoded);
++      const target = who.isAdmin && body.name ? body.name : who.person.name;
++      const contractor = contractorFor(settings, target);
++      if (!contractor) return json(404, { error: 'No such contractor' });
++
++      const amount = Number(body.amountIncGst);
++      if (!Number.isFinite(amount) || amount < 0) {
++        return json(400, { error: 'An amount is required (zero clears the declaration)' });
++      }
++      const cap = receipts.ownMaterialCapFor(settings, contractor.id);
++      if (amount > cap) {
++        return json(400, {
++          error: cap === 0
++            ? 'Own material is receipts-only on this account — upload the docket instead'
++            : `Own material is capped at $${cap.toFixed(2)} a job. Anything above that needs a receipt.`,
++          cap,
++        });
++      }
++      const loaded = await loadData(settings);
++      if (!loaded.allJobStatus[String(body.jobNumber)]) {
++        return json(400, { error: `No job ${body.jobNumber} in ServiceM8` });
++      }
++      const saved = await store.saveOwnMaterial({
++        contractorId: contractor.id, jobNumber: body.jobNumber,
++        amountIncGst: round2(amount), by: who.person.id,
++      });
++      return json(201, { declared: saved, cap });
++    }
++
+     // A short-lived URL to upload the photo straight to a private bucket, so
+     // the image never passes through this function.
+     // Query a receipt, or clear it. Admin only, and it NEVER deletes: the row
+@@ -773,6 +917,154 @@ export async function handler(event) {
+       return json(201, { adjustment });
+     }
+ 
++    // Move a receipt onto the job it actually belongs to.
++    //
++    // The gap Steven found: once a docket is filed against the wrong job, the
++    // duplicate check refuses the right one — and the check has no admin
++    // exemption, so the office could not file it either. The correct job never
++    // got its receipt.
++    //
++    // Moving rather than re-filing is the point. One piece of paper is one
++    // record; it keeps its photo, its amount, who lodged it and when, and it
++    // gains a note of where it came from. Nothing is duplicated because
++    // nothing was ever duplicated — it was only ever in the wrong place.
++    //
++    // NOBODY IS NOTIFIED, and that is deliberate. Steven's reasoning, which is
++    // better than the notification I proposed: both jobs belong to the same
++    // technician, so it is the same expense reimbursed to the same person
++    // whichever job carries it. The payout is identical, so telling them a
++    // record moved is noise.
++    //
++    // What the move actually buys is reconciliation. The Form 001 check is PER
++    // JOB, so a misfiled docket leaves one job over-evidenced and the other
++    // short — both past tolerance, both raising needsAdmin, both then chased by
++    // somebody. That is an office-time cost, not a pay one.
++    //
++    // A receipt crossing between DIFFERENT technicians is not this. That is a
++    // fraud question, it is never mentioned to either of them, and it surfaces
++    // only on the owner's dashboard — see docketFlags().
++    if (path === '/api/receipts/move' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      if (!body.contractorId || !body.fromJobNumber || !body.receiptId || !body.toJobNumber) {
++        return json(400, { error: 'contractorId, fromJobNumber, receiptId and toJobNumber are all required' });
++      }
++      if (String(body.fromJobNumber) === String(body.toJobNumber)) {
++        return json(400, { error: 'That receipt is already on that job' });
++      }
++      // The destination has to be a real job, same rule the save route applies.
++      const loaded = await loadData(settings);
++      if (!loaded.allJobStatus[String(body.toJobNumber)]) {
++        return json(400, { error: `No job ${body.toJobNumber} in ServiceM8` });
++      }
++      try {
++        const moved = await store.moveReceipt(
++          body.contractorId, String(body.fromJobNumber), body.receiptId,
++          String(body.toJobNumber), who.person.name,
++        );
++        return json(200, { receipt: moved });
++      } catch (e) {
++        return json(404, { error: e.message });
++      }
++    }
++
++    // Void a receipt, or bring it back. Never deletes: the row and its photo
++    // stay, marked, so "this should not have existed" is itself on the record.
++    if (path === '/api/receipts/void' && method === 'POST') {
++      const body = safeJson(event.body, event.isBase64Encoded);
++      // A subbie may void their OWN mistaken upload — wrong photo, wrong
++      // docket — but only while the job is not on a claim. Once money has
++      // been claimed against it, pulling evidence back out is exactly what
++      // the office should look at first, so it goes through them. Never a
++      // delete either way: the row and its photo stay on file, marked.
++      let contractorId = body.contractorId;
++      if (!who.isAdmin) {
++        const own = contractorFor(settings, who.person.name);
++        if (!own) return json(403, { error: 'No contractor record for this login' });
++        if (contractorId && contractorId !== own.id) {
++          return json(403, { error: 'Only your own receipts' });
++        }
++        contractorId = own.id;
++        const myClaims = await store.listClaims(own.id).catch(() => []);
++        if (claimedJobNumbers(myClaims).has(String(body.jobNumber))) {
++          return json(403, { error: 'That job is already on a claim — ask the office to sort the receipt' });
++        }
++      }
++      if (!contractorId || !body.jobNumber || !body.receiptId) {
++        return json(400, { error: 'contractorId, jobNumber and receiptId are all required' });
++      }
++      const voiding = body.voided !== false;
++      // A void removes money from a claim. It has to say why, on the record.
++      if (voiding && !String(body.reason || '').trim()) {
++        return json(400, { error: 'Say why it is being voided — it comes off what gets paid' });
++      }
++      try {
++        const updated = await store.setReceiptVoided(
++          contractorId, String(body.jobNumber), body.receiptId,
++          voiding, who.person.name, String(body.reason || '').trim() || null,
++        );
++        return json(200, { receipt: updated });
++      } catch (e) {
++        return json(404, { error: `That receipt is no longer there: ${e.message}` });
++      }
++    }
++
++    // Settings are the contract; these two routes are the signature.
++    //
++    // Upload the signed PDF (presigned, private bucket), then lock it. The
++    // lock row snapshots the contract terms AS THEY STAND — commission rules,
++    // retention policy, warranty terms, own-material cap — so a dispute in a
++    // year is answered by the row, not by archaeology on today's settings.
++    // An amendment is simply a later lock: new terms, new signature, forward
++    // only, because the engine dates everything by rule versions anyway.
++    if (path === '/api/contract/upload-url' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      const contractor = contractorById(settings, body.contractorId);
++      if (!contractor) return json(404, { error: 'No such contractor' });
++      const key = `contracts/${contractor.id}/${Date.now()}.pdf`;
++      const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
++      const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
++      const url = await getSignedUrl(new S3Client({}),
++        new PutObjectCommand({ Bucket: RECEIPT_BUCKET, Key: key, ContentType: 'application/pdf' }),
++        { expiresIn: 300 });
++      return json(200, { uploadUrl: url, docKey: key });
++    }
++
++    if (path === '/api/contract/lock' && method === 'POST') {
++      if (!who.isAdmin) return json(403, { error: 'Admins only' });
++      const body = safeJson(event.body, event.isBase64Encoded);
++      const contractor = contractorById(settings, body.contractorId);
++      if (!contractor) return json(404, { error: 'No such contractor' });
++      if (!body.docKey) return json(400, { error: 'Upload the signed document first — the lock records it' });
++      const locked = await store.saveContract({
++        contractorId: contractor.id,
++        docKey: body.docKey,
++        signedBy: who.person.id,
++        note: body.note || null,
++        terms: {
++          commissionRules: settings.commissionRules[contractor.id] || [],
++          retention: policyFor(settings, contractor.id),
++          warranty: { ...(settings.warranty || {}), ...(settings.warranty?.byContractor?.[contractor.id] || {}) },
++          ownMaterialCapIncGst: receipts.ownMaterialCapFor(settings, contractor.id),
++          ladder: ladderFor(settings, settings.people.find((p) => p.id === contractor.id) || {}),
++        },
++      });
++      return json(201, { contract: locked });
++    }
++
++    if (path === '/api/contract' && method === 'GET') {
++      const id = event?.queryStringParameters?.contractorId
++        || contractorFor(settings, who.person.name)?.id;
++      if (!id) return json(404, { error: 'No such contractor' });
++      // A subbie may read their own contract; only admins may read anyone's.
++      if (!who.isAdmin && contractorFor(settings, who.person.name)?.id !== id) {
++        return json(403, { error: 'Not yours to read' });
++      }
++      const contract = await store.currentContract(id).catch(() => null);
++      return json(200, { contract, required: !!settings.contracts?.required });
++    }
++
+     if (path === '/api/receipts/upload-url' && method === 'POST') {
+       const body = safeJson(event.body, event.isBase64Encoded);
+       const target = who.isAdmin && body.name ? body.name : who.person.name;
+@@ -853,16 +1145,18 @@ export async function handler(event) {
+       const statements = {}, claimsByOwner = {}, conversions = {}, unfinished = {};
+       const receiptsByContractor = {};
+       const claimedNumbers = new Set();
++      const cutoff = cutoffOf(settings);
+       await Promise.all(contractors.map(async (c) => {
+         const cPerson = settings.people.find((p) => p.id === c.id) || {};
+-        // Same visibility rule as the statement: a formless completed job
+-        // belongs to whoever accepted the lead, shown as awaiting its form.
++        // Same visibility rules as the statement: a formless completed job
++        // belongs to whoever accepted the lead (awaiting its form), and after
++        // the cutoff the completer UUID is the attribution.
+         const own = loaded.jobs.filter(({ job, forms }) => involves(c, forms)
++          || ownsByCompletion(job, cPerson, cutoff)
+           || (forms.length === 0 && cPerson.telegramId
+               && loaded.claimedOn[job.jobNumber]?.telegramId === cPerson.telegramId));
+-        statements[c.id] = buildStatement({ contractor: c, jobs: own, allJobs: loaded.jobs, gstDivisor: GST,
+-          duplicatePolicy: settings.formPolicy?.duplicates || 'last' });
+         receiptsByContractor[c.id] = await store.listReceipts(c.id).catch(() => []);
++        const ownMaterialRows = await store.listOwnMaterial(c.id).catch(() => []);
+         const claims = await store.listClaims(c.id).catch(() => []);
+         claimsByOwner[c.id] = claims.map((x) => ({
+           ...x,
+@@ -870,18 +1164,38 @@ export async function handler(event) {
+           review: reviewState({ claim: x, approvalDays: Number(settings.payment?.approvalDays) || 7 }),
+         }));
+         for (const n of claimedJobNumbers(claims)) claimedNumbers.add(n);
+-        const person = settings.people.find((p) => p.id === c.id) || {};
+         // Measured on THEIR ladder — a contractor with custom terms is judged
+         // by them here too, not just at review time.
+-        const ownLadder = ladderFor(settings, person);
++        const ownLadder = ladderFor(settings, cPerson);
+         unfinished[c.id] = approval.neverFinished({
+-          claims: loaded.claims, statusOf: loaded.allJobStatus, telegramId: person.telegramId,
++          claims: loaded.claims, statusOf: loaded.allJobStatus, telegramId: cPerson.telegramId,
+           olderThanDays: Number(ownLadder.staleQuoteDays) || 30,
+         });
+         conversions[c.id] = conv.conversionFor({
+-          claims: loaded.claims, telegramId: person.telegramId, statusOf: loaded.allJobStatus,
++          claims: loaded.claims, telegramId: cPerson.telegramId, statusOf: loaded.allJobStatus,
+           since: conv.windowStart(ownLadder.windowDays), staleQuoteDays: ownLadder.staleQuoteDays,
+         });
++        // The same compliance the subbie's own statement applies — the two
++        // faces must never disagree about what a job pays.
++        const cPolicy = compliance.policyFor(settings);
++        const cState = (conversions[c.id].claimed || 0) >= ownLadder.minimumClaims
++          ? compliance.complianceAssessment({
++              policy: cPolicy,
++              rate: compliance.complianceRate({
++                jobs: own.map((x) => x.job), policy: cPolicy,
++                jsaDone: loaded.jsaDone || new Set(),
++                windowStart: conv.windowStart(ownLadder.windowDays), cutoffDate: cutoff,
++              }),
++            })
++          : null;
++        statements[c.id] = buildStatement({
++          contractor: c,
++          jobs: withNewModelFigures({ jobs: own, receiptRows: receiptsByContractor[c.id], ownMaterialRows, cutoff }),
++          allJobs: loaded.jobs, gstDivisor: GST,
++          duplicatePolicy: settings.formPolicy?.duplicates || 'last',
++          cutoffDate: cutoff,
++          compliance: cState,
++        });
+       }));
+ 
+       const today = new Date().toISOString().slice(0, 10);
+@@ -922,7 +1236,22 @@ export async function handler(event) {
+       // Current subbies first, then the owner, then people who have left.
+       const rank = (p) => (p.role === 'Subbie' ? 0 : p.role === 'Owner' ? 1 : 2);
+       listed.sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name));
+-      return json(200, { people: listed });
++      // The live ServiceM8 staff list rides along for the onboarding picker —
++      // identity is chosen by tap, never typed, and this route already exists
++      // so no gateway change is needed. Best-effort: onboarding without SM8
++      // reachable degrades to the picker saying so, not the page dying.
++      let sm8Staff = [];
++      try {
++        const { servicem8TechApiKey } = await secrets();
++        const staff = await sm8.getStaff(servicem8TechApiKey);
++        sm8Staff = staff.map((s) => ({
++          uuid: s.uuid,
++          name: `${s.first || ''} ${s.last || ''}`.trim(),
++          active: String(s.active) === '1',
++          email: s.email || null,
++        }));
++      } catch (e) { console.warn('sm8 staff unavailable for onboarding:', e.message); }
++      return json(200, { people: listed, sm8Staff });
+     }
+ 
+     return json(404, { error: `No route for ${method} ${path}` });
+diff --git a/api/shell.mjs b/api/shell.mjs
+index 7bae839..ac4322f 100644
+--- a/api/shell.mjs
++++ b/api/shell.mjs
+@@ -91,6 +91,8 @@ button.row{cursor:pointer}button.row:hover{background:var(--zebra)}
+ .grow{flex:1;min-width:0}.ttl{font-weight:600}
+ .sub{font-size:12px;color:var(--muted)}
+ .amt{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap;text-align:right}
++/* A voided receipt is struck through, not hidden — nothing here is deleted. */
++.amt.dim{opacity:.45;text-decoration:line-through}
+ .chev{color:var(--blue-soft);font-weight:700}
+ .dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin:0 2px}
+ .dot.ok{background:var(--good)}
+@@ -204,6 +206,11 @@ let SETSEC=null,SETSUB=null,ABRSTATUS=null;
+ /* The suppliers list while it is being edited: the rows live here rather than
+    in the DOM, so adding one never loses what was typed into the others. */
+ let SUPP=null;
++/* Onboarding + contracts. ONBOARD.staff is the live ServiceM8 list, fetched
++   on entering the section; CONTRACT caches one signed-contract lookup per
++   contractor so a card asks once, not on every render. */
++let ONBOARD=null;
++let CONTRACT={};
+ let OPENM={},OPENY=new Set(),MINIT=new Set(),Q='',BIZ=null;
+ let SEC=null,SCROLLTO=null;   // one open section at a time
+ 
+@@ -625,6 +632,8 @@ function settingsView(){
+   return SETSEC==='suppliers' ? suppliersSection()
+     : SETSEC==='subbies' ? subbiesSection()
+     : SETSEC==='subbie' ? subbieSection(SETSUB)
++    : SETSEC==='addsubbie' ? addSubbieSection()
++    : SETSEC==='changeover' ? changeoverSection()
+     : SETSEC==='users' ? usersSection()
+     : SETSEC==='template' ? templateSection()
+     : SETSEC==='money' ? moneySection()
+@@ -670,6 +679,9 @@ function settingsHome(){
+    +card('users','users','ic-slate','Users &amp; roles',S.people.length+' people can sign in')
+    +card('template','ladder','ic-violet','Commission template','New subbies start on '+((L.rungs||[{rates:{quoted_and_completed:'?'}}])[0].rates.quoted_and_completed)+'&ndash;'+topRate+'%')
+    +card('money','money','ic-green','Invoicing &amp; money','GST '+esc((S.tax||{}).gstRatePercent)+'% &middot; retention &middot; warranty')
++   +card('changeover','ladder','ic-orange','Changeover &amp; caps',
++     ((S.changeover||{}).cutoffDate?'New model from '+esc(S.changeover.cutoffDate):'Not set &mdash; old model everywhere')
++     +' &middot; cap $'+esc((S.vanStock||{}).defaultCapIncGst!=null?(S.vanStock||{}).defaultCapIncGst:50))
+    +card('suppliers','shop','ic-rose','Suppliers',((SETTINGS.suppliers||[]).length)+' on the list &middot; chips on the receipt form')
+    +card('integrations','plug','ic-teal','Integrations','ServiceM8 &middot; Sheets &middot; ABN &middot; Telegram')
+    +'</div>';
+@@ -772,6 +784,8 @@ function templateSection(){
+ function subbiesSection(){
+   const S=SETTINGS.settings;
+   let h=setBack('Subcontractors');
++  h+='<div style="margin-bottom:12px"><button class="act" data-addsubbie="1">Add a contractor</button> '
++   +'<span class="sub">picked from ServiceM8, terms set on the spot</span></div>';
+   h+='<div class="card">';
+   for(const p of S.people.filter(function(x){return x.role==='Subbie'})){
+     const co=(S.companies||[]).find(function(c){return c.id===p.companyId})||{};
+@@ -781,7 +795,7 @@ function subbiesSection(){
+      +(p.commissionLadder?'<span class="pill info">custom commission</span>':'<span class="pill grey">default commission</span>')
+      +(p.status&&p.status!=='Active'?' <span class="pill warn">'+esc(p.status)+'</span>':'')
+      +'<div class="sub">'+esc(co.name||'no business record')
+-     +(live?' &middot; '+live.rates.quoted_and_completed+'% since '+esc(live.from):'')+'</div></span>'
++     +(live?' &middot; '+(live.rates.rate!=null?live.rates.rate:live.rates.quoted_and_completed)+'% since '+esc(live.from):'')+'</div></span>'
+      +'<span class="chev">&rsaquo;</span></button>';
+   }
+   h+='</div>';
+@@ -816,7 +830,7 @@ function subbieSection(id){
+ 
+   h+='<div class="card" style="padding:13px 15px;margin-bottom:12px">'
+    +'<div class="sub">'+esc(p.email||'no email')+' &middot; rung '+((p.ladderIndex|0)+1)
+-   +(live?' &middot; '+live.rates.quoted_and_completed+'% since '+esc(live.from):' &middot; no rate on record')
++   +(live?' &middot; '+(live.rates.rate!=null?live.rates.rate:live.rates.quoted_and_completed)+'% since '+esc(live.from):' &middot; no rate on record')
+    +(p.belowForPeriods?' &middot; '+p.belowForPeriods+' review(s) below their rung':'')+'</div>'
+    +(co?'<div style="margin-top:8px"><button class="mini" data-editco="'+esc(co.id)+'">'
+      +esc(co.tradingName||co.name)+' — business record</button></div>':'')
+@@ -835,12 +849,14 @@ function subbieSection(id){
+    +(hasOwn?'<button class="act ghost" data-resetladder="'+esc(p.id)+'">Reset to system default</button>':'')
+    +'<span class="sub" id="setMsg"></span></div>';
+ 
++  h+=contractCard(p.id);
++
+   if(rules.length){
+     h+='<h3 style="font-size:14px;margin:22px 0 8px">Rate history</h3><div class="card">'
+      +rules.slice().reverse().map(function(r){
+        return '<div class="calcrow"><span class="lbl">'+esc(r.from)
+         +'<div class="sub">'+esc(r.note||r.type||'')+'</div></span>'
+-        +'<span class="val">'+r.rates.quoted_and_completed+'%</span></div>';
++        +'<span class="val">'+(r.rates.rate!=null?r.rates.rate:r.rates.quoted_and_completed)+'%</span></div>';
+      }).join('')+'</div>';
+   }
+   return h;
+@@ -935,6 +951,223 @@ function saveSuppliers(){
+   });
+ }
+ 
++/* ── Changeover & caps ─────────────────────────────────────────────────
++   THE switch. Until the cutoff date exists every job calculates on the old
++   Form 001 model whatever code is deployed; from that date completion pays,
++   the completer owns the job, and material comes from receipts plus the
++   declared own-material figure, capped here. */
++function changeoverSection(){
++  const S=SETTINGS.settings, C2=S.changeover||{}, VS=S.vanStock||{};
++  const by=VS.byContractor||{};
++  let h=setBack('Changeover &amp; caps');
++  h+='<div class="warnbox" style="margin-bottom:12px"><b>The date below is the switch.</b> '
++   +'Empty means the old model everywhere. Setting it moves every job completed on or after it '
++   +'to the new model: no Form 001, the completer owns the job, receipts pay. '
++   +'Set it once, deliberately &mdash; the go-live script does this plus the rule versions in one pass.</div>';
++  h+='<div class="card">'
++   +'<div class="calcrow"><span class="lbl">Changeover date'
++   +'<div class="sub" style="font-size:11.5px">YYYY-MM-DD &middot; jobs completed on or after calculate on the new model</div></span>'
++   +'<span class="val"><input id="c_d" value="'+esc(C2.cutoffDate||'')+'" placeholder="2026-08-14" '
++   +'style="width:120px;text-align:right;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);font:inherit"></span></div>'
++   +'</div>';
++  h+='<h3 style="font-size:13px;margin:18px 0 8px">Own material, no receipt</h3><div class="card">'
++   +numInput('c_cap','Default cap inc GST',VS.defaultCapIncGst!=null?VS.defaultCapIncGst:50,'Van stock declared on trust, per job')
++   +numInput('c_flag','Review flag (% of invoice)',VS.flagPercentOfInvoice!=null?VS.flagPercentOfInvoice:5,'Over this share lands on the approval panel &mdash; a flag, never a gate')
++   +'</div>';
++  h+='<h3 style="font-size:13px;margin:18px 0 8px">Per-contractor caps</h3><div class="card">';
++  for(const p of S.people.filter(function(x){return x.role==='Subbie'})){
++    h+='<div class="calcrow"><span class="lbl">'+esc(p.name)
++     +'<div class="sub" style="font-size:11.5px">'+(by[p.id]!=null?(Number(by[p.id])===0?'receipts only':'own cap'):'follows the default')+'</div></span>'
++     +'<span class="val"><input id="cap_'+esc(p.id)+'" value="'+esc(by[p.id]!=null?by[p.id]:'')+'" placeholder="default" '
++     +'style="width:90px;text-align:right;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);font:inherit"></span></div>';
++  }
++  h+='</div><div class="sub" style="margin-top:8px">Blank follows the default. Zero is a real value &mdash; receipts only, for anyone not yet trusted.</div>';
++  h+='<div class="card" style="margin-top:12px;padding:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
++   +'<button class="act" data-savechangeover="1">Save</button>'
++   +'<span class="sub" id="setMsg"></span></div>';
++  return h;
++}
++
++function saveChangeover(){
++  return withSaveMsg(async function(){
++    const S=SETTINGS.settings;
++    const date=v('c_d');
++    if(date&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error('The date needs to be YYYY-MM-DD');
++    const by={};
++    for(const p of S.people.filter(function(x){return x.role==='Subbie'})){
++      const raw=v('cap_'+p.id);
++      if(raw!=='')by[p.id]=Number(raw);
++    }
++    await putSettings({
++      changeover:{...S.changeover, cutoffDate:date||null},
++      vanStock:{...S.vanStock, defaultCapIncGst:n('c_cap'), flagPercentOfInvoice:n('c_flag'), byContractor:by},
++    },date?('Changeover set: new model from '+date):'Changeover cleared: old model everywhere');
++  });
++}
++
++/* ── Add contractor ────────────────────────────────────────────────────
++   Identity by tap: pick the person from the LIVE ServiceM8 staff list, so
++   the UUID that attribution matches on is fetched, never typed. One save
++   creates the settings person and their first rule. The Cognito login and
++   the business record are deliberate follow-ups, named on screen. */
++function addSubbieSection(){
++  const S=SETTINGS.settings;
++  if(!ONBOARD)ONBOARD={staff:null,pick:null,err:null};
++  if(ONBOARD.staff===null&&!ONBOARD.err){loadOnboardStaff()}
++  let h='<button class="act ghost" data-setsec="subbies" style="margin-bottom:12px">&lsaquo; Subcontractors</button>'
++   +'<h3 style="font-size:15px;margin:0 0 10px">Add a contractor</h3>';
++  const taken=new Set(S.people.map(function(p){return p.sm8StaffUuid}).filter(Boolean));
++  h+='<div class="card" style="padding:13px 15px;margin-bottom:12px"><div class="sub">'
++   +'Pick them from ServiceM8 &mdash; the staff UUID is what the money follows after the changeover, '
++   +'so it is chosen by tap, never typed. They must exist in ServiceM8 first.</div></div>';
++  if(ONBOARD.err){
++    h+='<div class="warnbox">ServiceM8 staff list unavailable: '+esc(ONBOARD.err)+'</div>';
++  } else if(ONBOARD.staff===null){
++    h+='<div class="card" style="padding:18px;text-align:center;color:var(--muted)">Fetching the ServiceM8 staff list&hellip;</div>';
++  } else {
++    h+='<div class="card">';
++    const free=ONBOARD.staff.filter(function(s){return s.active&&!taken.has(s.uuid)});
++    for(const s of free){
++      const on=ONBOARD.pick&&ONBOARD.pick.uuid===s.uuid;
++      h+='<button class="row" data-obpick="'+esc(s.uuid)+'"><span class="grow"><span class="ttl">'+esc(s.name)+'</span>'
++       +'<div class="sub">'+esc(s.email||'no email in ServiceM8')+'</div></span>'
++       +(on?'<span class="pill ok">selected</span>':'<span class="chev">&rsaquo;</span>')+'</button>';
++    }
++    if(!free.length)h+='<div class="sub" style="padding:14px">Every active ServiceM8 staff member is already set up here.</div>';
++    h+='</div>';
++  }
++  if(ONBOARD.pick){
++    const L=S.commissionLadder||{};
++    const startRate=(L.rungs&&L.rungs.length)?(L.rungs[0].rates.rate!=null?L.rungs[0].rates.rate:L.rungs[0].rates.quoted_and_completed):50;
++    const today=new Date().toISOString().slice(0,10);
++    const inp=(id,val,w,ph)=>'<input id="'+id+'" value="'+esc(val)+'" placeholder="'+(ph||'')+'" '
++     +'style="width:'+w+';padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);font:inherit">';
++    h+='<h3 style="font-size:13px;margin:18px 0 8px">Their terms</h3><div class="card">'
++     +'<div class="calcrow"><span class="lbl">Name</span><span class="val">'+inp('ob_n',ONBOARD.pick.name,'190px')+'</span></div>'
++     +'<div class="calcrow"><span class="lbl">Email<div class="sub" style="font-size:11.5px">Their portal login is created with this address</div></span>'
++     +'<span class="val">'+inp('ob_e',ONBOARD.pick.email||'','190px','name@example.com')+'</span></div>'
++     +'<div class="calcrow"><span class="lbl">Start date<div class="sub" style="font-size:11.5px">Their rule takes effect from here</div></span>'
++     +'<span class="val">'+inp('ob_d',today,'120px')+'</span></div>'
++     +'<div class="calcrow"><span class="lbl">Starting rate (%)<div class="sub" style="font-size:11.5px">Rung 0 of the ladder unless negotiated</div></span>'
++     +'<span class="val">'+inp('ob_r',startRate,'70px')+'</span></div>'
++     +'<div class="calcrow"><span class="lbl">Own-material cap<div class="sub" style="font-size:11.5px">Blank = default &middot; zero = receipts only</div></span>'
++     +'<span class="val">'+inp('ob_c','','90px','default')+'</span></div>'
++     +'</div>';
++    h+='<div class="card" style="margin-top:12px;padding:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
++     +'<button class="act" data-onboard="1">Create contractor</button>'
++     +'<span class="sub" id="setMsg"></span></div>';
++    h+='<div class="card" style="margin-top:12px;padding:13px 15px"><div class="sub"><b>After this save, two follow-ups:</b> '
++     +'create their portal login in Cognito with the same email, and add their business record '
++     +'(ABN, bank, RCTI agreement) from the Subcontractors page. They cannot claim until a signed contract is locked on their page.</div></div>';
++  }
++  return h;
++}
++
++async function loadOnboardStaff(){
++  try{
++    const r=await api('/api/contractors');
++    ONBOARD.staff=r.sm8Staff||[];
++    if(!ONBOARD.staff.length)ONBOARD.err='ServiceM8 returned nobody';
++  }catch(e){ONBOARD.err=e.message||'unreachable'}
++  if(TAB==='settings'&&SETSEC==='addsubbie')render();
++}
++
++function obPick(uuid){
++  ONBOARD.pick=(ONBOARD.staff||[]).find(function(s){return s.uuid===uuid})||null;
++  render();
++}
++
++function saveOnboard(){
++  return withSaveMsg(async function(){
++    const S=SETTINGS.settings;
++    const pick=ONBOARD&&ONBOARD.pick;
++    if(!pick)throw new Error('Pick them from the ServiceM8 list first');
++    const name=v('ob_n'); if(!name)throw new Error('A name is required');
++    const date=v('ob_d');
++    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error('The start date needs to be YYYY-MM-DD');
++    const rate=n('ob_r');
++    if(!(rate>0&&rate<=100))throw new Error('The starting rate needs to be a percentage');
++    /* A readable id from the name, made unique against everyone existing. */
++    let base='p-'+name.toLowerCase().replace(/[^a-z ]/g,'').trim().split(/ +/).map(function(w,i,a){return i===a.length-1?w.slice(0,3):w[0]}).join('');
++    let id=base,k=2;
++    while(S.people.some(function(p){return p.id===id})){id=base+k;k++}
++    const person={id:id,name:name,email:v('ob_e')||undefined,role:'Subbie',status:'Active',sm8StaffUuid:pick.uuid};
++    const rule={from:date,type:'fixed',rates:{rate:rate},materialsFundedBy:'subbie',
++      note:'Onboarded via the portal — ladder rung 0'+(rate!==50?' (negotiated '+rate+'%)':'')};
++    const patch={
++      people:S.people.concat([person]),
++      commissionRules:{...S.commissionRules,[id]:[rule]},
++    };
++    const cap=v('ob_c');
++    if(cap!==''){
++      patch.vanStock={...S.vanStock,byContractor:{...((S.vanStock||{}).byContractor||{}),[id]:Number(cap)}};
++    }
++    await putSettings(patch,'Onboarded '+name+' — '+rate+'% from '+date+', subbie-funded material');
++    ONBOARD=null;SETSEC='subbies';
++  });
++}
++
++/* ── Signed contract, per contractor ───────────────────────────────────
++   Settings are the contract; this is the signature. The lock snapshots the
++   terms as they stand, so "what did they sign?" is a read, not archaeology. */
++async function fetchContract(id){
++  try{
++    const r=await api('/api/contract?contractorId='+encodeURIComponent(id));
++    CONTRACT[id]=r.contract||false;   // false = checked, none on file
++  }catch(e){CONTRACT[id]=false}
++  if(TAB==='settings'&&SETSEC==='subbie'&&SETSUB===id)render();
++}
++
++function contractCard(id){
++  const c=CONTRACT[id];
++  if(c===undefined){CONTRACT[id]='loading';fetchContract(id)}
++  let h='<h3 style="font-size:14px;margin:22px 0 8px">Signed contract</h3><div class="card" style="padding:13px 15px">';
++  if(c===undefined||c==='loading'){
++    h+='<div class="sub">Checking&hellip;</div>';
++  } else if(c&&c.signedAt){
++    h+='<span class="pill ok">locked</span> <span class="sub">Signed '+esc(String(c.signedAt).slice(0,10))
++     +(c.note?' &middot; '+esc(c.note):'')+' &middot; terms snapshotted at signing</div>'
++     +'<div class="sub" style="margin-top:8px">An amendment is a new signed document locked over this one &mdash; forward only, the old signing stays on file.</div>';
++  } else {
++    h+='<span class="pill warn">none on file</span> <span class="sub">No signed contract. '
++     +'Once contracts are required, they cannot claim until one is locked.</span>';
++  }
++  h+='<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
++   +'<input type="file" id="ctr_f" accept="application/pdf" style="font:inherit;color:var(--muted);max-width:230px">'
++   +'<input id="ctr_n" placeholder="note, e.g. v1 signed on site" style="padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);font:inherit;width:180px">'
++   +'<button class="act" data-lockcontract="'+esc(id)+'">Upload &amp; lock</button>'
++   +'<span class="sub" id="ctrMsg"></span></div></div>';
++  return h;
++}
++
++async function lockContract(id){
++  if(BUSY)return;BUSY=true;
++  const msg=document.getElementById('ctrMsg');
++  const fe=document.getElementById('ctr_f');
++  try{
++    const file=fe&&fe.files&&fe.files[0];
++    if(!file)throw new Error('Choose the signed PDF first');
++    if(msg){msg.style.color='';msg.textContent='Uploading…'}
++    const up=await fetch('/api/contract/upload-url',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:id})});
++    const uj=await up.json();
++    if(!up.ok)throw new Error(uj.error||'Could not get an upload link');
++    const put=await fetch(uj.uploadUrl,{method:'PUT',headers:{'content-type':'application/pdf'},body:file});
++    if(!put.ok)throw new Error('The upload itself failed ('+put.status+')');
++    if(msg){msg.textContent='Locking…'}
++    const lk=await fetch('/api/contract/lock',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:id,docKey:uj.docKey,note:(document.getElementById('ctr_n')||{}).value||null})});
++    const lj=await lk.json();
++    if(!lk.ok)throw new Error(lj.error||'Could not lock it');
++    CONTRACT[id]=lj.contract;
++    if(msg){msg.textContent='Locked.'}
++    render();
++  }catch(e){if(msg){msg.textContent=e.message;msg.style.color='var(--bad)'}}
++  finally{BUSY=false}
++}
++
+ function integrationsSection(){
+   let h=setBack('Integrations');
+   const rowi=(name,state,detail)=>'<div class="row"><span class="grow"><span class="ttl">'+name+'</span>'
+@@ -1073,16 +1306,65 @@ function receiptRow(j){
+    +'<span class="chev">&rsaquo;</span></button>';
+ }
+ 
++async function moveReceiptTo(receiptId, fromJob){
++  const to=prompt('Move this receipt to which job number?','');
++  if(!to)return;
++  if(BUSY)return; BUSY=true;
++  try{
++    const r=await fetch('/api/receipts/move',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:(DATA.profile||{}).personId,fromJobNumber:fromJob,
++        receiptId:receiptId,toJobNumber:String(to).replace(/[^0-9]/g,'')})});
++    const out=await r.json();
++    if(!r.ok)throw new Error(out.error||'Could not move it');
++    DATA=null; await load();
++  }catch(e){ alert(e.message) }
++  finally{ BUSY=false }
++}
++
++async function voidReceipt(receiptId, jobNumber, on){
++  const voiding = on==='1';
++  /* A void takes money off what gets paid, so it says why, on the record. */
++  const why = voiding ? prompt('Why is this being voided?','') : '';
++  if(voiding && !why)return;
++  if(BUSY)return; BUSY=true;
++  try{
++    const r=await fetch('/api/receipts/void',{method:'POST',
++      headers:{Authorization:'Bearer '+token(),'content-type':'application/json'},
++      body:JSON.stringify({contractorId:(DATA.profile||{}).personId,jobNumber:jobNumber,
++        receiptId:receiptId,voided:voiding,reason:why})});
++    const out=await r.json();
++    if(!r.ok)throw new Error(out.error||'Could not do that');
++    DATA=null; await load();
++  }catch(e){ alert(e.message) }
++  finally{ BUSY=false }
++}
++
+ function receiptsPane(n){
+   const r=receiptsFor(n), s=r.summary;
++  /* Admin-only repairs. Steven's question, and it had no answer: "when the app
++     rejects a receipt and it's a legitimate dispute, how will the office
++     override and add it to the job?" They could not — the duplicate check has
++     no admin exemption, so the office hit the same wall the subbie did.
++     MOVE is the fix for the common case (one docket, filed against the wrong
++     job) because it keeps one record for one piece of paper. VOID is for a row
++     that should never have existed; it never deletes. */
+   const rows=r.rows.map(function(x){
+-    const bad = x.disputed?'<span class="pill bad">queried</span>'
++    const bad = x.voided?'<span class="pill grey">voided</span>'
++      : x.disputed?'<span class="pill bad">queried</span>'
+       : (x.unevidenced||!x.imageKey)?'<span class="pill warn">no photo</span>':'';
++    const admin = (ME&&ME.isAdmin&&x.id&&!x.unevidenced)
++      ? '<button class="mini" data-movercpt="'+esc(x.id)+'" data-mjob="'+esc(n)+'">Move</button>'
++        +'<button class="mini" data-voidrcpt="'+esc(x.id)+'" data-vjob="'+esc(n)+'" data-von="'+(x.voided?'0':'1')+'">'
++        +(x.voided?'Restore':'Void')+'</button>'
++      : '';
+     return '<div class="row"><span class="grow"><span class="ttl">'+esc(x.supplier||'Declared on Form 001')+'</span> '+bad
+-     +'<div class="sub">'+[x.invoiceNumber?'inv '+esc(x.invoiceNumber):'',x.date?esc(x.date):'',esc(x.note||'')]
++     +'<div class="sub">'+[x.invoiceNumber?'inv '+esc(x.invoiceNumber):'',x.date?esc(x.date):'',esc(x.note||''),
++        x.movedFrom?'moved from job '+esc(x.movedFrom):'', x.voidedReason?'voided: '+esc(x.voidedReason):'']
+         .filter(Boolean).join(' &middot; ')+'</div></span>'
+      +(x.imageKey?'<button class="mini" data-viewreceipt="'+esc(x.imageKey)+'">Photo</button>':'')
+-     +'<span class="amt'+(x.amountIncGst<0?' neg':'')+'">'+money(x.amountIncGst)+'</span></div>';
++     +admin
++     +'<span class="amt'+(x.amountIncGst<0?' neg':'')+(x.voided?' dim':'')+'">'+money(x.amountIncGst)+'</span></div>';
+   }).join('');
+ 
+   let tot='';
+@@ -1226,6 +1508,16 @@ document.addEventListener('click',function(e){
+   if(ss){saveSettings();return}
+   const sv2=e.target.closest&&e.target.closest('[data-savesuppliers]');
+   if(sv2){saveSuppliers();return}
++  const cg2=e.target.closest&&e.target.closest('[data-savechangeover]');
++  if(cg2){saveChangeover();return}
++  const ao2=e.target.closest&&e.target.closest('[data-addsubbie]');
++  if(ao2){SETSEC='addsubbie';ONBOARD=null;render();return}
++  const op2=e.target.closest&&e.target.closest('[data-obpick]');
++  if(op2){obPick(op2.getAttribute('data-obpick'));return}
++  const on2=e.target.closest&&e.target.closest('[data-onboard]');
++  if(on2){saveOnboard();return}
++  const lc2=e.target.closest&&e.target.closest('[data-lockcontract]');
++  if(lc2){lockContract(lc2.getAttribute('data-lockcontract'));return}
+   const sa2=e.target.closest&&e.target.closest('[data-suppadd]');
+   if(sa2){addSupplier();return}
+   const sr2=e.target.closest&&e.target.closest('[data-supprm]');
+@@ -1240,6 +1532,10 @@ document.addEventListener('click',function(e){
+   if(sl2){saveSubbieLadder(sl2.getAttribute('data-savesubladder'));return}
+   const rl2=e.target.closest&&e.target.closest('[data-resetladder]');
+   if(rl2){resetLadder(rl2.getAttribute('data-resetladder'));return}
++  const mv=e.target.closest&&e.target.closest('[data-movercpt]');
++  if(mv){moveReceiptTo(mv.getAttribute('data-movercpt'),mv.getAttribute('data-mjob'));return}
++  const vd=e.target.closest&&e.target.closest('[data-voidrcpt]');
++  if(vd){voidReceipt(vd.getAttribute('data-voidrcpt'),vd.getAttribute('data-vjob'),vd.getAttribute('data-von'));return}
+   const qr=e.target.closest&&e.target.closest('[data-query]');
+   if(qr){queryReceipt(qr.getAttribute('data-query'),qr.getAttribute('data-qjob'),qr.getAttribute('data-qid'));return}
+   const aj=e.target.closest&&e.target.closest('[data-adjust]');
+@@ -1269,8 +1565,6 @@ document.addEventListener('click',function(e){
+   if(bt){TAB=bt.getAttribute('data-biztab');render();return}
+   const cq=e.target.closest&&e.target.closest('[data-clearq]');
+   if(cq){Q='';render();return}
+-  const bk=e.target.closest&&e.target.closest('[data-bulk]');
+-  if(bk){bulkMove(bk.getAttribute('data-bulk'),bk.getAttribute('data-bulkmonth'));return}
+   const yr=e.target.closest&&e.target.closest('[data-year]');
+   if(yr){const k=yr.getAttribute('data-year');OPENY.has(k)?OPENY.delete(k):OPENY.add(k);render();return}
+   const mo=e.target.closest&&e.target.closest('[data-month]');
+@@ -1766,33 +2060,6 @@ function claimRow(c){
+    +'<span class="amt">'+money(st.payableIncGst)+'</span><span class="chev">&rsaquo;</span></button>';
+ }
+ 
+-function claimActions(M){
+-  if(!(ME&&ME.isAdmin))return '';
+-  const at=function(st){return M.items.filter(function(c){return c.status===st})};
+-  const sub=at('submitted'), app=at('approved'), inv=at('invoiced');
+-  const btn=function(to,list,label){
+-    if(!list.length)return '';
+-    const v=list.reduce(function(a,c){return a+((c.settlement||{}).payableIncGst||0)},0);
+-    return '<button class="mini" data-bulk="'+to+'" data-bulkmonth="'+esc(M.month)+'">'
+-      +label+' all '+list.length+' <span class="sub">'+money(v)+'</span></button>';
+-  };
+-  const bar=btn('approved',sub,'Approve')+btn('invoiced',app,'Issue RCTI for')+btn('paid',inv,'Record payment for');
+-  return bar?bar+'<span class="sub" id="bulkMsg"></span>':'';
+-}
+-
+-async function bulkByStatus(to,key){
+-  const from = to==='approved'?'submitted' : to==='invoiced'?'approved' : 'invoiced';
+-  const list=(DATA.claims||[]).filter(matchClaim).filter(function(c){return c.status===from});
+-  await runBulk(to,list);
+-}
+-
+-async function bulkMove(to,month){
+-  const from = to==='approved'?'submitted' : to==='invoiced'?'approved' : 'invoiced';
+-  await runBulk(to,(DATA.claims||[]).filter(function(c){
+-    return String(c.submittedAt||'').slice(0,7)===month && c.status===from;
+-  }));
+-}
+-
+ async function runBulk(to,cs){
+   if(BUSY||!cs.length)return;
+   const what=to==='approved'?'Approve':to==='invoiced'?'Issue an RCTI for':'Record payment for';
+@@ -1822,6 +2089,12 @@ async function runBulk(to,cs){
+   finally{ BUSY=false }
+ }
+ 
++async function bulkByStatus(to,key){
++  const from = to==='approved'?'submitted' : to==='invoiced'?'approved' : 'invoiced';
++  const list=(DATA.claims||[]).filter(matchClaim).filter(function(c){return c.status===from});
++  await runBulk(to,list);
++}
++
+ function claimsView(){
+   const all=DATA.claims||[];
+   if(!all.length)return '<div class="card" style="padding:26px;text-align:center;color:var(--muted)">No claims yet. Pick some jobs and submit one.</div>';
+@@ -2438,9 +2711,10 @@ function drawModal(){
+    +'<div class="calcrow total"><span class="lbl">You get paid</span><span class="val">'+money(j.payableIncGst)+'</span></div>'
+    +'<div class="calcrow"><span class="lbl">&nbsp;</span><span class="val sub">'+money(j.payableExGst)+' ex GST</span></div>'
+    +(j.quotedBy?'<div class="calcrow"><span class="lbl">Quoted by</span><span class="val">'+esc(j.quotedBy)+'</span></div>':'');
++  const withReceipts = body + receiptRow(j);
+   el.innerHTML='<div class="veil" onclick="if(event.target===this)shut()"><div class="sheet" role="dialog" aria-modal="true">'
+    +'<div class="shead"><div class="t">Job '+j.jobNumber+'</div><button class="iconbtn" onclick="shut()" aria-label="Close">&times;</button></div>'
+-   +'<div class="sbody">'+body+'</div></div></div>';
++   +'<div class="sbody">'+withReceipts+'</div></div></div>';
+ }
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')shut()});
+ 
+diff --git a/lib/commission.mjs b/lib/commission.mjs
+index 4b744fd..50725f8 100644
+--- a/lib/commission.mjs
++++ b/lib/commission.mjs
+@@ -125,17 +125,45 @@ export function helpingHandTotal(form = {}) {
+   return round2(helpingHandLines(form).reduce((s, l) => s + l.amount, 0));
+ }
+ 
++/**
++ * The one rate a new-model rule pays. Rules written for the ladder may carry
++ * a single `rate`; older shapes carry the three-way split, in which case the
++ * headline (quoted_and_completed) IS the rate — the split is retired.
++ */
++function flatRateOf(rule) {
++  const r = Number(rule.rates?.rate ?? rule.rates?.quoted_and_completed);
++  return Number.isFinite(r) ? r : null;
++}
++
+ /**
+  * Calculate one job for one contractor.
+  *
+- * @param {object}   job          { jobNumber, invoiceIncGst, expenseIncGst, customerPaid }
++ * Two models, split by the changeover date in settings (passed in as
++ * `cutoffDate` — never hardwired):
++ *
++ *   BEFORE the cutoff — Form 001 era. Mr Sparky funded material; the form
++ *   carries attribution and van stock; no form means not payable. This path
++ *   is frozen: jobs completed under it must calculate identically forever.
++ *
++ *   ON/AFTER the cutoff — the form is gone. Completion in ServiceM8 is the
++ *   payability trigger, the completer (staff UUID) owns the job, material is
++ *   the receipts sum plus declared own material, and both are deducted from
++ *   gross then reimbursed on top because the tech fronted them.
++ *
++ * @param {object}   job          { jobNumber, invoiceIncGst, expenseIncGst, customerPaid,
++ *                                  completedByUuid, ownMaterialIncGst, date, claimedAt }
+  * @param {object[]} forms        Form 001 responses for this job (0, 1 or many)
+- * @param {object}   contractor   { name, rates: { quoted_and_completed, completed_only, quoted_only } }
++ * @param {object}   contractor   { name, aliases, rules | rates, sm8StaffUuid }
++ * @param {string}   cutoffDate   settings changeover date (ISO), or null for old-model only
++ * @param {object}   compliance   { failed, penaltyPoints } from the ladder assessment —
++ *                                stored as a flag, never baked into a stored rate
+  */
+ export function calculateJob({
+   job, forms = [], contractor,
+   gstDivisor = DEFAULT_GST_DIVISOR,
+   duplicatePolicy = 'last',
++  cutoffDate = null,
++  compliance = null,
+ }) {
+   const base = {
+     jobNumber: job.jobNumber ?? null,
+@@ -143,6 +171,10 @@ export function calculateJob({
+     customerPaid: !!job.customerPaid,
+   };
+ 
++  if (cutoffDate && job.date && job.date >= cutoffDate) {
++    return calculateNewModel({ base, job, contractor, gstDivisor, compliance });
++  }
++
+   if (forms.length === 0) return { ...base, outcome: OUTCOME.AWAITING_FORM };
+ 
+   // Duplicates are common — a tech resubmits to correct van stock, and one job
+@@ -213,6 +245,84 @@ export function calculateJob({
+   };
+ }
+ 
++/**
++ * The new model, from the changeover date on. One rate, one owner, no form.
++ *
++ * Two different dates anchor two different questions, deliberately:
++ *   - the RATE comes from the rule in force when the lead was CLAIMED —
++ *     "what was I promised when I took this job?" A rung change mid-flight
++ *     must not move a job already taken on.
++ *   - MATERIAL FUNDING comes from the rule in force at COMPLETION — "who
++ *     actually paid for what I used?" A lead claimed on the 10th and
++ *     completed on the 20th was bought with the tech's own money, whatever
++ *     his rate rule says.
++ *
++ * Compliance arrives as a flag plus penalty points, never as a pre-baked
++ * rate: "rung 0, compliance failed" can answer questions that a stored 48
++ * cannot (what happens when compliance recovers, or when they climb a rung
++ * while still failing).
++ */
++function calculateNewModel({ base, job, contractor, gstDivisor, compliance }) {
++  // Ownership: the completer's staff UUID against the contractor's. When both
++  // sides are known and disagree, this is somebody else's job. When the job
++  // has no completer recorded, fall back to trusting the caller's assignment
++  // (the api layer only hands a contractor jobs it believes are theirs).
++  const mine = contractor.sm8StaffUuid || null;
++  const who = job.completedByUuid || null;
++  if (mine && who && mine !== who) return { ...base, outcome: OUTCOME.NOT_THEIR_JOB };
++
++  const rateRule = ruleOn(contractor, job.claimedAt || job.date);
++  if (!rateRule) return { ...base, outcome: OUTCOME.NO_RULE };
++  const fundingRule = ruleOn(contractor, job.date) || rateRule;
++
++  const ratePct = flatRateOf(rateRule);
++  if (ratePct === null) {
++    throw new Error(`No flat rate in the rule effective ${rateRule.from} for ${contractor.name}`);
++  }
++
++  const penalty = compliance?.failed ? (Number(compliance.penaltyPoints) || 2) : 0;
++  const effectivePct = Math.max(0, ratePct - penalty);
++
++  // Material: the receipts sum (already voided-excluded, credit notes
++  // negative) plus what the tech declared as own material with no receipt.
++  const expenseIncGst = parseMoney(job.expenseIncGst);
++  const ownMaterial = parseMoney(job.ownMaterialIncGst);
++  const gross = base.invoiceIncGst - expenseIncGst - ownMaterial;
++
++  const share = gross * (effectivePct / 100);
++
++  // The tech fronted the purchase; both grades of material come back on top.
++  const subbieFunded = fundingRule.materialsFundedBy === 'subbie';
++  const reimbursed = subbieFunded ? round2(expenseIncGst + ownMaterial) : 0;
++  const payableIncGst = share + reimbursed;
++
++  return {
++    ...base,
++    outcome: OUTCOME.OK,
++    model: 'new',
++    duplicateForms: 0,
++    completedByUuid: who,
++    expenseIncGst: round2(expenseIncGst),
++    vanStockClaimed: round2(ownMaterial),   // same key claims freeze — "own material, no receipt"
++    grossProfit: round2(gross),
++    ruleFrom: rateRule.from ?? null,
++    rateLockedAt: job.claimedAt ? 'claim' : 'completion',
++    rateDate: job.claimedAt || job.date,
++    materialsFundedBy: fundingRule.materialsFundedBy ?? 'subbie',
++    materialsReimbursed: reimbursed,
++    rateKey: 'flat',
++    ratePct: effectivePct,
++    rungRatePct: ratePct,
++    compliancePenalty: penalty,
++    complianceNote: compliance?.note ?? null,
++    share: round2(share),
++    helpingHand: 0,
++    helpingHandLines: [],
++    payableIncGst: round2(payableIncGst),
++    payableExGst: round2(payableIncGst / gstDivisor),
++  };
++}
++
+ /**
+  * The other side of helping hand: what this contractor is owed for helping on
+  * OTHER people's jobs. Steven pays the helper directly, so it is their income
+@@ -248,8 +358,11 @@ export function helperEarnings({ contractor, jobs = [], gstDivisor = DEFAULT_GST
+  * @param allJobs  every job in the period, scanned for helping-hand credits
+  *                 owed to this contractor on other people's jobs
+  */
+-export function buildStatement({ contractor, jobs = [], allJobs, gstDivisor = DEFAULT_GST_DIVISOR, duplicatePolicy = 'last' }) {
+-  const results = jobs.map(({ job, forms }) => calculateJob({ job, forms, contractor, gstDivisor, duplicatePolicy }));
++export function buildStatement({
++  contractor, jobs = [], allJobs, gstDivisor = DEFAULT_GST_DIVISOR,
++  duplicatePolicy = 'last', cutoffDate = null, compliance = null,
++}) {
++  const results = jobs.map(({ job, forms }) => calculateJob({ job, forms, contractor, gstDivisor, duplicatePolicy, cutoffDate, compliance }));
+   const ok = results.filter((r) => r.outcome === OUTCOME.OK);
+   const blocked = results.filter((r) => r.outcome === OUTCOME.AWAITING_FORM || r.outcome === OUTCOME.AMBIGUOUS_FORM);
+   const helping = helperEarnings({ contractor, jobs: allJobs ?? jobs, gstDivisor });
+diff --git a/lib/compliance.mjs b/lib/compliance.mjs
+new file mode 100644
+index 0000000..f9108c4
+--- /dev/null
++++ b/lib/compliance.mjs
+@@ -0,0 +1,116 @@
++/**
++ * Compliance — 2 points of the rung hang on doing the paperwork.
++ *
++ * The deal (Steven, 8 Aug 2026): a job complies when every required item on
++ * it is done. A contractor keeps their rung rate when at least 80% of their
++ * jobs in the window comply; below that, the rate drops 2 points — 50 becomes
++ * 48. Assessed on the same 90-day rolling window as conversion, floored at
++ * the changeover so nobody is judged on jobs from before the rules existed.
++ *
++ * Two design rules carried over from the ladder:
++ *
++ *  - Store the RUNG and the FLAG, never a pre-baked 48. "Rung 0, compliance
++ *    failed" can answer what a stored 48 cannot: compliance recovers → back
++ *    to 50; they climb a rung while still failing → 58.
++ *  - A rate drop must arrive with its reason attached. An unexplained drop
++ *    is a dispute; an explained one is a conversation about paperwork.
++ *
++ * Version one measures the JSA only — it is a ServiceM8 form, so "done" is
++ * simply "a formresponse exists for this job", the same check Form 001 has
++ * always used. Photos and CCEW join later as tasks/attachments; the shape
++ * here (required set vs done set) already fits them.
++ *
++ * The 0-of-0 hole: a job with nothing required scores complete, so the
++ * required set must come from POLICY (every post-cutoff job requires a JSA),
++ * never from what happens to be attached to the job — otherwise the worst
++ * case reads as the best. requiredOn() is that policy, in one place.
++ */
++import { round2 } from './commission.mjs';
++
++export const DEFAULTS = { passPercent: 80, penaltyPoints: 2 };
++
++export const policyFor = (settings) => ({
++  ...DEFAULTS,
++  passPercent: Number(settings?.compliance?.passPercent) || DEFAULTS.passPercent,
++  penaltyPoints: Number(settings?.compliance?.penaltyPoints) || DEFAULTS.penaltyPoints,
++  jsaFormUuid: settings?.compliance?.jsaFormUuid || null,
++});
++
++/**
++ * Which jobs have a response for the given form, whatever ServiceM8 linked it
++ * by. Rows are matched tolerantly — a related-object uuid when present, and
++ * the "Job Number" answer as the fallback — because the two link styles both
++ * exist in the wild and a missed link must fail SAFE (job reads as not done,
++ * visibly, rather than silently passing).
++ */
++export function formDoneKeys(responses = [], formUuid) {
++  const done = new Set();
++  if (!formUuid) return done;
++  for (const r of responses) {
++    if (r.form_uuid !== formUuid) continue;
++    if (String(r.active) === '0') continue;
++    for (const k of [r.regarding_object_uuid, r.job_uuid, r.related_object_uuid]) {
++      if (k) done.add(String(k));
++    }
++    try {
++      const fields = JSON.parse(r.field_data || '[]');
++      const n = fields.find((f) => /job number/i.test(String(f.Question || '')));
++      if (n?.Response) done.add(String(n.Response).trim());
++    } catch { /* unreadable answers — the uuid keys above may still match */ }
++  }
++  return done;
++}
++
++/** Policy: what a post-cutoff job requires. Version one: a JSA, on every job. */
++export function requiredOn(job, policy) {
++  return policy.jsaFormUuid ? [{ key: 'jsa', label: 'JSA' }] : [];
++}
++
++/** One job: complies when every required item is done. */
++export function jobComplies(job, { policy, jsaDone }) {
++  const required = requiredOn(job, policy);
++  if (!required.length) return null; // nothing measurable — never counts either way
++  const done = required.every((item) =>
++    item.key !== 'jsa'
++    || jsaDone.has(String(job.uuid)) || jsaDone.has(String(job.jobNumber)));
++  return done;
++}
++
++/**
++ * The window: share of this contractor's post-cutoff jobs where everything
++ * required was done. Jobs before the window or the cutoff never count, and a
++ * period with nothing measurable returns null — unmeasured, not 0% and not
++ * 100%.
++ */
++export function complianceRate({ jobs = [], policy, jsaDone, windowStart, cutoffDate }) {
++  let measured = 0, passing = 0;
++  for (const job of jobs) {
++    if (!job.date) continue;
++    if (cutoffDate && job.date < cutoffDate) continue;
++    if (windowStart && job.date < windowStart) continue;
++    const ok = jobComplies(job, { policy, jsaDone });
++    if (ok === null) continue;
++    measured += 1;
++    if (ok) passing += 1;
++  }
++  if (!measured) return null;
++  return { measured, passing, percent: round2(passing / measured * 100) };
++}
++
++/**
++ * What the calculation needs: the flag, the points, and the sentence that
++ * explains the pay slip. Null when nothing is measurable — no penalty during
++ * the qualifying period, because you cannot fail a window that never ran.
++ */
++export function complianceAssessment({ rate, policy }) {
++  if (!rate) return null;
++  const failed = rate.percent < policy.passPercent;
++  return {
++    failed,
++    penaltyPoints: policy.penaltyPoints,
++    percent: rate.percent,
++    note: failed
++      ? `Compliance ran at ${rate.percent}% (${rate.passing} of ${rate.measured} jobs complete) — needed ${policy.passPercent}%, rate drops ${policy.penaltyPoints} points.`
++      : `Compliance at ${rate.percent}% (${rate.passing} of ${rate.measured} jobs) — rung rate holds.`,
++  };
++}
+diff --git a/lib/receipt-dupes.mjs b/lib/receipt-dupes.mjs
+index b1bb2c7..81b9b7d 100644
+--- a/lib/receipt-dupes.mjs
++++ b/lib/receipt-dupes.mjs
+@@ -76,8 +76,14 @@ export function docketKeys(r) {
+   const date = r?.date ? String(r.date).slice(0, 10) : null;
+ 
+   if (invoice) {
+-    if (abn) keys.push(`A:${abn}|I:${invoice}`);
+-    if (supplier) keys.push(`S:${supplier}|I:${invoice}`);
++    // A CREDIT carries the invoice number of the purchase it reverses — the
++    // supplier prints it deliberately, and validateReceipt already demands one
++    // for a negative amount. Without the sign in the key, a legitimate credit
++    // note collides with the invoice it credits and is refused as a duplicate.
++    // Two credits for the same invoice still match each other, which is right.
++    const kind = amount < 0 ? 'C' : 'I';
++    if (abn) keys.push(`A:${abn}|${kind}:${invoice}`);
++    if (supplier) keys.push(`S:${supplier}|${kind}:${invoice}`);
+   } else if (date && Number.isFinite(amount)) {
+     // No invoice number on the paper: the amount and the day stand in for it.
+     const tail = `D:${date}|A:${round2(amount).toFixed(2)}`;
+@@ -87,6 +93,21 @@ export function docketKeys(r) {
+   return keys;
+ }
+ 
++/**
++ * ", filed 5 Aug from this app" — the fact that ends most of these on the spot.
++ * Empty when nothing was recorded, rather than inventing a date.
++ */
++function filedWhen(row) {
++  const stamp = String(row?.addedAt || '').slice(0, 10);
++  if (!stamp) return '';
++  const d = new Date(`${stamp}T12:00:00`);
++  if (Number.isNaN(d.getTime())) return '';
++  const when = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
++  const how = row.source === 'office' ? ' by the office'
++    : row.source === 'form001' ? ' on the Form 001' : '';
++  return `, filed ${when}${how}`;
++}
++
+ /**
+  * The one key a docket is FILED under, for grouping and display. The ABN form
+  * wins when there is one, so the same supplier never splits into two rows of
+@@ -134,21 +155,23 @@ export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICAT
+   // Not identifiable, so not checkable. It saves, as it always did.
+   if (!key) return { verdict: 'ok', key: null, matches: [], reuse: false };
+ 
+-  const matches = existing.filter((r) => r && r.id !== incoming.id && sameDocket(r, incoming));
++  // A VOIDED receipt is a record that should never have existed — mis-keyed,
++  // test data, somebody else's paper. It stays visible for the audit trail but
++  // it must not stand in the way of the real one, or voiding would be a way of
++  // permanently poisoning a docket rather than correcting it.
++  const matches = existing.filter((r) => r && !r.voided && r.id !== incoming.id && sameDocket(r, incoming));
+   if (!matches.length) return { verdict: 'ok', key, matches: [], reuse: false };
+ 
+   const seen = matches.map((r) => ({
+-    id: r.id, jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0), date: r.date,
++    id: r.id, jobNumber: String(r.jobNumber), amountIncGst: round2(Number(r.amountIncGst) || 0),
++    date: r.date, addedAt: r.addedAt || null, source: r.source || null,
+   }));
+ 
+   const sameJob = seen.filter((r) => r.jobNumber === String(incoming.jobNumber));
+   if (sameJob.length && policy.blockSameJob) {
+     return {
+       verdict: 'blocked', reason: 'sameJob', key, matches: seen, reuse: true,
+-      message: `This docket is already on job #${incoming.jobNumber}`
+-        + `${matches[0].supplier ? ` — ${matches[0].supplier}` : ''}`
+-        + `${incoming.invoiceNumber ? ` invoice ${incoming.invoiceNumber}` : ''}`
+-        + `, $${sameJob[0].amountIncGst.toFixed(2)}. Filing it twice would claim it twice.`,
++      message: `This docket is already on job #${incoming.jobNumber}${filedWhen(sameJob[0])}.`,
+     };
+   }
+ 
+@@ -163,10 +186,10 @@ export function checkDocket({ existing = [], incoming, policy = DEFAULT_DUPLICAT
+         verdict: 'blocked', reason: 'overDocket', key, matches: seen, reuse: true,
+         docketTotalIncGst: total, remainingIncGst: remaining,
+         message: remaining <= 0
+-          ? `This docket is fully claimed already — $${total.toFixed(2)} across `
++          ? `This docket is fully accounted for — $${total.toFixed(2)} across `
+             + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`
+           : `This docket has $${remaining.toFixed(2)} left on it. `
+-            + `$${claimed.toFixed(2)} of $${total.toFixed(2)} is already claimed on `
++            + `$${claimed.toFixed(2)} of $${total.toFixed(2)} is already recorded against `
+             + `job${seen.length > 1 ? 's' : ''} ${seen.map((r) => `#${r.jobNumber}`).join(', ')}.`,
+       };
+     }
+@@ -206,6 +229,7 @@ export function docketFlags(receiptsByContractor = {}, nameOf = (id) => id) {
+   const groups = new Map();    // group id -> rows
+   for (const [contractorId, rows] of Object.entries(receiptsByContractor)) {
+     for (const r of rows || []) {
++      if (r?.voided) continue;
+       const keys = docketKeys(r);
+       if (!keys.length) continue;
+       const found = keys.map((k) => groupOf.get(k)).find(Boolean);
+@@ -281,7 +305,7 @@ export function claimWarnings({ claim, contractorId, receiptsByContractor = {},
+   };
+ 
+   for (const r of mine) {
+-    if (!jobNumbers.has(String(r.jobNumber))) continue;
++    if (r.voided || !jobNumbers.has(String(r.jobNumber))) continue;
+ 
+     if (r.disputed) {
+       add(r.jobNumber, {
+@@ -296,7 +320,7 @@ export function claimWarnings({ claim, contractorId, receiptsByContractor = {},
+     // The same docket anywhere else — their own other jobs, or somebody else's.
+     for (const [otherId, rows] of Object.entries(receiptsByContractor)) {
+       for (const other of rows || []) {
+-        if (other.id === r.id || !sameDocket(other, r)) continue;
++        if (other.voided || other.id === r.id || !sameDocket(other, r)) continue;
+         const elsewhere = otherId !== contractorId;
+         add(r.jobNumber, {
+           kind: 'duplicate',
+diff --git a/lib/receipts.mjs b/lib/receipts.mjs
+index f1713fa..a40894a 100644
+--- a/lib/receipts.mjs
++++ b/lib/receipts.mjs
+@@ -110,8 +110,14 @@ export function unevidencedFromForm({ jobNumber, contractorId, amountIncGst, add
+ export const DEFAULT_TOLERANCE_PERCENT = 3;
+ 
+ export function summarise(receipts = [], { declaredIncGst = null, tolerancePercent = DEFAULT_TOLERANCE_PERCENT } = {}) {
+-  let evidenced = 0, unevidenced = 0, disputed = 0;
++  let evidenced = 0, unevidenced = 0, disputed = 0, voided = 0;
+   for (const r of receipts) {
++    // A VOIDED receipt is a record that should never have existed. It stays on
++    // file with its photo — nothing is ever deleted here — but it counts
++    // towards nothing, which is the difference between voided and disputed: a
++    // dispute is a question about a real expense, a void says the entry itself
++    // was wrong.
++    if (r.voided) { voided += r.amountIncGst; continue; }
+     if (r.disputed) { disputed += r.amountIncGst; continue; }
+     if (r.unevidenced || !r.imageKey) { unevidenced += r.amountIncGst; continue; }
+     evidenced += r.amountIncGst;
+@@ -141,6 +147,7 @@ export function summarise(receipts = [], { declaredIncGst = null, tolerancePerce
+     evidencedIncGst: ev,
+     unevidencedIncGst: round2(unevidenced),
+     disputedIncGst: round2(disputed),
++    voidedIncGst: round2(voided),
+     // Trusting the evidence: the receipt sum is what is reimbursed.
+     reimbursableIncGst: ev,
+     variance,
+@@ -155,6 +162,43 @@ export function summarise(receipts = [], { declaredIncGst = null, tolerancePerce
+   };
+ }
+ 
++/**
++ * What the receipts on one job are worth to the calculation, under the new
++ * model where the receipt sum IS the material figure. Same rule summarise
++ * applies to reimbursement: voided rows never count, disputed rows wait for a
++ * human, and no photo means recorded-but-not-paid. Credit notes are negative
++ * and simply subtract.
++ */
++export function payableMaterialIncGst(rows = []) {
++  return summarise(rows).reimbursableIncGst;
++}
++
++/**
++ * The "own material, no receipt" cap for one contractor. A per-contractor
++ * override beats the default, and ZERO is a legitimate override — receipts
++ * only, for anyone not yet trusted. The default default is $50 inc GST.
++ */
++export function ownMaterialCapFor(settings, contractorId) {
++  const vs = settings?.vanStock || {};
++  const per = vs.byContractor?.[contractorId];
++  const cap = per != null && per !== '' ? Number(per) : Number(vs.defaultCapIncGst);
++  return Number.isFinite(cap) ? cap : 50;
++}
++
++/**
++ * The review flag — a flag, not a gate. Declared own material over this share
++ * of the invoice lands on the approval panel for a human to look at; it never
++ * refuses the declaration on site, because a refusal there just teaches
++ * people to under-declare and the data is lost.
++ */
++export function ownMaterialFlag({ amountIncGst, invoiceIncGst, flagPercent = 5 }) {
++  const amount = Number(amountIncGst) || 0;
++  const invoice = Number(invoiceIncGst) || 0;
++  if (amount <= 0 || invoice <= 0) return { flagged: false, percent: null };
++  const percent = round2(amount / invoice * 100);
++  return { flagged: percent > Number(flagPercent), percent };
++}
++
+ /** Group by job, so a statement can attach them without a lookup per job. */
+ export function byJob(receipts = []) {
+   const out = {};
+diff --git a/lib/servicem8.mjs b/lib/servicem8.mjs
+index 004a382..9fc9b30 100644
+--- a/lib/servicem8.mjs
++++ b/lib/servicem8.mjs
+@@ -69,6 +69,11 @@ export function toJobRecord(job, { expenseIncGst = 0, expenseKnown = false } = {
+   return {
+     jobNumber: String(job.generated_job_id),
+     uuid: job.uuid,
++    // Who marked the job complete. Under the new model this single field IS
++    // the attribution — the money, the conversion and the defect all follow
++    // it. Techs complete their own jobs (Steven, 8 Aug 2026); the office
++    // never does. Field name varies across SM8 payloads, so try both.
++    completedByUuid: String(job.completion_actioned_by_uuid || job.completion_actioned_by || '') || null,
+     date: String(job.completion_date || '').slice(0, 10),
+     suburb: (job.job_address || '').split(',').slice(-3, -2).join('').trim() || (job.job_address || '').slice(0, 28),
+     invoiceIncGst: parseFloat(job.total_invoice_amount || 0),
+diff --git a/lib/settings-store.mjs b/lib/settings-store.mjs
+index 8a050a1..e5ef220 100644
+--- a/lib/settings-store.mjs
++++ b/lib/settings-store.mjs
+@@ -89,6 +89,13 @@ export const EDITABLE = [
+   // Reference data, not money: a bad row here means a chip spelled wrong on a
+   // phone, which the person holding the docket can see and fix.
+   'suppliers',
++  // The changeover date splits the Form 001 era from the new model, and
++  // vanStock carries the "own material, no receipt" cap and its review flag.
++  // Both live here precisely so no date or dollar figure is hardwired.
++  'changeover', 'vanStock',
++  // Compliance thresholds and the contracts-required switch — policy, not
++  // identity, so a phone edit can tune them without a deploy.
++  'compliance', 'contracts',
+ ];
+ 
+ /**
+diff --git a/lib/store.mjs b/lib/store.mjs
+index 3203033..2d26aaf 100644
+--- a/lib/store.mjs
++++ b/lib/store.mjs
+@@ -127,6 +127,55 @@ export async function setRetention(contractorId, balance, claimId) {
+   });
+ }
+ 
++/* ---------- signed contracts ---------- */
++
++/**
++ * Settings are the contract; this record is the signature. Append-only —
++ * every signing (and every amendment, which is just a later signing) writes a
++ * new row carrying a SNAPSHOT of the terms as they stood, so "what exactly
++ * did Peter sign?" is answered by the row itself, not by inferring from
++ * today's settings. The newest row is the contract in force.
++ */
++export async function saveContract({ contractorId, docKey, terms, signedBy, note }) {
++  const signedAt = new Date().toISOString();
++  return put({
++    pk: pk(contractorId), sk: `CONTRACT#${signedAt}`,
++    contractorId, signedAt, docKey: docKey || null,
++    terms: terms || null, signedBy: signedBy || null, note: note || null,
++  });
++}
++
++export async function listContracts(contractorId) {
++  const rows = await queryPrefix(contractorId, 'CONTRACT#');
++  return rows.sort((a, b) => (a.signedAt < b.signedAt ? -1 : 1));
++}
++
++export async function currentContract(contractorId) {
++  const rows = await listContracts(contractorId);
++  return rows.length ? rows[rows.length - 1] : null;
++}
++
++/* ---------- own material, no receipt ---------- */
++
++/**
++ * The tech's declared van-stock material for one job — bought earlier, in
++ * bulk, so no per-job docket exists or ever can. One record per job per
++ * contractor; re-declaring overwrites, because claims freeze the figure at
++ * claim time anyway. The cap lives in settings and is checked at the API —
++ * this is just storage.
++ */
++export async function saveOwnMaterial({ contractorId, jobNumber, amountIncGst, by, at }) {
++  return put({
++    pk: pk(contractorId), sk: `MAT#${jobNumber}`,
++    contractorId, jobNumber: String(jobNumber),
++    amountIncGst, declaredBy: by || null, declaredAt: at || new Date().toISOString(),
++  });
++}
++
++export async function listOwnMaterial(contractorId) {
++  return queryPrefix(contractorId, 'MAT#');
++}
++
+ /* ---------- receipts ---------- */
+ 
+ export async function saveReceipt(receipt) {
+@@ -141,6 +190,61 @@ export async function receiptsForJob(contractorId, jobNumber) {
+   return queryPrefix(contractorId, `RCPT#${jobNumber}#`);
+ }
+ 
++/**
++ * Void a receipt, or bring it back. Never deletes — the row stays with its
++ * photo and its history, marked, so "this should not have existed" is itself
++ * on the record. Voided receipts are excluded from reimbursement and from the
++ * duplicate check, so a mis-keyed entry can be corrected rather than blocking
++ * the right one for ever.
++ */
++export async function setReceiptVoided(contractorId, jobNumber, receiptId, voided, by, reason) {
++  const { UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
++  const r = await (await doc()).send(new UpdateCommand({
++    TableName: TABLE,
++    Key: { pk: pk(contractorId), sk: `RCPT#${jobNumber}#${receiptId}` },
++    UpdateExpression: 'SET voided = :v, voidedBy = :b, voidedAt = :t, voidedReason = :r',
++    ExpressionAttributeValues: {
++      ':v': !!voided, ':b': by || null,
++      ':t': new Date().toISOString(), ':r': reason || null,
++    },
++    ConditionExpression: 'attribute_exists(sk)',
++    ReturnValues: 'ALL_NEW',
++  }));
++  return r.Attributes;
++}
++
++/**
++ * Move a receipt to a different job.
++ *
++ * The job number is part of the sort key, so this is a rewrite rather than an
++ * update: written to the new key FIRST, then removed from the old. That order
++ * is deliberate. A failure between the two leaves the receipt on both jobs —
++ * visible, and caught by the duplicate report — whereas delete-first would
++ * lose it along with its photo if the write failed.
++ *
++ * The id never changes, so the S3 photo key still resolves and the audit trail
++ * survives the move.
++ */
++export async function moveReceipt(contractorId, fromJobNumber, receiptId, toJobNumber, by) {
++  const { GetCommand, PutCommand, DeleteCommand } = await import('@aws-sdk/lib-dynamodb');
++  const d = await doc();
++  const from = `RCPT#${fromJobNumber}#${receiptId}`;
++  const got = await d.send(new GetCommand({ TableName: TABLE, Key: { pk: pk(contractorId), sk: from } }));
++  if (!got.Item) throw new Error('That receipt is no longer there');
++
++  const moved = {
++    ...got.Item,
++    sk: `RCPT#${toJobNumber}#${receiptId}`,
++    jobNumber: String(toJobNumber),
++    movedFrom: String(fromJobNumber),
++    movedBy: by || null,
++    movedAt: new Date().toISOString(),
++  };
++  await d.send(new PutCommand({ TableName: TABLE, Item: moved }));
++  await d.send(new DeleteCommand({ TableName: TABLE, Key: { pk: pk(contractorId), sk: from } }));
++  return moved;
++}
++
+ /** Mark a receipt disputed, or clear it. Never deletes — the record stays. */
+ export async function setReceiptDisputed(contractorId, jobNumber, receiptId, disputed, by) {
+   const { UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
+diff --git a/scripts/changeover-2026-08-14.mjs b/scripts/changeover-2026-08-14.mjs
+new file mode 100644
+index 0000000..e520d39
+--- /dev/null
++++ b/scripts/changeover-2026-08-14.mjs
+@@ -0,0 +1,134 @@
++/**
++ * The 14 August changeover, as one reviewable settings write.
++ *
++ * What it does — all in settings, nothing in code:
++ *
++ *   1. Sets changeover.cutoffDate. This is THE switch: until it exists every
++ *      job calculates on the old model, whatever code is deployed.
++ *   2. Appends a new-model rule version to every network subbie, effective on
++ *      the cutoff: rung 0 (50%), one flat rate, materials funded by subbie.
++ *      Appends — never edits history, so pre-cutoff jobs keep their old rule.
++ *   3. Deletes Alex's stray rule of 2026-07-27 (70%, subbie-funded). Nobody
++ *      was on the new structure before the changeover; it should not exist.
++ *   4. Sets vanStock defaults ($50 cap, 5% review flag) if absent.
++ *   5. Sets retention to the agreed policy: 10% accrual to a $1,000 target.
++ *
++ * Dry run by default — prints the exact before/after and writes nothing.
++ *
++ *   node scripts/changeover-2026-08-14.mjs            # show what would change
++ *   node scripts/changeover-2026-08-14.mjs --apply    # write it, versioned
++ *
++ * The write goes through settings-store.save(), so the previous version is
++ * kept and the change carries a note — the same audit trail as a portal edit.
++ */
++import { loadStored, save } from '../lib/settings-store.mjs';
++
++const APPLY = process.argv.includes('--apply');
++const CUTOFF = process.env.CUTOFF_DATE || '2026-08-14';
++
++/**
++ * Read live from ServiceM8, 8 Aug 2026 (scripts/check-sm8.mjs output). A UUID
++ * never drifts the way the Form 001 name dropdown did — this map is what
++ * retires alias matching for every job after the cutoff.
++ */
++const SM8_STAFF_UUID = {
++  'p-sts':     'acc8d40d-38e2-4359-803b-1d2638f4233b',   // Steven Sukar
++  'p-sts-sub': 'acc8d40d-38e2-4359-803b-1d2638f4233b',   // same person, subbie login
++  'p-mar':     'b3a573ca-6ba4-4692-a5fb-1d3ced87e88b',   // Marites Dela Cruz
++  'p-ptr':     '539fbdd0-64a5-4221-ac8d-1fa3faec380b',   // Peter Boulghourjian
++  'p-adn':     '54e097b8-3a49-43e8-ac6b-22f5f8ceb6ab',   // Adnan Jaafar
++  'p-alx':     '2eef7262-dffe-4716-bf47-238cfa508c4b',   // Alex Fitzpatrick
++  'p-nic':     'fc45ffba-c946-48c6-b1d1-2301227a503b',   // Nicholas Liaris (inactive in SM8)
++};
++
++/** 101_Job Safety Analysis (JSA) – Procedures — the active one; the five
++ *  other JSA variants in the account are all inactive. */
++const JSA_FORM_UUID = '656ec8a0-12f1-4d40-a57b-2303d6379c8b';
++
++const settings = await loadStored();
++if (!settings) {
++  console.error('No stored settings — run against the live table (check AWS credentials/region).');
++  process.exit(1);
++}
++
++const changes = [];
++
++// 1. The switch.
++if (settings.changeover?.cutoffDate === CUTOFF) {
++  console.log(`changeover.cutoffDate already ${CUTOFF} — nothing to do there.`);
++} else {
++  changes.push(`changeover.cutoffDate: ${settings.changeover?.cutoffDate ?? '(unset)'} -> ${CUTOFF}`);
++  settings.changeover = { ...(settings.changeover || {}), cutoffDate: CUTOFF };
++}
++
++// 2. A new-model rule for every network subbie, effective on the cutoff.
++const NEW_RULE = { from: CUTOFF, type: 'fixed', rates: { rate: 50 }, materialsFundedBy: 'subbie',
++  note: 'Changeover: ladder rung 0, tech buys material, reimbursed on top.' };
++const subbies = (settings.people || []).filter((p) => p.role === 'Subbie');
++for (const p of subbies) {
++  const rules = settings.commissionRules[p.id] || [];
++  if (rules.some((r) => r.from === CUTOFF)) {
++    console.log(`${p.name}: already has a rule effective ${CUTOFF} — left alone.`);
++    continue;
++  }
++  changes.push(`${p.name} (${p.id}): append rule from ${CUTOFF} — rate 50, subbie-funded`);
++  settings.commissionRules[p.id] = [...rules, NEW_RULE];
++}
++
++// 3. Alex's stray rule. Match precisely — date AND shape — so this can never
++// delete a legitimate rule that happens to share the date.
++const alex = (settings.people || []).find((p) => /alex/i.test(p.name));
++if (alex) {
++  const rules = settings.commissionRules[alex.id] || [];
++  const stray = rules.filter((r) => r.from === '2026-07-27' && r.materialsFundedBy === 'subbie');
++  if (stray.length) {
++    changes.push(`${alex.name}: delete stray rule of 2026-07-27 (${JSON.stringify(stray[0].rates)})`);
++    settings.commissionRules[alex.id] = rules.filter((r) => !stray.includes(r));
++  } else {
++    console.log(`${alex.name}: no stray 2026-07-27 rule found — nothing to delete.`);
++  }
++}
++
++// 3b. Staff UUIDs onto every person, and the JSA form uuid — the two IDs read
++// live from ServiceM8 on 8 Aug. The UUID is what attribution matches on after
++// the cutoff; the JSA uuid is what switches compliance from dark to measuring.
++for (const p of settings.people || []) {
++  const uuid = SM8_STAFF_UUID[p.id];
++  if (!uuid || p.sm8StaffUuid === uuid) continue;
++  changes.push(`${p.name}: sm8StaffUuid ${p.sm8StaffUuid ? 'corrected' : 'set'} -> ${uuid.slice(0, 8)}…`);
++  p.sm8StaffUuid = uuid;
++}
++if (settings.compliance?.jsaFormUuid !== JSA_FORM_UUID) {
++  changes.push(`compliance.jsaFormUuid -> ${JSA_FORM_UUID.slice(0, 8)}… (101_JSA Procedures) — compliance starts measuring`);
++  settings.compliance = { passPercent: 80, penaltyPoints: 2, ...(settings.compliance || {}), jsaFormUuid: JSA_FORM_UUID };
++}
++
++// 4. Van stock defaults, only where unset — a tuned value is never clobbered.
++if (settings.vanStock?.defaultCapIncGst == null) {
++  changes.push('vanStock: default cap $50, review flag 5% of invoice');
++  settings.vanStock = { defaultCapIncGst: 50, flagPercentOfInvoice: 5, byContractor: {}, ...(settings.vanStock || {}) };
++}
++
++// 5. Retention: 10% to $1,000, held whole, released 12 months after the later
++// of losing job access or the last completed job (the release itself is a
++// human act; the target is what the engine enforces).
++const target = Number(settings.retention?.default?.target) || 0;
++if (target !== 1000) {
++  changes.push(`retention.default.target: ${target} -> 1000 (accrual stays 10%)`);
++  settings.retention = { ...(settings.retention || {}),
++    default: { ...(settings.retention?.default || {}), target: 1000, accrualPercent: 10 } };
++}
++
++if (!changes.length) { console.log('\nEverything already in place. No write needed.'); process.exit(0); }
++
++console.log(`\n${APPLY ? 'APPLYING' : 'DRY RUN — would apply'}:\n  - ${changes.join('\n  - ')}`);
++
++if (APPLY) {
++  const { savedAt } = await save({
++    settings, by: 'changeover-script',
++    note: `14 August changeover: cutoff ${CUTOFF}, ladder rung 0 for all subbies, van stock cap, retention target $1,000.`,
++  });
++  console.log(`\nSaved (versioned) at ${savedAt}. The previous settings version is retained.`);
++} else {
++  console.log('\nNothing written. Re-run with --apply to make it real.');
++}
+diff --git a/settings/portal-settings.json b/settings/portal-settings.json
+index 468588e..412d774 100644
+--- a/settings/portal-settings.json
++++ b/settings/portal-settings.json
+@@ -1,5 +1,5 @@
+ {
+-  "_comment": "Single source of truth for every configurable number. Nothing in lib/ or scripts/ may hardcode a rate, a percentage or a fee \u2014 if it varies by business decision, it belongs here. Replaced by DynamoDB when the portal is deployed; the shape stays the same.",
++  "_comment": "Single source of truth for every configurable number. Nothing in lib/ or scripts/ may hardcode a rate, a percentage or a fee — if it varies by business decision, it belongs here. Replaced by DynamoDB when the portal is deployed; the shape stays the same.",
+   "business": {
+     "name": "Mr Sparky Electrical Services Pty Ltd",
+     "entity": "Company",
+@@ -474,15 +474,81 @@
+   },
+   "_suppliersNote": "The wholesalers the crew actually stands at. On the phone this is a row of chips on the receipt form, so the same supplier is spelled the same way every time - which is what lets spend group and reconcile at all. Aliases are what the DOCKET prints: the paper says MIDDENDORP ELECTRIC CO PTY LTD, the trade says Middy's. Phone numbers are for dialling from the app later, and are left blank rather than guessed. Edited in the portal under Settings > Suppliers.",
+   "suppliers": [
+-    { "id": "middys", "name": "Middy's", "phone": "", "aliases": ["Middendorp", "Middendorp Electric"] },
+-    { "id": "lh", "name": "Lawrence & Hanson", "phone": "", "aliases": ["L&H", "Lawrence and Hanson"] },
+-    { "id": "mmem", "name": "MM Electrical", "phone": "", "aliases": ["MMEM", "MM Electrical Merchandising"] },
+-    { "id": "rexel", "name": "Rexel", "phone": "", "aliases": ["Ideal Electrical", "Rexel Electrical"] },
+-    { "id": "agm", "name": "AGM Electrical Supplies", "phone": "", "aliases": ["AGM", "AGM Electrical"] },
+-    { "id": "auslec", "name": "Auslec", "phone": "", "aliases": [] },
+-    { "id": "cnw", "name": "CNW", "phone": "", "aliases": ["CNW Electrical"] },
+-    { "id": "haymans", "name": "Haymans", "phone": "", "aliases": ["Haymans Electrical"] },
+-    { "id": "bunnings", "name": "Bunnings", "phone": "", "aliases": ["Bunnings Warehouse"] }
++    {
++      "id": "middys",
++      "name": "Middy's",
++      "phone": "",
++      "aliases": [
++        "Middendorp",
++        "Middendorp Electric"
++      ]
++    },
++    {
++      "id": "lh",
++      "name": "Lawrence & Hanson",
++      "phone": "",
++      "aliases": [
++        "L&H",
++        "Lawrence and Hanson"
++      ]
++    },
++    {
++      "id": "mmem",
++      "name": "MM Electrical",
++      "phone": "",
++      "aliases": [
++        "MMEM",
++        "MM Electrical Merchandising"
++      ]
++    },
++    {
++      "id": "rexel",
++      "name": "Rexel",
++      "phone": "",
++      "aliases": [
++        "Ideal Electrical",
++        "Rexel Electrical"
++      ]
++    },
++    {
++      "id": "agm",
++      "name": "AGM Electrical Supplies",
++      "phone": "",
++      "aliases": [
++        "AGM",
++        "AGM Electrical"
++      ]
++    },
++    {
++      "id": "auslec",
++      "name": "Auslec",
++      "phone": "",
++      "aliases": []
++    },
++    {
++      "id": "cnw",
++      "name": "CNW",
++      "phone": "",
++      "aliases": [
++        "CNW Electrical"
++      ]
++    },
++    {
++      "id": "haymans",
++      "name": "Haymans",
++      "phone": "",
++      "aliases": [
++        "Haymans Electrical"
++      ]
++    },
++    {
++      "id": "bunnings",
++      "name": "Bunnings",
++      "phone": "",
++      "aliases": [
++        "Bunnings Warehouse"
++      ]
++    }
+   ],
+   "payment": {
+     "_note": "When a claim becomes due and how remittance reaches the contractor. The portal knows what is outstanding and what is overdue; the bank sends the remittance advice to the address held against the company.",
+@@ -493,5 +559,25 @@
+     "remittanceSentBy": "bank",
+     "_remittanceNote": "'bank' means the payment file carries the remittance email and the bank sends the advice. 'portal' would mean sending it ourselves - not built."
+   },
+-  "_sampleDataNote": "ABNs, bank details, addresses and RCTI agreement dates below are SAMPLES so the build is complete end to end. Replace each in Settings -> Contractor details before anyone is paid; an RCTI raised against a sample ABN is not a valid tax invoice."
++  "_sampleDataNote": "ABNs, bank details, addresses and RCTI agreement dates below are SAMPLES so the build is complete end to end. Replace each in Settings -> Contractor details before anyone is paid; an RCTI raised against a sample ABN is not a valid tax invoice.",
++  "changeover": {
++    "_comment": "The Form 001 era ends here. Null means the old model everywhere — the code ships dark and this date is the switch. Set to 2026-08-14 at go-live.",
++    "cutoffDate": null
++  },
++  "vanStock": {
++    "_comment": "Own material, no receipt. The cap is the rule the tech lives inside; the flag percent is a review flag on the approval panel, never a gate. Zero in byContractor means receipts only for that person.",
++    "defaultCapIncGst": 50,
++    "flagPercentOfInvoice": 5,
++    "byContractor": {}
++  },
++  "compliance": {
++    "_comment": "Ships dark until jsaFormUuid is set. 2 points of the rung hang on >=80% of jobs completing every required item, measured on the same 90-day window as conversion, floored at the changeover.",
++    "jsaFormUuid": null,
++    "passPercent": 80,
++    "penaltyPoints": 2
++  },
++  "contracts": {
++    "_comment": "Settings are the contract. When required is true, a contractor with no locked signed contract cannot submit a claim. Ships dark.",
++    "required": false
++  }
+ }
+diff --git a/test/commission-new-model.test.mjs b/test/commission-new-model.test.mjs
+new file mode 100644
+index 0000000..86401c1
+--- /dev/null
++++ b/test/commission-new-model.test.mjs
+@@ -0,0 +1,155 @@
++/**
++ * The new model — from the changeover date (settings, never hardwired).
++ *
++ * One rate, one owner, no form. Material = receipts sum + declared own
++ * material; both deducted from gross, both reimbursed on top when the rule
++ * says the subbie funds material. Compliance is a flag and a penalty, never
++ * a pre-baked rate.
++ */
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { calculateJob, buildStatement, OUTCOME } from '../lib/commission.mjs';
++
++const CUTOFF = '2026-08-14';
++
++/** A contractor living on both sides of the changeover. */
++const alex = {
++  name: 'Alex Fitzpatrick',
++  sm8StaffUuid: 'uuid-alex',
++  rules: [
++    // Old world: 60/40 company-funded, the three-way split.
++    { from: '2025-01-01', rates: { quoted_and_completed: 40, completed_only: 30, quoted_only: 20 }, materialsFundedBy: 'company' },
++    // New world: rung 0 on the ladder, subbie-funded, one rate.
++    { from: CUTOFF, rates: { rate: 50 }, materialsFundedBy: 'subbie' },
++  ],
++};
++
++test('before the cutoff, no form still means not payable', () => {
++  const r = calculateJob({
++    job: { jobNumber: 'A', invoiceIncGst: 1000, date: '2026-08-13' },
++    forms: [], contractor: alex, cutoffDate: CUTOFF,
++  });
++  assert.equal(r.outcome, OUTCOME.AWAITING_FORM);
++});
++
++test('on the cutoff, no form is fine — completion is the trigger', () => {
++  const r = calculateJob({
++    job: { jobNumber: 'B', invoiceIncGst: 1000, date: CUTOFF, completedByUuid: 'uuid-alex' },
++    forms: [], contractor: alex, cutoffDate: CUTOFF,
++  });
++  assert.equal(r.outcome, OUTCOME.OK);
++  assert.equal(r.model, 'new');
++});
++
++test('no cutoff configured means the old model everywhere', () => {
++  const r = calculateJob({
++    job: { jobNumber: 'C', invoiceIncGst: 1000, date: '2026-09-01' },
++    forms: [], contractor: alex,
++  });
++  assert.equal(r.outcome, OUTCOME.AWAITING_FORM);
++});
++
++test('the money: deducted before the split, reimbursed after', () => {
++  // Invoice 1000, receipts 200, own material 50, rung 0 = 50%.
++  // gross 750 → share 375 → + 250 back = 625. Mr Sparky keeps 375 of the 750.
++  const r = calculateJob({
++    job: {
++      jobNumber: '168001', invoiceIncGst: 1000, date: '2026-08-20',
++      completedByUuid: 'uuid-alex', expenseIncGst: 200, ownMaterialIncGst: 50,
++    },
++    contractor: alex, cutoffDate: CUTOFF,
++  });
++  assert.equal(r.grossProfit, 750);
++  assert.equal(r.share, 375);
++  assert.equal(r.materialsReimbursed, 250);
++  assert.equal(r.payableIncGst, 625);
++  assert.equal(r.vanStockClaimed, 50);
++  assert.equal(r.helpingHand, 0);
++});
++
++test('a padded declaration is only worth cap × (100 − rate)', () => {
++  const honest = calculateJob({
++    job: { jobNumber: 'H', invoiceIncGst: 1000, date: '2026-08-20', completedByUuid: 'uuid-alex' },
++    contractor: alex, cutoffDate: CUTOFF,
++  });
++  const padded = calculateJob({
++    job: { jobNumber: 'P', invoiceIncGst: 1000, date: '2026-08-20', completedByUuid: 'uuid-alex', ownMaterialIncGst: 50 },
++    contractor: alex, cutoffDate: CUTOFF,
++  });
++  // At 50%: he gains $25, not $50 — the split discounts the fake material.
++  assert.equal(padded.payableIncGst - honest.payableIncGst, 25);
++});
++
++test('somebody else completed it — not their job', () => {
++  const r = calculateJob({
++    job: { jobNumber: 'D', invoiceIncGst: 800, date: '2026-08-20', completedByUuid: 'uuid-peter' },
++    contractor: alex, cutoffDate: CUTOFF,
++  });
++  assert.equal(r.outcome, OUTCOME.NOT_THEIR_JOB);
++});
++
++test('missing completer falls back to trusting the assignment', () => {
++  const r = calculateJob({
++    job: { jobNumber: 'E', invoiceIncGst: 800, date: '2026-08-20' },
++    contractor: alex, cutoffDate: CUTOFF,
++  });
++  assert.equal(r.outcome, OUTCOME.OK);
++});
++
++test('compliance failed drops the rate 2 points but keeps the rung', () => {
++  const r = calculateJob({
++    job: { jobNumber: 'F', invoiceIncGst: 1000, date: '2026-08-20', completedByUuid: 'uuid-alex' },
++    contractor: alex, cutoffDate: CUTOFF,
++    compliance: { failed: true, penaltyPoints: 2, note: 'compliance ran at 72%, needed 80%' },
++  });
++  assert.equal(r.ratePct, 48);        // what this job pays
++  assert.equal(r.rungRatePct, 50);    // the rung is not lost
++  assert.equal(r.compliancePenalty, 2);
++  assert.equal(r.payableIncGst, 480);
++  assert.match(r.complianceNote, /72%/);
++});
++
++test('split anchors: rate from the claim date, funding from completion', () => {
++  // Lead claimed on the 10th under the old 40% promise, completed on the
++  // 20th with the tech's own money. He keeps the promised 40 — but the
++  // material he bought comes back, because funding reads the completion date.
++  const r = calculateJob({
++    job: {
++      jobNumber: 'G', invoiceIncGst: 1000, date: '2026-08-20',
++      claimedAt: '2026-08-10', completedByUuid: 'uuid-alex', expenseIncGst: 200,
++    },
++    contractor: alex, cutoffDate: CUTOFF,
++  });
++  assert.equal(r.ratePct, 40);                    // old promise honoured
++  assert.equal(r.materialsFundedBy, 'subbie');    // new reality honoured
++  assert.equal(r.materialsReimbursed, 200);
++  // gross 800 × 40% = 320, + 200 back = 520
++  assert.equal(r.payableIncGst, 520);
++});
++
++test('credit notes reduce the material sum straight through', () => {
++  const r = calculateJob({
++    job: {
++      jobNumber: 'I', invoiceIncGst: 1000, date: '2026-08-20',
++      completedByUuid: 'uuid-alex', expenseIncGst: 187.1, // 200 docket − 12.90 credit
++    },
++    contractor: alex, cutoffDate: CUTOFF,
++  });
++  assert.equal(r.grossProfit, 812.9);
++  assert.equal(r.materialsReimbursed, 187.1);
++});
++
++test('buildStatement carries the cutoff and skips helping hand cleanly', () => {
++  const s = buildStatement({
++    contractor: alex, cutoffDate: CUTOFF,
++    jobs: [
++      { job: { jobNumber: 'old', invoiceIncGst: 500, date: '2026-08-01' }, forms: [] },
++      { job: { jobNumber: 'new', invoiceIncGst: 1000, date: '2026-08-20', completedByUuid: 'uuid-alex' }, forms: [] },
++    ],
++  });
++  const byNumber = Object.fromEntries(s.jobs.map((j) => [j.jobNumber, j]));
++  assert.equal(byNumber.old.outcome, OUTCOME.AWAITING_FORM); // old world still gated
++  assert.equal(byNumber.new.outcome, OUTCOME.OK);            // new world pays
++  assert.equal(s.totals.jobsIncGst, 500);                    // 1000 × 50%
++  assert.equal(s.helperEarnings.length, 0);                  // no forms → no helping hand
++});
+diff --git a/test/compliance.test.mjs b/test/compliance.test.mjs
+new file mode 100644
+index 0000000..85db241
+--- /dev/null
++++ b/test/compliance.test.mjs
+@@ -0,0 +1,69 @@
++/**
++ * Compliance: 2 points of the rung hang on the paperwork.
++ * Run: node --test test/compliance.test.mjs
++ */
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { policyFor, formDoneKeys, jobComplies, complianceRate, complianceAssessment } from '../lib/compliance.mjs';
++
++const JSA = 'jsa-form-uuid';
++const policy = policyFor({ compliance: { jsaFormUuid: JSA, passPercent: 80, penaltyPoints: 2 } });
++
++const job = (n, date, uuid = `u-${n}`) => ({ jobNumber: String(n), uuid, date });
++
++test('formDoneKeys matches by related uuid and by Job Number answer, and fails safe', () => {
++  const done = formDoneKeys([
++    { form_uuid: JSA, active: '1', regarding_object_uuid: 'u-1' },
++    { form_uuid: JSA, active: '1', field_data: JSON.stringify([{ Question: 'Job Number', Response: '167595' }]) },
++    { form_uuid: JSA, active: '0', regarding_object_uuid: 'u-dead' },   // inactive never counts
++    { form_uuid: 'other-form', active: '1', regarding_object_uuid: 'u-2' },
++    { form_uuid: JSA, active: '1', field_data: 'not json' },            // unreadable — no crash, no match
++  ], JSA);
++  assert.equal(done.has('u-1'), true);
++  assert.equal(done.has('167595'), true);
++  assert.equal(done.has('u-dead'), false);
++  assert.equal(done.has('u-2'), false);
++});
++
++test('a job with no policy in force is unmeasured — never a free pass', () => {
++  const noPolicy = policyFor({});   // jsaFormUuid null → ships dark
++  assert.equal(jobComplies(job(1, '2026-08-20'), { policy: noPolicy, jsaDone: new Set() }), null);
++});
++
++test('the 80% window: 9 of 10 passes, 7 of 10 fails, nothing measured is null', () => {
++  const jobs = Array.from({ length: 10 }, (_, i) => job(i, '2026-08-20'));
++  const doneNine = new Set(jobs.slice(0, 9).map((j) => j.uuid));
++  const doneSeven = new Set(jobs.slice(0, 7).map((j) => j.uuid));
++
++  const nine = complianceRate({ jobs, policy, jsaDone: doneNine, cutoffDate: '2026-08-14' });
++  assert.equal(nine.percent, 90);
++  assert.equal(complianceAssessment({ rate: nine, policy }).failed, false);
++
++  const seven = complianceRate({ jobs, policy, jsaDone: doneSeven, cutoffDate: '2026-08-14' });
++  assert.equal(seven.percent, 70);
++  const a = complianceAssessment({ rate: seven, policy });
++  assert.equal(a.failed, true);
++  assert.equal(a.penaltyPoints, 2);
++  assert.match(a.note, /70% \(7 of 10 jobs complete\)/);
++  assert.match(a.note, /needed 80%/);
++
++  assert.equal(complianceRate({ jobs: [], policy, jsaDone: new Set() }), null);
++  assert.equal(complianceAssessment({ rate: null, policy }), null);   // qualifying period: no penalty
++});
++
++test('jobs before the cutoff or the window never count', () => {
++  const jobs = [job(1, '2026-08-10'), job(2, '2026-08-20'), job(3, '2026-05-01')];
++  const r = complianceRate({
++    jobs, policy, jsaDone: new Set(['u-2']),
++    cutoffDate: '2026-08-14', windowStart: '2026-06-01',
++  });
++  assert.equal(r.measured, 1);   // only job 2 — pre-cutoff and pre-window are out
++  assert.equal(r.percent, 100);
++});
++
++test('exactly 80% keeps the rate — the threshold is a floor, not a ceiling', () => {
++  const jobs = Array.from({ length: 10 }, (_, i) => job(i, '2026-08-20'));
++  const done8 = new Set(jobs.slice(0, 8).map((j) => j.uuid));
++  const r = complianceRate({ jobs, policy, jsaDone: done8, cutoffDate: '2026-08-14' });
++  assert.equal(complianceAssessment({ rate: r, policy }).failed, false);
++});
+diff --git a/test/receipt-dupes.test.mjs b/test/receipt-dupes.test.mjs
+index f0e2b20..2bded23 100644
+--- a/test/receipt-dupes.test.mjs
++++ b/test/receipt-dupes.test.mjs
+@@ -48,6 +48,8 @@ test('the same docket on the same job is blocked', () => {
+   assert.equal(r.verdict, 'blocked');
+   assert.equal(r.reason, 'sameJob');
+   assert.match(r.message, /already on job #167595/);
++  // The mechanism is never named. Steven: "I wouldn't give them ideas."
++  assert.doesNotMatch(r.message, /claim it twice|twice would/i);
+ });
+ 
+ test('a receipt never blocks against itself — an edit is not a duplicate', () => {
+@@ -85,7 +87,7 @@ test('a fully claimed docket says so rather than quoting nothing left', () => {
+     existing: [first], incoming: docket({ id: 'RCPT-2', jobNumber: '167610', amountIncGst: 10 }),
+   });
+   assert.equal(r.reason, 'overDocket');
+-  assert.match(r.message, /fully claimed already/);
++  assert.match(r.message, /fully accounted for/);
+ });
+ 
+ test('cents of rounding do not block a legitimate split', () => {
+@@ -218,6 +220,12 @@ test('the owner report merges a docket seen with and without its ABN', () => {
+ 
+ const claimOf = (...jobs) => ({ id: 'CLM-1', lines: jobs.map((n) => ({ jobNumber: n })) });
+ 
++test('the refusal says WHEN it was filed — usually the whole answer', () => {
++  const first = docket({ addedAt: '2026-08-05T09:14:00Z' });
++  const r = checkDocket({ existing: [first], incoming: docket({ id: 'RCPT-2' }) });
++  assert.match(r.message, /filed 5 Aug/);
++});
++
+ test('a queried receipt flags the job inside the claim', () => {
+   const w = claimWarnings({
+     claim: claimOf('167595', '167610'),
+@@ -275,3 +283,45 @@ test('the worse reason wins when a job has both', () => {
+   assert.equal(w[0].severity, 'duplicate');
+   assert.equal(w[0].reasons.length, 2);
+ });
++
++/* ---------- credits, and records that should never have existed ---------- */
++
++test('a credit note is not a duplicate of the invoice it credits', () => {
++  // Suppliers print the original invoice number on the credit, deliberately —
++  // and validateReceipt demands one precisely when the amount is negative. If
++  // the sign were left out of the key, every legitimate credit would be
++  // refused as a duplicate of the purchase it reverses.
++  const invoice = docket({ amountIncGst: 130.17 });
++  const credit = docket({ id: 'CR', amountIncGst: -130.17 });
++  assert.equal(sameDocket(invoice, credit), false);
++  assert.equal(checkDocket({ existing: [invoice], incoming: credit }).verdict, 'ok');
++});
++
++test('but two credits for the same invoice still match', () => {
++  const a = docket({ id: 'CR1', amountIncGst: -130.17 });
++  const b = docket({ id: 'CR2', amountIncGst: -130.17 });
++  assert.equal(sameDocket(a, b), true);
++});
++
++test('a voided receipt stands in nobody\'s way', () => {
++  // Voiding corrects a record; it must not poison the docket for ever.
++  const wrong = docket({ id: 'A', voided: true });
++  const r = checkDocket({ existing: [wrong], incoming: docket({ id: 'B' }) });
++  assert.equal(r.verdict, 'ok');
++  assert.equal(r.reuse, false);
++});
++
++test('voided receipts drop out of the owner report and the claim warnings', () => {
++  const flags = docketFlags({
++    c1: [docket({ id: 'A' })],
++    c2: [docket({ id: 'B', jobNumber: '167610', voided: true })],
++  });
++  assert.equal(flags.crossContractor.length, 0, 'a voided collision is not a collision');
++
++  const w = claimWarnings({
++    claim: { lines: [{ jobNumber: '167595' }] },
++    contractorId: 'c1',
++    receiptsByContractor: { c1: [docket({ voided: true, disputed: true })] },
++  });
++  assert.deepEqual(w, []);
++});
+diff --git a/test/receipts.test.mjs b/test/receipts.test.mjs
+index e5db146..2a3e32f 100644
+--- a/test/receipts.test.mjs
++++ b/test/receipts.test.mjs
+@@ -147,3 +147,36 @@ test('an emailed PDF invoice or a screenshot is as good as a photo', () => {
+   assert.equal(imageKeyFor({ contractorId: 'p-alx', jobNumber: '1', receiptId: 'r', extension: 'pdf' }),
+     'receipts/p-alx/1/r.pdf');
+ });
++
++/* ---------- the new model: receipts ARE the material figure ---------- */
++
++import { payableMaterialIncGst, ownMaterialCapFor, ownMaterialFlag } from '../lib/receipts.mjs';
++
++test('payable material: voided and disputed and paperless rows never pay', () => {
++  const rows = [
++    newReceipt({ ...good, id: 'a', amountIncGst: 200 }),
++    newReceipt({ ...good, id: 'b', amountIncGst: -12.9, invoiceNumber: 'CR-1' }),  // credit note
++    { ...newReceipt({ ...good, id: 'c', amountIncGst: 500 }), voided: true },
++    { ...newReceipt({ ...good, id: 'd', amountIncGst: 90 }), disputed: true },
++    unevidencedFromForm({ jobNumber: '167505', contractorId: 'p-alx', amountIncGst: 40 }),
++  ];
++  assert.equal(payableMaterialIncGst(rows), 187.1);   // 200 − 12.90, nothing else
++  assert.equal(payableMaterialIncGst([]), 0);
++});
++
++test('the own-material cap: default 50, per-contractor override, zero is real', () => {
++  assert.equal(ownMaterialCapFor({}, 'p-alx'), 50);
++  const s = { vanStock: { defaultCapIncGst: 60, byContractor: { 'p-new': 0, 'p-vet': 100 } } };
++  assert.equal(ownMaterialCapFor(s, 'p-alx'), 60);
++  assert.equal(ownMaterialCapFor(s, 'p-vet'), 100);
++  assert.equal(ownMaterialCapFor(s, 'p-new'), 0);     // receipts only — not "fall to default"
++});
++
++test('the 5% review flag flags, and never gates', () => {
++  assert.equal(ownMaterialFlag({ amountIncGst: 50, invoiceIncGst: 1000 }).flagged, false);
++  const f = ownMaterialFlag({ amountIncGst: 50, invoiceIncGst: 250 });
++  assert.equal(f.flagged, true);
++  assert.equal(f.percent, 20);
++  assert.equal(ownMaterialFlag({ amountIncGst: 0, invoiceIncGst: 250 }).flagged, false);
++  assert.equal(ownMaterialFlag({ amountIncGst: 50, invoiceIncGst: 0 }).flagged, false);
++});
+diff --git a/test/shell-script.test.mjs b/test/shell-script.test.mjs
+index 54addc9..9cc2985 100644
+--- a/test/shell-script.test.mjs
++++ b/test/shell-script.test.mjs
+@@ -50,10 +50,10 @@ test('every handler the click listener dispatches to exists', () => {
+                     'receiptsPane', 'companyPane', 'addReceipt', 'viewReceipt', 'saveCompany',
+                     'submitClaim', 'flagDecl', 'openJob', 'showMaterials', 'viewSubbie',
+                     'claimRow', 'groupedList', 'groupYM', 'jobSections',
+-                    'claimActions', 'bulkMove', 'matchJob', 'matchClaim', 'searchSummary',
++                    'matchJob', 'matchClaim', 'searchSummary',
+                     'businessView', 'loadBusiness', 'bizTile', 'section', 'openSection', 'moneyChart', 'runBulk', 'bulkByStatus', 'bulkBar', 'summaryCard', 'unfinishedView',
+                     'docketsSection', 'suppliersSection', 'saveSuppliers', 'addSupplier', 'removeSupplier', 'readSuppliers',
+-                    'queryReceipt', 'raiseAdjustment']) {
++                    'queryReceipt', 'raiseAdjustment', 'moveReceiptTo', 'voidReceipt']) {
+     assert.ok(defined.has(fn), `${fn}() is referenced but never defined`);
+   }
+ });
+@@ -61,10 +61,10 @@ test('every handler the click listener dispatches to exists', () => {
+ test('every data-* hook the markup emits has a listener', () => {
+   // Attributes that carry a value for another hook to read, rather than being
+   // a hook themselves.
+-  const COMPANIONS = new Set(['claimid', 'boxed', 'bulkmonth', 'bulkkey',
++  const COMPANIONS = new Set(['claimid', 'boxed', 'bulkkey',
+     // the docket-flag actions: the hook is data-query / data-adjust, and these
+     // carry the rest of what each one needs
+-    'qjob', 'qid', 'ajob', 'aamt', 'awhy']);
++    'qjob', 'qid', 'ajob', 'aamt', 'awhy', 'mjob', 'vjob', 'von']);
+   const emitted = new Set([...code.matchAll(/data-([a-z]+)=/g)].map((m) => m[1]));
+   const handled = new Set([...code.matchAll(/closest\('\[data-([a-z]+)/g)].map((m) => m[1]));
+   const orphans = [...emitted].filter((a) => !handled.has(a) && !COMPANIONS.has(a));
+@@ -74,11 +74,26 @@ test('every data-* hook the markup emits has a listener', () => {
+ test('every companion attribute is actually read by its hook', () => {
+   // The other half of the pair above — an allowlist that stops being true is
+   // worse than no allowlist.
+-  for (const a of ['claimid', 'qjob', 'qid', 'ajob', 'aamt', 'awhy']) {
++  for (const a of ['claimid', 'qjob', 'qid', 'ajob', 'aamt', 'awhy', 'mjob', 'vjob', 'von']) {
+     assert.ok(code.includes(`getAttribute('data-${a}')`), `data-${a} is emitted but never read`);
+   }
+ });
+ 
++test('no function builds UI that nothing ever calls', () => {
++  // How this test came to exist: Steven filed three receipts against job
++  // 167595 and had nowhere in the portal to look at them. receiptRow() — the
++  // only door into the receipts pane, and therefore into Move and Void — had
++  // been defined and never called since the day it was written. The page was
++  // not broken, it simply did not contain the feature.
++  //
++  // A dead builder is invisible: no error, no blank space, nothing to notice.
++  // The only way it surfaces is somebody going looking for a feature that was
++  // shipped, tested and unreachable.
++  const defined = [...js.matchAll(/(?:async\s+)?function\s+(\w+)/g)].map((m) => m[1]);
++  const dead = defined.filter((fn) => (js.match(new RegExp(`\\b${fn}\\b`, 'g')) || []).length <= 1);
++  assert.deepEqual(dead, [], 'defined but never called — either wire it up or delete it');
++});
++
+ test('every CSS class the script uses is defined in the stylesheet', () => {
+   const css = html.split('<style>')[1].split('</style>')[0];
+   // Only the ones carrying meaning; a missing pill style renders as bare text.
