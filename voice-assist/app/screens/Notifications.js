@@ -29,6 +29,7 @@ import {
 } from "react-native";
 import { Card, Empty, Header } from "../components/ui";
 import { C, R, S, T } from "../lib/theme";
+import { ago } from "../lib/when";
 import * as portal from "../lib/portal";
 
 /** A row with nothing to press is a row already dealt with. */
@@ -180,7 +181,12 @@ export default function Notifications({ visible = true, onCount }) {
             <Card key={String(row.id)} style={[s.row, !outstanding(row) && s.done]}>
               <View style={s.rowTop}>
                 <Text style={s.title}>{row.title || "A question for you"}</Text>
-                {row.when ? <Text style={s.when}>{row.when}</Text> : null}
+                {/* `when` arrives ISO-8601 in UTC (network session, 17 Oct
+                    2026). lib/when turns it into words, and anything it has to
+                    print as a clock time goes through Australia/Sydney - a UTC
+                    time shown to a tradesman here is out by ten or eleven
+                    hours, and in the afternoon by a day as well. */}
+                {row.when ? <Text style={s.when}>{ago(row.when)}</Text> : null}
               </View>
 
               {row.body ? <Text style={s.bodyText}>{row.body}</Text> : null}
@@ -193,7 +199,7 @@ export default function Notifications({ visible = true, onCount }) {
                  */
                 <Text style={s.answered}>
                   {"✓ "}{row.answered.text || "Answered"}
-                  {row.answered.at ? ` · ${row.answered.at}` : ""}
+                  {row.answered.at ? ` · ${ago(row.answered.at)}` : ""}
                 </Text>
               ) : (
                 <>
