@@ -198,6 +198,22 @@ export default function PassJob({ jobNumber, onDone }) {
                               {m.invoiceNumber ? ` · ${m.invoiceNumber}` : ""}
                             </Text>
                             {m.date ? <Text style={T.small}>{at(m.date)}</Text> : null}
+                            {/*
+                              * SOMEBODY ELSE'S MONEY, in amber.
+                              *
+                              * A job can be passed TWICE, so the man looking at
+                              * this list is not always the man who bought what
+                              * is on it - "it is his job so it is his material"
+                              * stops being true the moment it has moved before.
+                              *
+                              * Amber because section 21 says amber is money
+                              * that may be owed to somebody. NEVER red: red is
+                              * an exception, and buying material on a job you
+                              * were handed is not a wrong thing to have done.
+                              */}
+                            {m.boughtByMe === false && m.boughtBy ? (
+                              <Text style={s.matOther}>Bought by {m.boughtBy}</Text>
+                            ) : null}
                           </View>
                           <Text style={[s.matAmt, mono]}>{money(m.amountIncGst)}</Text>
                         </Pressable>
@@ -225,28 +241,6 @@ export default function PassJob({ jobNumber, onDone }) {
                     <Text style={s.chev}>{sending === String(c.id) ? "..." : "›"}</Text>
                   </Pressable>
                 ))}
-
-                {/*
-                  * BACK ON THE NETWORK, and it was Steven's own answer rather
-                  * than one of the two we offered him: "resubmit the job to the
-                  * network ... haven't spoken to anyone."
-                  *
-                  * Passing it to a named man is what you do AFTER a phone call.
-                  * This is for when there has not been one - it goes up for
-                  * anybody, first to take it, which is the Available tab doing
-                  * the job it already does.
-                  */}
-                <Pressable
-                  style={[s.pick, s.network]}
-                  disabled={!!sending}
-                  onPress={() => send({ toNetwork: true, handedOverIds: [...handed] }, "network")}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.pickName}>Put It Back On The Network</Text>
-                    <Text style={T.small}>Anyone can take it. First one in gets it.</Text>
-                  </View>
-                  <Text style={s.chev}>{sending === "network" ? "..." : "›"}</Text>
-                </Pressable>
 
                 {!(state?.contractors || []).length ? (
                   <Text style={[T.small, { marginTop: 10 }]}>
@@ -295,6 +289,7 @@ const s = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 10,
     minHeight: S.touch, borderBottomWidth: 1, borderBottomColor: C.line,
   },
+  matOther: { color: C.activeLight, fontSize: 12.5, fontWeight: "600" },
   // Glove-sized and square, like every other tick in the app.
   tick: {
     width: 22, height: 22, borderRadius: 6,
@@ -309,7 +304,6 @@ const s = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 10,
     minHeight: S.touch, borderBottomWidth: 1, borderBottomColor: C.line,
   },
-  network: { marginTop: 6, borderBottomWidth: 0 },
   pickName: { flex: 1, color: C.ink, fontSize: 15.5, fontWeight: "700" },
   close: {
     marginTop: 14, minHeight: S.touch, justifyContent: "center", alignItems: "center",

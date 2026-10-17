@@ -441,8 +441,30 @@ export const passTargets = (jobNumber) => get(`/api/jobs/passto${qs({ jobNumber 
  *   { cancel: true }    take the offer back before he answers. His call the
  *                       same night: nothing has moved, so nothing is undone.
  */
-export const passJob = ({ jobNumber, toId, toNetwork, cancel, handedOverIds }) =>
-  post("/api/jobs/pass", { jobNumber, toId, toNetwork, cancel, handedOverIds });
+export const passJob = ({ jobNumber, toId, cancel, handedOverIds }) =>
+  post("/api/jobs/pass", { jobNumber, toId, cancel, handedOverIds });
+
+/*
+ * PUTTING A JOB BACK ON THE NETWORK IS DECIDED AGAINST - do not re-add it.
+ *
+ * Steven, 17 Oct 2026: "Don't worry about putting the job back on the network.
+ * If you have managed to get a job and you want to pass it on for whatever
+ * reason, that's fine." Passing it to a named man is the whole feature.
+ *
+ * The route still refuses `toNetwork`, and that refusal is the settled answer
+ * rather than something waiting to be built. Three reasons, and the middle one
+ * was measured rather than argued:
+ *
+ *   - it is the only action in the system that would WIPE an accept record
+ *     instead of laying one over it, which decision 12 exists to prevent
+ *   - the Available tab windows on when a job LANDED, so a job taken three
+ *     weeks ago and released today would go back up invisible to everybody,
+ *     including the man who released it
+ *   - material already bought against it would follow the job to a stranger
+ *
+ * The parameter is gone rather than left unused, so nobody wires a button to
+ * it on the strength of finding it here.
+ */
 
 /*
  * `handedOverIds` is WHICH MATERIAL GOES WITH THE JOB, and an empty array is a
