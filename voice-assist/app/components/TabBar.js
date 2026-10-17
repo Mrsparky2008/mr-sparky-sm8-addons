@@ -2,6 +2,7 @@
 //
 //   Jobs       what am I doing
 //   Available  what is up for grabs
+//   Alerts     what is waiting on an answer from me  (labelled Notifications)
 //   Money      what am I owed
 //   Team       what is the crew carrying  (employees, in Money's slot)
 //   Business   how is the business        (admin only)
@@ -42,13 +43,22 @@ export const TABS = {
    * not a feature, and everything it reached is one tap away on the segment it
    * was pointing at.
    *
-   * The slot it freed goes to NOTIFICATIONS, which is waiting on the portal's
-   * routes (docs/APP-TABS-AND-NOTIFICATIONS.md in mr-sparky-network).
-   *
    * Available deliberately did NOT move. Folding it into the Jobs segment was
    * the first plan and it would have left `goingNow` - the dot that is how a
    * man learns there is work up - with nowhere on the bar to live.
    */
+  /*
+   * NOTIFICATIONS takes the slot My Day left - the Telegram questions, in the
+   * app (docs/APP-TABS-AND-NOTIFICATIONS.md in mr-sparky-network).
+   *
+   * THE KEY IS `alerts`, NOT `notifications`, on purpose. "Notifications" in
+   * this codebase already means the iOS push pipe - `expo-notifications`,
+   * PUSHDEVICE rows, lib/push.mjs - and those are the thing that RINGS the
+   * phone, not the thing listed on this tab. One word for two mechanisms is
+   * how a cold session wires the wrong one. The label a man reads is
+   * Notifications; the key underneath says which of the two it is.
+   */
+  alerts: { icon: "bell", label: "Notifications" },
   /*
    * THE CREW'S WORK. Steven, 14 Oct 2026: "I prefer the team tab... the
    * available, the jobs, the day, and the team."
@@ -87,7 +97,20 @@ export default function TabBar({ tabs, value, onChange, badges = {} }) {
                 </View>
               ) : null}
             </View>
-            <Text style={[s.label, on && { color: C.ink }]}>{t.label}</Text>
+            {/* NOTIFICATIONS is thirteen letters and the widest label the bar
+                has ever carried - at four tabs it is within a few pixels of
+                its own column, and at five it is over. Shrinking beats
+                wrapping or clipping: a label on two lines pushes the icons out
+                of line with each other, and a clipped one reads as a different
+                word. Only a label that does not fit moves at all. */}
+            <Text
+              style={[s.label, on && { color: C.ink }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+            >
+              {t.label}
+            </Text>
           </Pressable>
         );
       })}

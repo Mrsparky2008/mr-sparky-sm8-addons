@@ -3,6 +3,7 @@
 // One question per tab:
 //   Jobs      what am I doing   — his jobs, today's diary, a job card
 //   Available what is up        — nobody has taken it, first to tap takes it
+//   Alerts    what wants me     — the Telegram questions, labelled Notifications
 //   Money     what am I owed    — the subcontractor portal, natively
 //   Team      what is the crew carrying — employees, in Money's slot
 //   Business  how's it going    — admin only: the claims waiting on a decision
@@ -50,6 +51,7 @@ import ClaimDetail from "./screens/pay/ClaimDetail";
 import SubmitClaim from "./screens/pay/SubmitClaim";
 import Available from "./screens/Available";
 import Team from "./screens/Team";
+import Notifications from "./screens/Notifications";
 import AddReceipt from "./screens/pay/AddReceipt";
 import OwnMaterial from "./screens/pay/OwnMaterial";
 import JobMaterial from "./screens/JobMaterial";
@@ -104,6 +106,7 @@ function Shell() {
   const [workView, setWorkView] = useState("jobs");   // jobs | today
   const [waiting, setWaiting] = useState(0);          // claims needing a decision
   const [goingNow, setGoingNow] = useState(0);        // jobs nobody has taken yet
+  const [toAnswer, setToAnswer] = useState(0);        // questions waiting on him
   const [account, setAccount] = useState(false);      // the who-am-I / sign-out sheet
 
   const stack = Array.isArray(stacks[tab]) ? stacks[tab] : [stacks[tab]];
@@ -259,6 +262,7 @@ function Shell() {
     setWho(null);
     setWaiting(0);
     setGoingNow(0);
+    setToAnswer(0);
     setDemoSignedIn(false);
     setWhoPending(false);
     emailRef.current = null;
@@ -415,12 +419,23 @@ function Shell() {
      * double." It was a bottom-bar button that jumped to the Today segment
      * already inside Jobs, so deleting it cost a shortcut and no feature.
      *
-     * NOTIFICATIONS takes the slot - the Telegram questions, in the app - and
-     * it is not here yet because its portal routes do not exist yet. The spec
-     * is docs/APP-TABS-AND-NOTIFICATIONS.md in mr-sparky-network, and the
-     * routes are the network session's to write. Nothing is built against a
-     * shape nobody has returned yet.
+     * NOTIFICATIONS takes the slot - the Telegram questions, in the app.
+     * Spec: docs/APP-TABS-AND-NOTIFICATIONS.md in mr-sparky-network.
+     *
+     * IT IS HERE BEFORE ITS PORTAL ROUTES ARE, and that was Steven's call on
+     * 17 Oct 2026 after finding it missing: "how come you're not [showing it]
+     * then... I didn't know I have to wait." He was right. Only the CONTENT
+     * waits on `GET /api/notifications` - the tab, the screen and the
+     * answering do not, and a 404 on that route is drawn as "not switched on
+     * yet" rather than as a fault.
+     *
+     * Nothing is built against an invented row shape either: the portal sends
+     * the BUTTONS along with the rows, so a new kind of question is a change at
+     * their end and none at all at this one.
+     *
+     * Portal-decided like the rest, so it can be taken away without a release.
      */
+    ...(can.notifications === false ? [] : ["alerts"]),
     /*
      * TEAM sits where Money sits for a subbie, so the bar stays the same width
      * for everybody. Steven, 14 Oct 2026: "the available, the jobs, the day,
@@ -561,6 +576,18 @@ function Shell() {
             onOpenJob={(j) => { setTab("work"); openJob(j.job_number); }}
           />
         </View>
+
+        {/* ---- Notifications ----------------------------------------------
+            The Telegram questions, in the app. One screen, no stack - every
+            row is answered where it sits, because a question that takes you
+            to another screen to answer it is a question that waits. Mounted
+            from sign-in like Available, so its count is right before the tab
+            has ever been opened. */}
+        {can.notifications === false ? null : (
+          <View style={[s.fill, tab !== "alerts" && s.hidden]} pointerEvents={tab === "alerts" ? "auto" : "none"}>
+            <Notifications visible={tab === "alerts"} onCount={setToAnswer} />
+          </View>
+        )}
 
         {/* ---- Team -------------------------------------------------------
             What the rest of the crew is carrying. Same shape as Available:
@@ -772,7 +799,11 @@ function Shell() {
           if (t === tab) { resetTab(t); return; }
           setTab(t);
         }}
-        badges={{ admin: waiting, available: goingNow }}
+        /* Notifications gets its OWN count, never folded into goingNow: two
+           different things are outstanding and one number for both would be
+           meaningless. One badge colour on the bar, not two - the bar has one
+           badge style and two kinds of urgent read as two systems. */
+        badges={{ admin: waiting, available: goingNow, alerts: toAnswer }}
       />
 
       <AccountSheet

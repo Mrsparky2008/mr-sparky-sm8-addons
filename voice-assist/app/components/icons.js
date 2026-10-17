@@ -92,6 +92,12 @@ const SHAPES = {
     <Path key="a" d="M12 2.5v6M12 15.5v6M2.5 12h6M15.5 12h6" />,
     <Path key="b" d="M5.3 5.3l4.2 4.2M14.5 14.5l4.2 4.2M18.7 5.3l-4.2 4.2M9.5 14.5l-4.2 4.2" />,
   ],
+  // The one notification icon everybody already knows. Line-work only, like
+  // the rest - the dot on the bar carries the urgency, not the glyph.
+  bell: [
+    <Path key="a" d="M12 3.2a5.4 5.4 0 0 0-5.4 5.4c0 3.9-1.4 5.2-2 6.2-.3.6.1 1.2.8 1.2h13.2c.7 0 1.1-.6.8-1.2-.6-1-2-2.3-2-6.2A5.4 5.4 0 0 0 12 3.2z" />,
+    <Path key="b" d="M10 18.8a2 2 0 0 0 4 0" />,
+  ],
   people: [
     <Circle key="a" cx="9" cy="9" r="2.8" />,
     <Path key="b" d="M3.8 18.5c.6-3 9.8-3 10.4 0" />,

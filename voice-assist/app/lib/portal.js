@@ -365,3 +365,43 @@ export const teamJobs = () => get("/api/jobs/team");
  * anybody is a way to wake every phone in the business at 3am.
  */
 export const testPush = () => post("/api/push/test", {});
+
+/*
+ * THE TELEGRAM QUESTIONS, IN THE APP.
+ *
+ * Today a bot posts "Who picked this up?" into a Telegram group and waits for
+ * somebody to type back. These two routes are the same conversation without
+ * Telegram in it, and they are the network session's to write
+ * (docs/APP-TABS-AND-NOTIFICATIONS.md in mr-sparky-network).
+ *
+ * NEITHER EXISTS YET. The portal's API Gateway has no catch-all, so an
+ * undeclared route answers 404 before the authoriser even runs - which is why
+ * the screen treats a 404 on these two as "not switched on yet" and says so in
+ * those words, rather than as a fault. The moment the routes land, nothing in
+ * the app changes.
+ *
+ * THE SHAPE THE SCREEN RENDERS, and every field of it is optional so a row
+ * carrying something unexpected still draws rather than crashing a tab:
+ *
+ *   { badge, rows: [{
+ *       id, kind, title, body, when,
+ *       answered: { text, at } | null,
+ *       actions: [{ key, label, needsText, placeholder, tone }]
+ *   }] }
+ *
+ * ACTIONS COME FROM THE SERVER, and that is the one decision here worth
+ * defending. The portal already knows what it is willing to accept for a given
+ * question; a phone that invents the buttons would be a second opinion about
+ * that, and a new kind of notification would then need an App Store trip. The
+ * same rule as `can`: the phone renders what it is told.
+ */
+export const notifications = () => get("/api/notifications");
+
+/*
+ * `text` carries whatever he typed, UNPARSED. The bot already pulls supplier,
+ * invoice numbers and job numbers out of free text server-side
+ * (`supplierFrom`, `invoiceNumbersFrom`, `jobFrom`), and a second parser on a
+ * phone is how the two quietly stop agreeing about what a man said.
+ */
+export const answerNotification = ({ id, action, text }) =>
+  post("/api/notifications/answer", { id, action, text });
