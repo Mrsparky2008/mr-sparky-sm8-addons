@@ -405,3 +405,41 @@ export const notifications = () => get("/api/notifications");
  */
 export const answerNotification = ({ id, action, text }) =>
   post("/api/notifications/answer", { id, action, text });
+
+/*
+ * PASSING A JOB ON, before anybody has done it.
+ *
+ * Steven, 17 Oct 2026: a job only becomes visible to a second contractor
+ * because somebody allocated it, so the honest way to give work away is to
+ * offer it and have the other man take it - not to schedule it to him and
+ * argue about whose it was afterwards. CLAUDE.md section 37.
+ *
+ * THE JOB NEVER LEAVES UNTIL HE SAYS YES. "If he decides to say no, it never
+ * comes back, it never leaves until he says yes. So it remains on the original
+ * acceptor." So an offer moves NOTHING - no ownership, no allocation, no
+ * money - and ignoring one is a valid answer. There is no chaser and no
+ * expiry: nothing in this system times out (section 20, rule 10).
+ *
+ * WHO MAY RECEIVE ONE IS THE PORTAL'S DECISION AND NOT THIS SCREEN'S. The list
+ * is filtered by canAccessJobs at the other end, because passing work on would
+ * otherwise be a way to put a real job in front of somebody who was never
+ * approved in ServiceM8 - the one step decision 8 says never to automate.
+ *
+ * ACCEPTING an offer needs nothing here at all: it arrives as a row on the
+ * Notifications tab and is answered through answerNotification, like every
+ * other question. Only SENDING lives on this screen.
+ */
+export const passTargets = (jobNumber) => get(`/api/jobs/passto${qs({ jobNumber })}`);
+
+/*
+ * Three things through one route, because they are one decision with three
+ * answers and the portal should settle them together.
+ *
+ *   { toId }            offer it to one contractor you have spoken to
+ *   { toNetwork: true } put it back up for anybody - Steven, 17 Oct 2026,
+ *                       for when you "haven't spoken to anyone"
+ *   { cancel: true }    take the offer back before he answers. His call the
+ *                       same night: nothing has moved, so nothing is undone.
+ */
+export const passJob = ({ jobNumber, toId, toNetwork, cancel }) =>
+  post("/api/jobs/pass", { jobNumber, toId, toNetwork, cancel });

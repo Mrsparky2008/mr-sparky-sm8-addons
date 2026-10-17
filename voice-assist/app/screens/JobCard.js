@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Empty, Header, Row, SectionLabel, StatusChip } from "../components/ui";
+import PassJob from "../components/PassJob";
 import Icon from "../components/icons";
 import { C, R, S, T, money, mono, oneLine } from "../lib/theme";
 import { fetchJob } from "../lib/api";
@@ -272,6 +273,17 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                 </Pressable>
               ))}
             </Card>
+
+            {/*
+              * GIVING IT AWAY belongs here and TAKING one does not, which is
+              * the same distinction the comment below draws. This job is
+              * already his - that is why it is on this screen - so the only
+              * ownership question it can honestly ask is whether he wants to
+              * keep it (CLAUDE.md section 37).
+              *
+              * It draws nothing at all until the portal has a route for it.
+              */}
+            <PassJob jobNumber={jobNumber} />
 
             {/*
               * NO ACCEPT BUTTON HERE, and it was wrong to put one here.
