@@ -1,10 +1,10 @@
 // AI Assist — the Mr Sparky app.
 //
-// Four questions, one tab each:
-//   Work      what am I doing   — jobs, today's diary, a job card
-//   AI Assist ask about it      — opens Claude with a primer, outside the app
-//   My day    what's booked     — today's bookings
+// One question per tab:
+//   Jobs      what am I doing   — his jobs, today's diary, a job card
+//   Available what is up        — nobody has taken it, first to tap takes it
 //   Money     what am I owed    — the subcontractor portal, natively
+//   Team      what is the crew carrying — employees, in Money's slot
 //   Business  how's it going    — admin only: the claims waiting on a decision
 //
 // Role-shaped: a subcontractor never learns the last tab exists. The portal
@@ -373,9 +373,9 @@ function Shell() {
     );
   }
 
-  // AI Assist (Claude via the connector) does
-  // the talking. The bar carries the everyday four: Work, AI Assist, My day,
-  // Money - plus Business for the admin.
+  // The bar carries Jobs, Available and Money - plus Team for an employee and
+  // Business for the admin. Talking to the assistant happens in Claude itself,
+  // opened by the blue button on a job card, which carries the job with it.
   /*
    * What this person may see. The portal decides it and sends it on /api/me;
    * the phone renders what it is told it may have.
@@ -410,11 +410,21 @@ function Shell() {
      * release on mine.
      */
     ...(can.available === false ? [] : ["available"]),
-    "day",
     /*
-     * TEAM sits where Money sits for a subbie, so the bar stays four wide for
-     * everybody. Steven, 14 Oct 2026: "the available, the jobs, the day, and
-     * the team."
+     * MY DAY WAS HERE until 17 Oct 2026. Steven: "Remove My Day because it is
+     * double." It was a bottom-bar button that jumped to the Today segment
+     * already inside Jobs, so deleting it cost a shortcut and no feature.
+     *
+     * NOTIFICATIONS takes the slot - the Telegram questions, in the app - and
+     * it is not here yet because its portal routes do not exist yet. The spec
+     * is docs/APP-TABS-AND-NOTIFICATIONS.md in mr-sparky-network, and the
+     * routes are the network session's to write. Nothing is built against a
+     * shape nobody has returned yet.
+     */
+    /*
+     * TEAM sits where Money sits for a subbie, so the bar stays the same width
+     * for everybody. Steven, 14 Oct 2026: "the available, the jobs, the day,
+     * and the team."
      *
      * Portal-decided, like the rest. Off unless it says on, because a man with
      * no crew opening a Team tab learns nothing and wonders what he is missing.
@@ -745,9 +755,12 @@ function Shell() {
         tabs={tabs}
         value={tab}
         onChange={(t) => {
-          // Two of these are ACTIONS, not places: AI Assist opens Claude and
-          // My day jumps to the Work tab's diary. Neither becomes "current".
-          if (t === "day") { setTab("work"); setWorkView("today"); return; }
+          /*
+           * Every tab in the bar is now a PLACE. The two that were actions -
+           * AI Assist, which opened Claude, and My day, which jumped to the
+           * Today segment inside Jobs - are both gone, so there is no longer a
+           * button here that does something without becoming "current".
+           */
           /*
            * Tapping the tab you are already on takes you back to the top of
            * it. Steven, 13 Oct 2026: "I feel like the thumb works better from

@@ -1,10 +1,10 @@
 // The questions the app answers, one per slot.
 //
-//   Work       what am I doing
-//   AI Assist  ask Claude (an ACTION - opens Claude, never becomes "current")
-//   My day     where am I meant to be
+//   Jobs       what am I doing
+//   Available  what is up for grabs
 //   Money      what am I owed
-//   Business   how is the business  (admin only)
+//   Team       what is the crew carrying  (employees, in Money's slot)
+//   Business   how is the business        (admin only)
 //
 // Role-shaped: a subcontractor never learns the admin slot exists. Icons are
 // white line-work; the Mr Sparky yellow marks where you are - except the
@@ -32,7 +32,23 @@ export const TABS = {
    * with it and does the work.
    */
   available: { icon: "spark", label: "Available", tint: "#2F9E57" },
-  day: { icon: "board", label: "My day" },
+  /*
+   * MY DAY WAS DELETED, 17 Oct 2026, and it is worth saying why here so it is
+   * not added back as an oversight.
+   *
+   * Steven: "Remove My Day because it is double." It was the one entry in this
+   * list that was never a screen - a bottom-bar button that jumped to the
+   * Today segment already sitting inside Jobs. Deleting it removed a shortcut,
+   * not a feature, and everything it reached is one tap away on the segment it
+   * was pointing at.
+   *
+   * The slot it freed goes to NOTIFICATIONS, which is waiting on the portal's
+   * routes (docs/APP-TABS-AND-NOTIFICATIONS.md in mr-sparky-network).
+   *
+   * Available deliberately did NOT move. Folding it into the Jobs segment was
+   * the first plan and it would have left `goingNow` - the dot that is how a
+   * man learns there is work up - with nowhere on the bar to live.
+   */
   /*
    * THE CREW'S WORK. Steven, 14 Oct 2026: "I prefer the team tab... the
    * available, the jobs, the day, and the team."

@@ -145,9 +145,11 @@ export default function Jobs({ onOpenJob, onDiary, onAllJobs, onSignOut, onAccou
         )}
       </ScrollView>
 
-      {/* The dock retired 30 Aug 2026: AI Assist and My day live in the tab
-          bar now, and signing out is a tap on your name up top. The list
-          gets the whole screen back. */}
+      {/* The dock retired 30 Aug 2026, and signing out is a tap on your name
+          up top. The list gets the whole screen back. Both buttons it carried
+          have since gone: AI Assist moved onto the job card, where it already
+          knows which job you mean, and My day was deleted on 17 Oct 2026 -
+          today's bookings are the Today segment at the top of this screen. */}
 
       <KeyboardToggle inputRef={searchRef} />
     </View>
