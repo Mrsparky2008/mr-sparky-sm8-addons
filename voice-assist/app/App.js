@@ -250,9 +250,25 @@ function Shell() {
    * or threw took the whole sign-out with it and said nothing, while the sheet
    * had already closed as though it had worked.
    *
-   * So: END THE SESSION FIRST. It is all local and it cannot fail. Then tell
-   * the portal, as a courtesy, with a time limit - because a phone being handed
-   * over must not stay signed in waiting for a server that is not answering.
+   * So the SCREEN goes back to the front door first, with nothing awaited in
+   * front of it, and nothing below can leave him looking at a signed-in app.
+   *
+   * CORRECTED 17 Oct 2026, and the correction is the whole point of the
+   * ordering now. That rewrite went on to clear the CREDENTIALS before telling
+   * the portal - which quietly made telling the portal impossible, because the
+   * DELETE is authenticated and the credentials it needs had just been
+   * deleted. The fix was right about the unhandled rejection and wrong about
+   * the order, in the opposite direction to the bug it was fixing.
+   *
+   * The order that satisfies all three, and each step says why in place:
+   *   1. the screen        - local, instant, nothing awaited above it
+   *   2. the push DELETE   - needs the session, so it goes BEFORE the session
+   *                          is destroyed, capped at five seconds
+   *   3. the credentials   - local, cannot fail, and runs whatever step 2 did
+   *
+   * The rule that has not changed and must not: a portal that hangs or throws
+   * can never leave him signed in. Step 2 is capped and its error swallowed
+   * for exactly that reason.
    */
   async function handleSignOut() {
     // 1. The screen goes back to the front door immediately. No await above
@@ -268,26 +284,53 @@ function Shell() {
     emailRef.current = null;
     setEmail(null);
 
-    // 2. The credentials. Local, and the one failure worth reporting.
-    let cleared = true;
-    try {
-      const r = await signOut();
-      cleared = r?.cleared !== false;
-    } catch {
-      cleared = false;
-    }
-
-    // 3. Retire the push registration. A courtesy to the portal and a real
-    //    protection - a handset must not keep ringing with the last man's
-    //    jobs - but never a reason to still be signed in. Five seconds, then
-    //    we stop waiting; the portal retires a device on a 410 from Apple
-    //    anyway, so the worst case is it learns later rather than never.
+    /*
+     * 2. Retire the push registration - and it has to be HERE, before the
+     *    credentials go, which it was not until 17 Oct 2026.
+     *
+     *    THE BUG, found by the network session reading this chain and
+     *    confirmed here: `signOut()` nulls the id token and deletes the stored
+     *    refresh token (lib/auth.js), and `disablePush` is an authenticated
+     *    call - `call()` does `await getIdToken()`, which then has nothing to
+     *    refresh from and throws "no stored session". So the DELETE never left
+     *    the phone, and the `.catch(() => {})` below swallowed the evidence.
+     *    Step 2 was destroying what step 3 needed.
+     *
+     *    MEASURED, not reasoned: the one live PUSHDEVICE row still reads
+     *    `retiredAt: null` after a sign-out and sign-in on 14 Oct. The note in
+     *    CLAUDE.md section 29 - "no DELETE arrived while he was trying" - was
+     *    this same symptom. The fix that day was right about the unhandled
+     *    rejection and never touched the cause.
+     *
+     *    NOT FIXED AT THE PORTAL END, deliberately. It could accept a bare
+     *    token with no session, and then anybody guessing a push token could
+     *    retire anybody's handset. Weakening the authenticated side to work
+     *    around an ordering mistake on this side is the wrong trade.
+     *
+     *    THE COST OF THE REORDER, stated rather than hidden: the credentials
+     *    now live up to five seconds longer than they did. That is the price
+     *    of the DELETE being possible at all, and it buys a real protection -
+     *    a handset handed back must not keep ringing with the last man's jobs.
+     *    Still never a reason to stay signed in, so the five-second cap stays
+     *    and the error is still swallowed: the portal retires a device on a
+     *    410 from Apple anyway, so the worst case is it learns later rather
+     *    than never.
+     */
     const token = alerts?.token?.current;
     if (token) {
       await Promise.race([
         disablePush(token).catch(() => {}),
         new Promise((r) => setTimeout(r, 5000)),
       ]);
+    }
+
+    // 3. The credentials. Local, and the one failure worth reporting.
+    let cleared = true;
+    try {
+      const r = await signOut();
+      cleared = r?.cleared !== false;
+    } catch {
+      cleared = false;
     }
 
     /*
