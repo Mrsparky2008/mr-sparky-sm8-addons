@@ -5,39 +5,34 @@ import { C, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
 import { StatusChip } from "../../components/ui";
 
-/*
- * Why a job is not payable yet, in the words the office uses for it.
- *
- * THIS MAP IS A FALLBACK, NOT THE SOURCE. The portal owns the reason - it has
- * its own `blockedWhy` in the same words - and this list went stale the moment
- * the portal grew an outcome nobody told the app about: a SETTLING job printed
- * the word SETTLING at a tradesman. So `heldWhy` below prefers whatever the
- * server sent with the row, and only falls back to these.
- */
-export const HELD = {
-  AWAITING_FORM: "Waiting on Form 001",
-  AMBIGUOUS_FORM: "More than one Form 001 — needs a human",
-  NOT_THEIR_JOB: "Not attributed to you",
-  NO_RULE: "No rate in force on that date",
-  // The portal's own wording for these three (api/shell.mjs blockedWhy).
-  SETTLING: "Material still arriving",
-  AWAITING_INVOICE: "Awaiting material confirmation",
-  BILL_NOT_ALLOCATED: "A bill for this job is not allocated",
-  NO_VALUE: "No invoice value",
-};
-
 /**
- * The reason, for the row he is looking at.
+ * Why a job is not payable yet - in the server's words, every time.
  *
- * A SETTLING job carries its own sentence - "Awaiting clearing period - 3
- * working days to go" - because the day count is in it, and a count the phone
- * worked out for itself is a second copy of a rule that can drift from the
- * server's. Network session, 18 Oct 2026: print `settling.say`, do not
- * compose your own.
+ * THERE IS NO OUTCOME -> WORDS MAP IN THE APP ANY MORE. There was, and it was
+ * the thing that printed the bare word SETTLING at a tradesman: the portal
+ * grew an outcome and nobody told the phone. Retired 18 Oct 2026 once the
+ * server started sending the sentence (network session, portal #505).
+ *
+ * `why` is a finished sentence on every non-OK row, worded by whyBlocked() in
+ * the portal's lib/commission.mjs and stamped in the one place all three price
+ * paths meet - so a path that grows a new outcome cannot forget it, and there
+ * is a test at that end that fails if an outcome has no sentence or if its
+ * sentence is the enum itself. An OK row carries no `why` at all.
+ *
+ * AND IT SAYS THINGS NO MAP COULD HAVE SAID. "Customer not invoiced yet" is a
+ * condition layered on an outcome rather than an outcome of its own, so there
+ * are more sentences than there are outcomes. A phone working the reason out
+ * from a code would have printed the wrong one of the two.
+ *
+ * `settling.say` is kept below for one case only: a statement already in
+ * memory, fetched before #505. It is the same string, so nothing changes when
+ * it stops being reached - and the day it cannot be, it goes.
  */
 export function heldWhy(job) {
-  if (!job || !job.outcome || job.outcome === "OK") return null;
-  return job.settling?.say || job.why || HELD[job.outcome] || "Not claimable yet";
+  if (!job) return null;
+  if (job.why) return job.why;
+  if (!job.outcome || job.outcome === "OK") return null;
+  return job.settling?.say || "Not claimable yet";
 }
 
 /**
