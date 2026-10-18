@@ -15,6 +15,7 @@ import Icon from "../../components/icons";
 import { C, R, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
 import { PayError } from "./shared";
+import { at } from "../../lib/when";
 
 export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) {
   const [data, setData] = useState(null);
@@ -49,6 +50,22 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
     handovers = { mine: [], theirs: [] }, owedBack } = data;
 
   const heldCount = (st.jobs || []).filter((j) => j.outcome !== "OK").length;
+  /*
+   * FINISHED, AND CLEARING. A completed job waits five working days before it
+   * can be claimed, so the material on it is settled by the time he signs
+   * (portal #501, 18 Oct 2026).
+   *
+   * It is said HERE as well as on the claim screen, because this is where he
+   * lands. On a day when everything claimable is already claimed there is no
+   * Make a claim button at all, so without this line a man with three jobs
+   * clearing sees "$0.00, 0 jobs" and nothing else - which is the vanishing
+   * he complained about, one screen up.
+   */
+  const clearing = (st.jobs || []).filter((j) => j.outcome === "SETTLING");
+  const clearsFirst = clearing
+    .map((j) => j.settling?.claimableFrom)
+    .filter(Boolean)
+    .sort()[0];
   const awaiting = claims.filter((c) => c.status === "submitted").length;
   const overdue = claims.filter((c) => c.payment?.state === "overdue").length;
   const receiptCount = Object.values(receipts).reduce((n, r) => n + (r.rows?.length || 0), 0);
@@ -116,6 +133,13 @@ export default function MoneyHub({ onOpen, onMakeClaim, onAccount, onSignOut }) 
           ) : (
             <Text style={T.small}>The portal isn't serving the claimable figure yet.</Text>
           )}
+          {clearing.length ? (
+            <Text style={s.clearing}>
+              {`${clearing.length} more finished and clearing`}
+              {clearsFirst ? `, the first on ${at(clearsFirst)}` : ""}
+              {". Each one joins this figure on its own."}
+            </Text>
+          ) : null}
         </Card>
 
         {profile?.canClaim && claimable?.jobCount > 0 ? (
@@ -268,6 +292,7 @@ function HubRow({ label, value, note = "", badge, tone = "", onPress, last = fal
 const s = StyleSheet.create({
   body: { padding: S.screen, paddingTop: 0, gap: S.gap },
   hero: { color: C.ink, fontSize: 32, fontWeight: "800", letterSpacing: -0.6, marginVertical: 3 },
+  clearing: { color: C.warnChipInk, fontSize: 11.5, lineHeight: 16, marginTop: 7 },
 
   attn: {
     flexDirection: "row", alignItems: "center", gap: 8,

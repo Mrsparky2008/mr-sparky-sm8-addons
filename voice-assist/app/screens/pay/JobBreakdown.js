@@ -19,7 +19,7 @@ import {
 import { Card, Header, SectionLabel } from "../../components/ui";
 import { C, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
-import { HELD } from "./shared";
+import { heldWhy, moneyOrDash } from "./shared";
 
 export default function JobBreakdown({ job, meta, onBack }) {
   const [opening, setOpening] = useState("");
@@ -40,6 +40,17 @@ export default function JobBreakdown({ job, meta, onBack }) {
   }
 
   const held = job?.outcome && job.outcome !== "OK";
+  /*
+   * A HELD JOB MAY HAVE NO FIGURES AT ALL, and zeros would invent them.
+   *
+   * The portal's engine stops before pricing a job that is still settling -
+   * the row carries its number, its invoice value and the reason, and nothing
+   * else - because the material on it is not yet what it will be. Printing
+   * `money(undefined)` down the card gives him a gross of $0.00 and a share
+   * of $0.00 on a job worth four thousand dollars, which is not a held job,
+   * it is a wrong one.
+   */
+  const unpriced = !Number.isFinite(Number(job?.payableIncGst));
 
   return (
     <View style={{ flex: 1 }}>
@@ -48,28 +59,38 @@ export default function JobBreakdown({ job, meta, onBack }) {
         {held ? (
           <Card>
             <SectionLabel>Not payable yet</SectionLabel>
-            <Text style={T.small}>{HELD[job.outcome] || job.outcome}</Text>
+            <Text style={T.small}>{heldWhy(job)}</Text>
           </Card>
         ) : null}
 
         <Card>
           <SectionLabel>How it adds up</SectionLabel>
-          <Line label="Invoiced to the customer" value={money(job?.invoiceIncGst)} />
-          {/* Named the way the office says it, and negative because it comes
-              off - a row reading "2,073.75" beside "6,531.18" reads like more
-              money, which is the one thing it is not. */}
-          <Line label="Less material" value={`- ${money(job?.expenseIncGst)}`} dim />
-          <Line label="Gross profit" value={money(job?.grossProfit)} strong />
-          <Line
-            label={`Your rate${job?.ratePct != null ? ` · ${job.ratePct}%` : ""}`}
-            value={rateWords(job)}
-            dim
-          />
-          <Line label="Your share" value={money(job?.share)} strong />
-          {job?.helpingHand ? (
-            <Line label="Helping hand" value={money(job.helpingHand)} />
-          ) : null}
-          <Line label="Payable inc GST" value={money(job?.payableIncGst)} hero />
+          <Line label="Invoiced to the customer" value={moneyOrDash(job?.invoiceIncGst)} />
+          {unpriced ? (
+            <Text style={[T.small, { marginTop: 6 }]}>
+              The rest is worked out when the job comes free. Material is still coming
+              through, so a gross and a share taken now would be figures that move —
+              and the one you claim is the one that counts.
+            </Text>
+          ) : (
+            <>
+              {/* Named the way the office says it, and negative because it comes
+                  off - a row reading "2,073.75" beside "6,531.18" reads like more
+                  money, which is the one thing it is not. */}
+              <Line label="Less material" value={`- ${money(job?.expenseIncGst)}`} dim />
+              <Line label="Gross profit" value={money(job?.grossProfit)} strong />
+              <Line
+                label={`Your rate${job?.ratePct != null ? ` · ${job.ratePct}%` : ""}`}
+                value={rateWords(job)}
+                dim
+              />
+              <Line label="Your share" value={money(job?.share)} strong />
+              {job?.helpingHand ? (
+                <Line label="Helping hand" value={money(job.helpingHand)} />
+              ) : null}
+              <Line label="Payable inc GST" value={money(job?.payableIncGst)} hero />
+            </>
+          )}
         </Card>
 
         {job?.rateDate ? (

@@ -26,6 +26,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Card, Cta, Header, SectionLabel } from "../../components/ui";
 import { C, R, S, T, mono, money } from "../../lib/theme";
 import * as portal from "../../lib/portal";
+import { HeldRow } from "./shared";
 
 // ISO stamp -> "1:47 pm today" / "1:47 pm, 31 Aug" in the phone's local time.
 function when(iso) {
@@ -41,6 +42,28 @@ export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
   const meta = data?.meta || {};
   const jobsById = Object.fromEntries((data?.statement?.jobs || []).map((j) => [j.jobNumber, j]));
   const all = claimable?.jobNumbers || [];
+
+  /*
+   * JOBS INSIDE THE SETTLING WINDOW ARE SHOWN, NOT DROPPED.
+   *
+   * A completed job waits five working days before it can be claimed, so the
+   * material on it is what it will be by the time he signs for it (portal
+   * #501-#503, 18 Oct 2026). Steven had this screen open at 11 jobs and
+   * $6,127.19, reopened it, and found 8 and $4,961.15 - three jobs gone with
+   * nothing saying why. The server refuses a settling job either way, so
+   * nothing wrong could have been lodged; vanishing off a money screen was
+   * the fault.
+   *
+   * THEY COME OFF `statement.jobs`, NEVER `claimable`. The portal keeps them
+   * out of `claimable` deliberately - that list is what may be lodged - so a
+   * screen reading only that list cannot see them at all.
+   *
+   * ONLY THE SETTLING ONES. These are ready in every other respect and
+   * waiting on nothing but time, so they belong beside the claim. A job held
+   * for any other reason is not nearly-claimable and carries its reason on
+   * the statement.
+   */
+  const settling = (data?.statement?.jobs || []).filter((j) => j.outcome === "SETTLING");
 
   /*
    * A bill is offered unless it is already spoken for. `spokenFor` means
@@ -162,6 +185,29 @@ export default function SubmitClaim({ data, onBack, onSubmitted, onOpenJob }) {
             ) : null}
           </Card>
         </View>
+
+        {settling.length ? (
+          <View>
+            <SectionLabel>Not ready yet — {settling.length}</SectionLabel>
+            <Card>
+              {settling.map((j, i) => (
+                <HeldRow
+                  key={j.jobNumber}
+                  job={j}
+                  suburb={meta[j.jobNumber]?.suburb}
+                  tick
+                  onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : null}
+                  last={i === settling.length - 1}
+                />
+              ))}
+            </Card>
+            <Text style={s.owedNote}>
+              {"Finished, and waiting out the five working days material takes to come "
+                + "through. Nothing to do — each one joins the list above on its own, "
+                + "and the figure it joins with is the one you claim."}
+            </Text>
+          </View>
+        ) : null}
 
         {/*
           * Drawn whether he owes anything or not. The whole point is that the

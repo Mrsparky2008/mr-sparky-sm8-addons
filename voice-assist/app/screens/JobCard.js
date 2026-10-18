@@ -10,6 +10,7 @@ import Icon from "../components/icons";
 import { C, R, S, T, money, mono, oneLine } from "../lib/theme";
 import { fetchJob } from "../lib/api";
 import * as portal from "../lib/portal";
+import { heldWhy } from "./pay/shared";
 import { loadSettings, saveSettings } from "../lib/settings";
 
 const GST = 0.1;
@@ -386,7 +387,7 @@ export default function JobCard({ jobNumber, siblings, onSibling, onBack, onJobD
                       {/* A job that cannot be claimed should say so HERE, on
                           the job, not three weeks later on a claim. */}
                       {mine.outcome && mine.outcome !== "OK" ? (
-                        <Text style={s.mineWhy}>{mine.why || "This job is not claimable yet."}</Text>
+                        <Text style={s.mineWhy}>{heldWhy(mine) || "This job is not claimable yet."}</Text>
                       ) : null}
                     </View>
                   ) : null}

@@ -3,7 +3,7 @@
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Card, Empty, Header, Row, SectionLabel } from "../../components/ui";
 import { S, money } from "../../lib/theme";
-import { HELD } from "./shared";
+import { HeldRow } from "./shared";
 
 export default function Statement({ data, onBack, onOpenJob }) {
   const st = data?.statement || {};
@@ -38,14 +38,21 @@ export default function Statement({ data, onBack, onOpenJob }) {
         {held.length ? (
           <View>
             <SectionLabel>Held — {held.length}</SectionLabel>
+            {/*
+              * One row shape for every held job, reason and all. It used to
+              * print the outcome as the row's VALUE, in the money column -
+              * which fitted while the reasons were short and printed the bare
+              * word SETTLING at a tradesman the day the portal grew a fourth
+              * one. The reason now gets its own line and comes from the
+              * server, so a new outcome needs nothing here.
+              */}
             <Card>
               {held.map((j, i) => (
-                <Row
+                <HeldRow
                   key={j.jobNumber}
-                  onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : undefined}
-                  label={String(j.jobNumber)}
-                  value={HELD[j.outcome] || j.outcome}
-                  dim
+                  job={j}
+                  suburb={meta[j.jobNumber]?.suburb}
+                  onPress={onOpenJob ? () => onOpenJob(j, meta[j.jobNumber]) : null}
                   last={i === held.length - 1}
                 />
               ))}
