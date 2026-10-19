@@ -19,7 +19,24 @@ import {
   startReset, storedEmail, unlock,
 } from "../lib/auth";
 
-export default function SignIn({ onSignedIn }) {
+/**
+ * `onBack` is the way OFF this screen, and it is not decoration.
+ *
+ * SignIn has never had one. It did not show while Welcome was the first thing
+ * every launch - you got here by choosing to, and force-closing was the way
+ * out. Two things changed that on 19 Oct 2026: a phone with a stored session
+ * now opens here without being asked, and `unlock()` on a dead session throws
+ * the Keychain entry away and leaves you on the password field. So a handset
+ * handed on, whose last owner's session has lapsed, would land on a password
+ * screen for somebody else's account with nowhere to go - and "start an
+ * application" lives on Welcome and nowhere else, so that is the whole route
+ * to Apply gone.
+ *
+ * It costs one launch at most, because the Keychain entry is already gone and
+ * the next launch answers false and shows Welcome. One launch is enough for a
+ * man to decide the app is broken.
+ */
+export default function SignIn({ onSignedIn, onBack }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -245,6 +262,11 @@ export default function SignIn({ onSignedIn }) {
             <Pressable onPress={() => { setReturning(false); setError(""); }} style={s.linkWrap}>
               <Text style={s.link}>Sign in as someone else</Text>
             </Pressable>
+            {onBack ? (
+              <Pressable onPress={onBack} style={s.linkWrap}>
+                <Text style={s.link}>Back to the start</Text>
+              </Pressable>
+            ) : null}
           </>
         ) : (
           <>
@@ -270,6 +292,11 @@ export default function SignIn({ onSignedIn }) {
             {!!error && <Text style={s.error}>{error}</Text>}
             <Cta label={busy ? "Signing in…" : "Sign in"} onPress={submit} disabled={busy} />
             <Text style={s.note}>Once only on this phone. Face ID after that.</Text>
+            {onBack ? (
+              <Pressable onPress={onBack} style={s.linkWrap}>
+                <Text style={s.link}>Back to the start</Text>
+              </Pressable>
+            ) : null}
           </>
         )}
 

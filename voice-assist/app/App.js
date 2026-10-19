@@ -419,7 +419,7 @@ function Shell() {
               onDone={(m) => { setDemoMobile(m); setEntry("demo"); }}
             />
           )
-          : entry === "signin" ? <SignIn onSignedIn={handleSignedIn} />
+          : entry === "signin" ? <SignIn onSignedIn={handleSignedIn} onBack={() => setEntry("welcome")} />
           : <Welcome
               onSignIn={() => setEntry("signin")}
               onApply={() => setEntry("apply")}
