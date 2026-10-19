@@ -66,7 +66,7 @@ import BucketList from "./screens/admin/BucketList";
 import CrewList from "./screens/admin/CrewList";
 import CrewMember from "./screens/admin/CrewMember";
 import ApproveClaim from "./screens/admin/ApproveClaim";
-import { signOut } from "./lib/auth";
+import { hasStoredSession, signOut } from "./lib/auth";
 import * as portal from "./lib/portal";
 import { usePush, disable as disablePush } from "./lib/push";
 
@@ -86,11 +86,28 @@ export default function App() {
 function Shell() {
   const [email, setEmail] = useState(null);           // null = not signed in
 
-  // Which front door is showing. Always starts on Welcome for now: Steven is
-  // reviewing both screens and wants to pick each time. The Face ID
-  // short-circuit for returning phones goes back in once the screens are
-  // settled - SignIn itself still unlocks on Face ID the moment it opens.
-  const [entry, setEntry] = useState("welcome");
+  /*
+   * Which front door is showing, and `null` means it has not been decided yet.
+   * That is a state rather than a tidy default: deciding needs a Keychain read,
+   * the read is async, and any other starting value puts the wrong door on the
+   * screen for a frame.
+   *
+   * A PHONE THAT HAS SIGNED IN BEFORE GOES STRAIGHT TO SignIn, which unlocks
+   * itself on Face ID the moment it mounts. `"welcome"` was hard-coded here
+   * while the two screens were being reviewed and never went back, and that is
+   * the whole of what Steven has been reporting as the app logging him out.
+   * IT NEVER DID: CloudTrail has every silent renewal succeeding and not one
+   * password sign-in from his handset on 18 or 19 Oct, with no RevokeToken and
+   * no GlobalSignOut in the account (network session, 19 Oct 2026). He was
+   * being shown the front door, which looks identical from the outside.
+   *
+   * IT FAILS TOWARDS Welcome, and that is the harmless direction. A Keychain
+   * that throws or answers empty shows the menu, which costs a returning man
+   * one tap. The other way strands him on a sign-in screen that has no way
+   * back - SignIn carries no Back and no "start an application", so Welcome is
+   * the only route to Apply on the whole phone.
+   */
+  const [entry, setEntry] = useState(null);
   // The verified mobile, which is how the demo asks the portal for its view.
   const [demoMobile, setDemoMobile] = useState(null);
   const emailRef = useRef(null);                      // readable from listeners
@@ -108,6 +125,19 @@ function Shell() {
   const [goingNow, setGoingNow] = useState(0);        // jobs nobody has taken yet
   const [toAnswer, setToAnswer] = useState(0);        // questions waiting on him
   const [account, setAccount] = useState(false);      // the who-am-I / sign-out sheet
+
+  // Which door, decided once per launch. Everything after this already exists
+  // and already runs: SignIn's own mount effect does the Face ID prompt and
+  // the token refresh, so this only has to point him at it.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let returning = false;
+      try { returning = await hasStoredSession(); } catch { returning = false; }
+      if (!cancelled) setEntry(returning ? "signin" : "welcome");
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const stack = Array.isArray(stacks[tab]) ? stacks[tab] : [stacks[tab]];
   const top = stack[stack.length - 1];
@@ -283,6 +313,10 @@ function Shell() {
     setWhoPending(false);
     emailRef.current = null;
     setEmail(null);
+    // Back to the menu rather than to the screen he just signed out of. A
+    // sign-out is usually "I am finished with this phone", and Welcome is the
+    // only way to Apply if the next person on it is somebody new.
+    setEntry("welcome");
 
     /*
      * 2. Retire the push registration - and it has to be HERE, before the
@@ -351,9 +385,30 @@ function Shell() {
   }
 
   if (!email) {
-    // A phone that has signed in before skips the front door entirely — SignIn
-    // unlocks on Face ID, and a returning contractor should not have to pick
-    // "sign in" off a menu every morning. Only a fresh phone sees Welcome.
+    /*
+     * A phone that has signed in before skips the front door entirely - SignIn
+     * unlocks on Face ID, and a returning contractor should not have to pick
+     * "sign in" off a menu every morning. Only a fresh phone sees Welcome.
+     *
+     * That is now what the code does. IT SAID SO FOR WEEKS WHILE DOING THE
+     * OPPOSITE, because the `entry` state above was hard-coded to "welcome"
+     * and carried its own comment saying so - two comments in one file
+     * disagreeing, and whichever a session read, the other one was sitting
+     * there to be taken for the mistake. Both are now written from the code.
+     *
+     * The hold below is the beat while the Keychain is read. It is the same
+     * spinner as the one after sign-in on purpose: both are the app working
+     * out which screen you get, and they should not look like two different
+     * kinds of event.
+     */
+    if (!entry) {
+      return (
+        <SafeAreaView style={[s.root, { alignItems: "center", justifyContent: "center" }]}>
+          <StatusBar style="light" />
+          <ActivityIndicator size="large" color={C.brand} />
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView style={s.root}>
         <StatusBar style="light" />
